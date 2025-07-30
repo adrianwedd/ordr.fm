@@ -22,11 +22,15 @@ fi
 # --- Global Variables ---
 DRY_RUN=1 # Default to dry run for safety
 MOVE_FILES=0 # Flag to enable actual file movement
+UNSORTED_DIR="" # Will be set in main() with timestamp
 
 # Define log levels
 readonly LOG_QUIET=0
 readonly LOG_INFO=1
 readonly LOG_DEBUG=2
+readonly LOG_WARNING=3
+readonly LOG_ERROR=4
+readonly LOG_FATAL=5
 
 # --- Helper Functions ---
 # Log function
@@ -49,6 +53,9 @@ get_log_level_name() {
         $LOG_QUIET) echo "QUIET" ;;
         $LOG_INFO) echo "INFO" ;;
         $LOG_DEBUG) echo "DEBUG" ;;
+        $LOG_WARNING) echo "WARNING" ;;
+        $LOG_ERROR) echo "ERROR" ;;
+        $LOG_FATAL) echo "FATAL" ;;
         *) echo "UNKNOWN" ;;
     esac
 }
@@ -124,7 +131,7 @@ process_album_directory() {
     if [[ ${#audio_files[@]} -eq 0 ]]; then
         log $LOG_INFO "SKIP: No audio files found in '$album_dir'. Skipping."
         return 0
-    }
+    fi
 
     # Extract all relevant metadata from all audio files in one go using exiftool -json.
     # This is more efficient than calling exiftool per file.
@@ -137,7 +144,7 @@ process_album_directory() {
         # If no metadata can be extracted, treat as unsorted.
         move_to_unsorted "$album_dir" "No readable metadata found."
         return 0
-    }
+    fi
 
     # --- DEBUGGING: Print raw exiftool output ---
     log $LOG_DEBUG "Raw exiftool output for '$album_dir':\n$exiftool_output"
@@ -206,7 +213,7 @@ process_album_directory() {
         log $LOG_WARNING "WARN: Missing essential album tags (Album Artist or Album Title) for '$album_dir'. Moving to unsorted."
         move_to_unsorted "$album_dir" "Missing essential album tags."
         return 0
-    }
+    fi
 
     # --- Determine Album Quality ---
     # Referencing SPECIFICATIONS.md: "Album Classification Logic"
