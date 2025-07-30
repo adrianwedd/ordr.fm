@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Music Sorter - Organizes music libraries based on metadata.
+# ordr.fm - Organizes music libraries based on metadata.
 
 # --- Configuration Loading ---
 # Default configuration file path
@@ -15,7 +15,7 @@ else
     SOURCE_DIR="/home/plex/Music/Unsorted and Incomplete"
     DEST_DIR="/home/plex/Music/sorted_music"
     UNSORTED_DIR_BASE="/home/plex/Music/Unsorted and Incomplete/unsorted"
-    LOG_FILE="/home/plex/Music/music_sorter.log"
+    LOG_FILE="/home/plex/Music/ordr.fm.log"
     VERBOSITY=1
 fi
 
@@ -364,7 +364,7 @@ main() {
 
     # Initialize log file (clear previous content for new run)
     > "$LOG_FILE"
-    log $LOG_INFO "--- Music Sorter Script Started ---"
+    log $LOG_INFO "--- ordr.fm Script Started ---"
     log $LOG_INFO "Configuration:"
     log $LOG_INFO "  Source Directory: $SOURCE_DIR"
     log $LOG_INFO "  Destination Directory: $DEST_DIR"
@@ -417,7 +417,7 @@ main() {
         done
     fi
 
-    log $LOG_INFO "--- Music Sorter Script Finished ---"
+    log $LOG_INFO "--- ordr.fm Script Finished ---"
 }
 
 # Execute main function

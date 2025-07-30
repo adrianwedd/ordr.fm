@@ -1,8 +1,8 @@
-# Music Sorter - Technical Specifications
+# ordr.fm - Technical Specifications
 
 ## Introduction
 
-This document details the technical specifications for the Music Sorter script. It outlines the core principles, input/output requirements, metadata handling, album classification logic, naming conventions, error handling, and safety features. This specification serves as a blueprint for development and a reference for understanding the script's behavior.
+This document details the technical specifications for the ordr.fm script. It outlines the core principles, input/output requirements, metadata handling, album classification logic, naming conventions, error handling, and safety features. This specification serves as a blueprint for development and a reference for understanding the script's behavior.
 
 ## Metadata Extraction and Interpretation
 
