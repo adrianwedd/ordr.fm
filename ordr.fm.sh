@@ -1,10 +1,11 @@
 #!/bin/bash
+set -e
 
 # ordr.fm - Organizes music libraries based on metadata.
 
 # --- Configuration Loading ---
 # Default configuration file path
-CONFIG_FILE="$(dirname "$0")/music_sorter.conf"
+CONFIG_FILE="$(dirname "$0")/ordr.fm.conf"
 
 # Load defaults from config file if it exists
 if [[ -f "$CONFIG_FILE" ]]; then
@@ -362,6 +363,9 @@ show_help() {
 main() {
     parse_arguments "$@"
 
+    # Create log file directory if it doesn't exist
+    mkdir -p "$(dirname "$LOG_FILE")" || { echo "FATAL: Could not create log directory: $(dirname "$LOG_FILE")"; exit 1; }
+
     # Initialize log file (clear previous content for new run)
     > "$LOG_FILE"
     log $LOG_INFO "--- ordr.fm Script Started ---"
@@ -385,40 +389,30 @@ main() {
         log $LOG_INFO "(Dry Run) Would create unsorted directory: $UNSORTED_DIR"
     fi
 
+    # Check if source directory exists
+    if [[ ! -d "$SOURCE_DIR" ]]; then
+        log $LOG_FATAL "FATAL: Source directory not found: $SOURCE_DIR"
+        exit 1
+    fi
+
     log $LOG_INFO "Scanning for album directories in $SOURCE_DIR..."
 
     local album_dirs=()
-
-    # Check if the SOURCE_DIR itself is an album directory
-    if find "$SOURCE_DIR" -maxdepth 1 -type f \( -iname "*.mp3" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" -o -iname "*.aiff" -o -iname "*.alac" \) -print -quit | grep -q .; then
-        album_dirs+=("$SOURCE_DIR")
-        log $LOG_INFO "Source directory '$SOURCE_DIR' contains audio files and will be processed as an album."
-    fi
-
-    # Also find subdirectories that are albums, if SOURCE_DIR is a collection
-    while IFS= read -r -d $'\0' dir; do
-        # Ensure we don't add the SOURCE_DIR itself again if it was already added
-        if [[ "$dir" != "$SOURCE_DIR" ]]; then
-            album_dirs+=("$dir")
-        fi
-    done < <(find "$SOURCE_DIR" -mindepth 2 -type d -print0 | while IFS= read -r -d $'\0' d; do
-        find "$d" -maxdepth 1 -type f \( -iname "*.mp3" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" -o -iname "*.aiff" -o -iname "*.alac" \) -print -quit | grep -q .
-        if [[ $? -eq 0 ]]; then
-            echo "$d"
-        fi
-    done | sort -u -z)
+    while IFS= read -r -d '' album_dir; do
+        album_dirs+=("$album_dir")
+    done < <(find "$SOURCE_DIR" -type d -print0)
 
     if [[ ${#album_dirs[@]} -eq 0 ]]; then
         log $LOG_INFO "No album directories found in $SOURCE_DIR."
-    else
-        log $LOG_INFO "Found ${#album_dirs[@]} potential album directories. Processing..."
-        for album_dir in "${album_dirs[@]}"; do
-            process_album_directory "$album_dir"
-        done
+        exit 0
     fi
 
-    log $LOG_INFO "--- ordr.fm Script Finished ---"
-}
+    log $LOG_INFO "Found ${#album_dirs[@]} potential album directories. Processing..."
+    for album_dir in "${album_dirs[@]}"; do
+        process_album_directory "$album_dir"
+    done
 
-# Execute main function
-main "$@"
+    log $LOG_INFO "--- ordr.fm Script Finished ---"
+} 
+
+    
