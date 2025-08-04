@@ -10,23 +10,8 @@ if [[ -f "$SCRIPT_DIR/gdrive_backup.sh" ]]; then
 # Source optimized alias resolution
 if [[ -f "$SCRIPT_DIR/alias_optimization.sh" ]]; then
     source "$SCRIPT_DIR/alias_optimization.sh"
-
-# Source alias validation
-if [[ -f "$SCRIPT_DIR/alias_validation.sh" ]]; then
-    source "$SCRIPT_DIR/alias_validation.sh"
-fi
     # Parse alias groups once at startup for performance
     parse_alias_groups_once
-    # Validate alias configuration
-    if [[ "$GROUP_ARTIST_ALIASES" == "1" ]] && [[ -n "$ARTIST_ALIAS_GROUPS" ]]; then
-        if ! validate_artist_aliases "$ARTIST_ALIAS_GROUPS" "0" > /dev/null 2>&1; then
-            Warning "Artist alias configuration has errors. Run: ./alias_validation.sh validate"
-            if [[ "$STRICT_MODE" == "1" ]]; then
-                Error "Exiting due to invalid alias configuration (strict mode)"
-                exit 1
-            fi
-        fi
-    fi
     [[ "$VERBOSE" == "1" ]] && show_alias_cache_stats
 fi
     [[ "$ENABLE_GDRIVE_BACKUP" == "1" ]] && check_rclone && Info "Google Drive backup integration loaded"

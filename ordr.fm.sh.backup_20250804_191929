@@ -1,37 +1,4 @@
 #!/bin/bash
-# Source security patches
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/security_patch.sh" || { echo "ERROR: Failed to load security patches"; exit 1; }
-
-# Source Google Drive backup functions
-if [[ -f "$SCRIPT_DIR/gdrive_backup.sh" ]]; then
-    source "$SCRIPT_DIR/gdrive_backup.sh"
-
-# Source optimized alias resolution
-if [[ -f "$SCRIPT_DIR/alias_optimization.sh" ]]; then
-    source "$SCRIPT_DIR/alias_optimization.sh"
-
-# Source alias validation
-if [[ -f "$SCRIPT_DIR/alias_validation.sh" ]]; then
-    source "$SCRIPT_DIR/alias_validation.sh"
-fi
-    # Parse alias groups once at startup for performance
-    parse_alias_groups_once
-    # Validate alias configuration
-    if [[ "$GROUP_ARTIST_ALIASES" == "1" ]] && [[ -n "$ARTIST_ALIAS_GROUPS" ]]; then
-        if ! validate_artist_aliases "$ARTIST_ALIAS_GROUPS" "0" > /dev/null 2>&1; then
-            Warning "Artist alias configuration has errors. Run: ./alias_validation.sh validate"
-            if [[ "$STRICT_MODE" == "1" ]]; then
-                Error "Exiting due to invalid alias configuration (strict mode)"
-                exit 1
-            fi
-        fi
-    fi
-    [[ "$VERBOSE" == "1" ]] && show_alias_cache_stats
-fi
-    [[ "$ENABLE_GDRIVE_BACKUP" == "1" ]] && check_rclone && Info "Google Drive backup integration loaded"
-fi
-
 set -e
 
 # ordr.fm - Organizes music libraries based on metadata.
@@ -283,7 +250,7 @@ discogs_cache_get() {
     
     if [[ $cache_age_hours -gt $DISCOGS_CACHE_EXPIRY ]]; then
         log $LOG_DEBUG "Discogs cache expired for key: $cache_key (age: ${cache_age_hours}h)"
-        secure_remove_file "$cache_file"
+        rm -f "$cache_file"
         return 1
     fi
     
@@ -986,161 +953,161 @@ get_vinyl_position() {
 # --- Artist Alias Management Functions ---
 
 # Find primary artist name for an alias
-# OLD_FUNCTION: resolve_artist_alias() {
-# OLD_FUNCTION:     local artist_name="$1"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     log $LOG_DEBUG "resolve_artist_alias called with: '$artist_name'"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     if [[ $GROUP_ARTIST_ALIASES -eq 0 ]] || [[ -z "$ARTIST_ALIAS_GROUPS" ]]; then
-# OLD_FUNCTION:         log $LOG_DEBUG "Artist alias resolution disabled or no groups configured"
-# OLD_FUNCTION:         echo "$artist_name"
-# OLD_FUNCTION:         return
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Normalize the artist name for comparison
-# OLD_FUNCTION:     local normalized_input=$(echo "$artist_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
-# OLD_FUNCTION:     log $LOG_DEBUG "Normalized input: '$normalized_input'"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Debug what we're actually getting
-# OLD_FUNCTION:     log $LOG_DEBUG "Raw ARTIST_ALIAS_GROUPS (length ${#ARTIST_ALIAS_GROUPS}): '$ARTIST_ALIAS_GROUPS'"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Check if the string contains the expected content
-# OLD_FUNCTION:     if [[ "$ARTIST_ALIAS_GROUPS" == *"00110100 01010100"* ]]; then
-# OLD_FUNCTION:         log $LOG_DEBUG "String contains binary Four Tet alias"
-# OLD_FUNCTION:     else
-# OLD_FUNCTION:         log $LOG_DEBUG "WARNING: String missing binary Four Tet alias!"
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Parse alias groups - use awk which should handle this correctly
-# OLD_FUNCTION:     local alias_groups_array=()
-# OLD_FUNCTION:     while IFS= read -r group; do
-# OLD_FUNCTION:         alias_groups_array+=("$group")
-# OLD_FUNCTION:     done < <(echo "$ARTIST_ALIAS_GROUPS" | awk -F'|' '{for(i=1;i<=NF;i++) print $i}')
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     log $LOG_DEBUG "Found ${#alias_groups_array[@]} alias groups to check"
-# OLD_FUNCTION:     if [[ ${#alias_groups_array[@]} -gt 0 ]]; then
-# OLD_FUNCTION:         log $LOG_DEBUG "First group: '${alias_groups_array[0]}'"
-# OLD_FUNCTION:         log $LOG_DEBUG "Last group: '${alias_groups_array[-1]}'"
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     for group in "${alias_groups_array[@]}"; do
-# OLD_FUNCTION:         # Split on comma using awk  
-# OLD_FUNCTION:         local current_aliases_array=()
-# OLD_FUNCTION:         while IFS= read -r alias; do
-# OLD_FUNCTION:             current_aliases_array+=("$alias")
-# OLD_FUNCTION:         done < <(echo "$group" | awk -F',' '{for(i=1;i<=NF;i++) print $i}')
-# OLD_FUNCTION:         
-# OLD_FUNCTION:         log $LOG_DEBUG "Checking group with ${#current_aliases_array[@]} aliases: first few are '${current_aliases_array[0]}' '${current_aliases_array[1]}' '${current_aliases_array[2]}'"
-# OLD_FUNCTION:         
-# OLD_FUNCTION:         # Check if input matches any alias in this group
-# OLD_FUNCTION:         for alias in "${current_aliases_array[@]}"; do
-# OLD_FUNCTION:             # Trim whitespace and normalize
-# OLD_FUNCTION:             alias=$(echo "$alias" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-# OLD_FUNCTION:             local normalized_alias=$(echo "$alias" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
-# OLD_FUNCTION:             log $LOG_DEBUG "Comparing normalized input '$normalized_input' with normalized alias '$normalized_alias' (from '$alias')"
-# OLD_FUNCTION:             
-# OLD_FUNCTION:             if [[ "$normalized_input" == "$normalized_alias" ]]; then
-# OLD_FUNCTION:                 if [[ $USE_PRIMARY_ARTIST_NAME -eq 1 ]]; then
-# OLD_FUNCTION:                     # Return the primary (first) artist in the group
-# OLD_FUNCTION:                     local primary="${current_aliases_array[0]}"
-# OLD_FUNCTION:                     primary=$(echo "$primary" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-# OLD_FUNCTION:                     log $LOG_INFO "MATCH FOUND! Resolved alias '$artist_name' to primary artist '$primary'"
-# OLD_FUNCTION:                     echo "$primary"
-# OLD_FUNCTION:                     return
-# OLD_FUNCTION:                 else
-# OLD_FUNCTION:                     # Return the matched name as-is
-# OLD_FUNCTION:                     log $LOG_DEBUG "Match found but USE_PRIMARY_ARTIST_NAME=0, returning original"
-# OLD_FUNCTION:                     echo "$artist_name"
-# OLD_FUNCTION:                     return
-# OLD_FUNCTION:                 fi
-# OLD_FUNCTION:             fi
-# OLD_FUNCTION:         done
-# OLD_FUNCTION:     done
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # No alias match found, return original
-# OLD_FUNCTION:     log $LOG_DEBUG "No alias match found for '$artist_name'"
-# OLD_FUNCTION:     echo "$artist_name"
-# OLD_FUNCTION: }
+resolve_artist_alias() {
+    local artist_name="$1"
+    
+    log $LOG_DEBUG "resolve_artist_alias called with: '$artist_name'"
+    
+    if [[ $GROUP_ARTIST_ALIASES -eq 0 ]] || [[ -z "$ARTIST_ALIAS_GROUPS" ]]; then
+        log $LOG_DEBUG "Artist alias resolution disabled or no groups configured"
+        echo "$artist_name"
+        return
+    fi
+    
+    # Normalize the artist name for comparison
+    local normalized_input=$(echo "$artist_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
+    log $LOG_DEBUG "Normalized input: '$normalized_input'"
+    
+    # Debug what we're actually getting
+    log $LOG_DEBUG "Raw ARTIST_ALIAS_GROUPS (length ${#ARTIST_ALIAS_GROUPS}): '$ARTIST_ALIAS_GROUPS'"
+    
+    # Check if the string contains the expected content
+    if [[ "$ARTIST_ALIAS_GROUPS" == *"00110100 01010100"* ]]; then
+        log $LOG_DEBUG "String contains binary Four Tet alias"
+    else
+        log $LOG_DEBUG "WARNING: String missing binary Four Tet alias!"
+    fi
+    
+    # Parse alias groups - use awk which should handle this correctly
+    local alias_groups_array=()
+    while IFS= read -r group; do
+        alias_groups_array+=("$group")
+    done < <(echo "$ARTIST_ALIAS_GROUPS" | awk -F'|' '{for(i=1;i<=NF;i++) print $i}')
+    
+    log $LOG_DEBUG "Found ${#alias_groups_array[@]} alias groups to check"
+    if [[ ${#alias_groups_array[@]} -gt 0 ]]; then
+        log $LOG_DEBUG "First group: '${alias_groups_array[0]}'"
+        log $LOG_DEBUG "Last group: '${alias_groups_array[-1]}'"
+    fi
+    
+    for group in "${alias_groups_array[@]}"; do
+        # Split on comma using awk  
+        local current_aliases_array=()
+        while IFS= read -r alias; do
+            current_aliases_array+=("$alias")
+        done < <(echo "$group" | awk -F',' '{for(i=1;i<=NF;i++) print $i}')
+        
+        log $LOG_DEBUG "Checking group with ${#current_aliases_array[@]} aliases: first few are '${current_aliases_array[0]}' '${current_aliases_array[1]}' '${current_aliases_array[2]}'"
+        
+        # Check if input matches any alias in this group
+        for alias in "${current_aliases_array[@]}"; do
+            # Trim whitespace and normalize
+            alias=$(echo "$alias" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            local normalized_alias=$(echo "$alias" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
+            log $LOG_DEBUG "Comparing normalized input '$normalized_input' with normalized alias '$normalized_alias' (from '$alias')"
+            
+            if [[ "$normalized_input" == "$normalized_alias" ]]; then
+                if [[ $USE_PRIMARY_ARTIST_NAME -eq 1 ]]; then
+                    # Return the primary (first) artist in the group
+                    local primary="${current_aliases_array[0]}"
+                    primary=$(echo "$primary" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+                    log $LOG_INFO "MATCH FOUND! Resolved alias '$artist_name' to primary artist '$primary'"
+                    echo "$primary"
+                    return
+                else
+                    # Return the matched name as-is
+                    log $LOG_DEBUG "Match found but USE_PRIMARY_ARTIST_NAME=0, returning original"
+                    echo "$artist_name"
+                    return
+                fi
+            fi
+        done
+    done
+    
+    # No alias match found, return original
+    log $LOG_DEBUG "No alias match found for '$artist_name'"
+    echo "$artist_name"
+}
 
 # Check if two artists are aliases of each other
-# OLD_FUNCTION: are_artist_aliases() {
-# OLD_FUNCTION:     local artist1="$1"
-# OLD_FUNCTION:     local artist2="$2"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     if [[ $GROUP_ARTIST_ALIASES -eq 0 ]] || [[ -z "$ARTIST_ALIAS_GROUPS" ]]; then
-# OLD_FUNCTION:         return 1
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Get primary names for both
-# OLD_FUNCTION:     local primary1=$(resolve_artist_alias "$artist1")
-# OLD_FUNCTION:     local primary2=$(resolve_artist_alias "$artist2")
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     if [[ "$primary1" == "$primary2" ]]; then
-# OLD_FUNCTION:         return 0
-# OLD_FUNCTION:     else
-# OLD_FUNCTION:         return 1
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION: }
+are_artist_aliases() {
+    local artist1="$1"
+    local artist2="$2"
+    
+    if [[ $GROUP_ARTIST_ALIASES -eq 0 ]] || [[ -z "$ARTIST_ALIAS_GROUPS" ]]; then
+        return 1
+    fi
+    
+    # Get primary names for both
+    local primary1=$(resolve_artist_alias "$artist1")
+    local primary2=$(resolve_artist_alias "$artist2")
+    
+    if [[ "$primary1" == "$primary2" ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
 
 # Get all known aliases for an artist
-# OLD_FUNCTION: get_artist_aliases() {
-# OLD_FUNCTION:     local artist_name="$1"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     if [[ $GROUP_ARTIST_ALIASES -eq 0 ]] || [[ -z "$ARTIST_ALIAS_GROUPS" ]]; then
-# OLD_FUNCTION:         echo "$artist_name"
-# OLD_FUNCTION:         return
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     local normalized_input=$(echo "$artist_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Parse alias groups
-# OLD_FUNCTION:     IFS='|' read -ra GROUPS <<< "$ARTIST_ALIAS_GROUPS"
-# OLD_FUNCTION:     for group in "${GROUPS[@]}"; do
-# OLD_FUNCTION:         IFS=',' read -ra ALIASES <<< "$group"
-# OLD_FUNCTION:         
-# OLD_FUNCTION:         # Check if input matches any alias in this group
-# OLD_FUNCTION:         for alias in "${ALIASES[@]}"; do
-# OLD_FUNCTION:             alias=$(echo "$alias" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-# OLD_FUNCTION:             local normalized_alias=$(echo "$alias" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
-# OLD_FUNCTION:             
-# OLD_FUNCTION:             if [[ "$normalized_input" == "$normalized_alias" ]]; then
-# OLD_FUNCTION:                 # Return all aliases in the group
-# OLD_FUNCTION:                 echo "$group"
-# OLD_FUNCTION:                 return
-# OLD_FUNCTION:             fi
-# OLD_FUNCTION:         done
-# OLD_FUNCTION:     done
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # No alias group found, return just the input
-# OLD_FUNCTION:     echo "$artist_name"
-# OLD_FUNCTION: }
+get_artist_aliases() {
+    local artist_name="$1"
+    
+    if [[ $GROUP_ARTIST_ALIASES -eq 0 ]] || [[ -z "$ARTIST_ALIAS_GROUPS" ]]; then
+        echo "$artist_name"
+        return
+    fi
+    
+    local normalized_input=$(echo "$artist_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
+    
+    # Parse alias groups
+    IFS='|' read -ra GROUPS <<< "$ARTIST_ALIAS_GROUPS"
+    for group in "${GROUPS[@]}"; do
+        IFS=',' read -ra ALIASES <<< "$group"
+        
+        # Check if input matches any alias in this group
+        for alias in "${ALIASES[@]}"; do
+            alias=$(echo "$alias" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            local normalized_alias=$(echo "$alias" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
+            
+            if [[ "$normalized_input" == "$normalized_alias" ]]; then
+                # Return all aliases in the group
+                echo "$group"
+                return
+            fi
+        done
+    done
+    
+    # No alias group found, return just the input
+    echo "$artist_name"
+}
 
 # Count releases across all artist aliases
-# OLD_FUNCTION: count_artist_releases_with_aliases() {
-# OLD_FUNCTION:     local artist_name="$1"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     if [[ $GROUP_ARTIST_ALIASES -eq 0 ]]; then
-# OLD_FUNCTION:         # Just count for this artist
-# OLD_FUNCTION:         count_existing_releases "artist" "$artist_name"
-# OLD_FUNCTION:         return
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Get all aliases
-# OLD_FUNCTION:     local aliases=$(get_artist_aliases "$artist_name")
-# OLD_FUNCTION:     local total_count=0
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Count releases for each alias
-# OLD_FUNCTION:     IFS=',' read -ra ALIAS_LIST <<< "$aliases"
-# OLD_FUNCTION:     for alias in "${ALIAS_LIST[@]}"; do
-# OLD_FUNCTION:         alias=$(echo "$alias" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-# OLD_FUNCTION:         local count=$(count_existing_releases "artist" "$alias")
-# OLD_FUNCTION:         total_count=$((total_count + count))
-# OLD_FUNCTION:         log $LOG_DEBUG "Alias '$alias' has $count releases"
-# OLD_FUNCTION:     done
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     log $LOG_DEBUG "Total releases across all aliases of '$artist_name': $total_count"
-# OLD_FUNCTION:     echo "$total_count"
-# OLD_FUNCTION: }
+count_artist_releases_with_aliases() {
+    local artist_name="$1"
+    
+    if [[ $GROUP_ARTIST_ALIASES -eq 0 ]]; then
+        # Just count for this artist
+        count_existing_releases "artist" "$artist_name"
+        return
+    fi
+    
+    # Get all aliases
+    local aliases=$(get_artist_aliases "$artist_name")
+    local total_count=0
+    
+    # Count releases for each alias
+    IFS=',' read -ra ALIAS_LIST <<< "$aliases"
+    for alias in "${ALIAS_LIST[@]}"; do
+        alias=$(echo "$alias" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        local count=$(count_existing_releases "artist" "$alias")
+        total_count=$((total_count + count))
+        log $LOG_DEBUG "Alias '$alias' has $count releases"
+    done
+    
+    log $LOG_DEBUG "Total releases across all aliases of '$artist_name': $total_count"
+    echo "$total_count"
+}
 
 # --- Metadata Database Functions for Full Tracking ---
 
@@ -1270,7 +1237,7 @@ EOF
 }
 
 # Record album processing to database
-s*secure_record_album_metadata() {
+record_album_metadata() {
     local metadata_db="$1"
     local original_path="$2"
     local new_path="$3"
@@ -1303,7 +1270,7 @@ EOF
 }
 
 # Record track information
-s*secure_record_track_metadata() {
+record_track_metadata() {
     local metadata_db="$1"
     local album_id="$2"
     local original_filename="$3"
@@ -1739,7 +1706,7 @@ analyze_album_for_duplicates() {
     sqlite3 "$duplicates_db" <<EOF
 INSERT OR REPLACE INTO albums 
 (directory_path, album_artist, album_title, album_year, track_count, total_size, quality_type, avg_bitrate, format_mix, album_hash) 
-VALUES ("$(sql_escape "$album_dir")", "$(sql_escape "$album_artist")", "$(sql_escape "$album_title")", ${album_year:-NULL}, $track_count, $total_size, "$(sql_escape "$quality_type")", $avg_bitrate, "$(sql_escape "$format_mix")", "$(sql_escape "$album_hash")");
+VALUES ("$album_dir", "$album_artist", "$album_title", ${album_year:-NULL}, $track_count, $total_size, "$quality_type", $avg_bitrate, "$format_mix", "$album_hash");
 EOF
     
     log $LOG_DEBUG "Stored album analysis: $album_artist - $album_title ($album_year) [$quality_type, ${track_count} tracks]"
@@ -1763,7 +1730,7 @@ find_duplicate_groups() {
     
     for hash in $duplicate_hashes; do
         # Get all albums with this hash
-        local albums=$(sqlite3 "$duplicates_db" "SELECT id, directory_path, album_artist, album_title, album_year, track_count, quality_type, avg_bitrate, total_size, format_mix FROM albums WHERE album_hash = '$(sql_escape "$hash")';")
+        local albums=$(sqlite3 "$duplicates_db" "SELECT id, directory_path, album_artist, album_title, album_year, track_count, quality_type, avg_bitrate, total_size, format_mix FROM albums WHERE album_hash = '$hash';")
         
         if [[ -z "$albums" ]]; then
             continue
@@ -1929,7 +1896,7 @@ resolve_duplicates() {
                     log $LOG_INFO "(Dry Run) Would move '$album_path' to '$backup_path'"
                 else
                     log $LOG_INFO "Moving duplicate to backup: $album_path -> $backup_path"
-                    secure_move_file "$album_path" "$backup_path"
+                    mv "$album_path" "$backup_path"
                     if [[ $? -eq 0 ]]; then
                         group_removed=$((group_removed + 1))
                         removed_count=$((removed_count + 1))
@@ -2251,7 +2218,7 @@ acquire_lock() {
             local lock_pid=$(cat "$lock_file" 2>/dev/null)
             if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
                 log $LOG_WARNING "Removing stale lock file: $lock_file (PID $lock_pid no longer running)"
-                secure_remove_file "$lock_file"
+                rm -f "$lock_file"
                 break
             fi
         fi
@@ -2278,7 +2245,7 @@ release_lock() {
     if [[ -f "$lock_file" ]]; then
         local lock_pid=$(cat "$lock_file" 2>/dev/null)
         if [[ "$lock_pid" == "$$" ]]; then
-            secure_remove_file "$lock_file"
+            rm -f "$lock_file"
             log $LOG_DEBUG "Released lock file: $lock_file"
         else
             log $LOG_WARNING "Lock file PID mismatch: expected $$, found $lock_pid"
@@ -2464,7 +2431,7 @@ move_to_unsorted() {
         log $LOG_INFO "(Dry Run) Would move '$album_dir' to '$unsorted_target'"
     else
         mkdir -p "$(dirname "$unsorted_target")" || { log $LOG_ERROR "ERROR: Could not create unsorted target directory for '$album_dir'."; return 1; }
-        secure_move_file "$album_dir" "$unsorted_target"
+        mv "$album_dir" "$unsorted_target"
         if [[ $? -eq 0 ]]; then
             log $LOG_INFO "Successfully moved '$album_dir' to '$unsorted_target'"
         else
@@ -2567,7 +2534,7 @@ perform_atomic_directory_move() {
     log $LOG_INFO "Using rsync to move directory atomically..."
     if rsync $rsync_options "$source_dir/" "$temp_dest/"; then
         # Atomic rename to final destination
-        if secure_move_file "$temp_dest" "$dest_dir"; then
+        if mv "$temp_dest" "$dest_dir"; then
             # Remove empty source directory
             if rmdir "$source_dir" 2>/dev/null; then
                 log $LOG_DEBUG "Successfully removed source directory: $source_dir"
@@ -2656,7 +2623,7 @@ rename_tracks_in_album() {
         
         # Perform the rename
         log $LOG_INFO "Renaming: '$original_filename' -> '$(basename "$new_track_path")'"
-        if secure_move_file "$current_file_path" "$new_track_path"; then
+        if mv "$current_file_path" "$new_track_path"; then
             # Record the rename operation for potential rollback
             record_file_rename "$operation_id" "$current_file_path" "$new_track_path"
             ((rename_count++))
@@ -2682,7 +2649,7 @@ rename_tracks_in_album() {
 #   $2: source path
 #   $3: destination path
 # Returns: 0 on success, 1 on failure
-s*secure_create_move_record() {
+create_move_record() {
     local operation_id="$1"
     local source_path="$2"
     local dest_path="$3"
@@ -2708,7 +2675,7 @@ s*secure_create_move_record() {
 #   $1: operation ID
 #   $2: new status (SUCCESS, FAILED, ROLLED_BACK)
 # Returns: 0 on success, 1 on failure
-s*secure_update_move_record_status() {
+update_move_record_status() {
     local operation_id="$1"
     local status="$2"
     
@@ -2765,7 +2732,7 @@ rollback_move_operation() {
     # Attempt to restore from destination back to source
     if [[ -d "$dest_path" && ! -d "$source_path" ]]; then
         log $LOG_INFO "Restoring directory: $dest_path -> $source_path"
-        if secure_move_file "$dest_path" "$source_path"; then
+        if mv "$dest_path" "$source_path"; then
             update_move_record_status "$operation_id" "ROLLED_BACK"
             log $LOG_INFO "Successfully rolled back move operation: $operation_id"
             return 0
