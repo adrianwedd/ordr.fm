@@ -2481,7 +2481,9 @@ process_album_directory() {
     local has_lossy=0
 
     for file_type in $all_file_types; do
-        case "$file_type" in
+        # Convert to uppercase for comparison
+        file_type_upper=$(echo "$file_type" | tr '[:lower:]' '[:upper:]')
+        case "$file_type_upper" in
             "FLAC"|"WAV"|"AIFF"|"ALAC") has_lossless=1 ;;
             "MP3"|"AAC"|"M4A"|"OGG") has_lossy=1 ;;
         esac
@@ -3020,10 +3022,26 @@ main() {
 
     log $LOG_INFO "Scanning for album directories in $SOURCE_DIR..."
 
+    # Check if the source directory itself is an album (contains audio files)
+    local source_is_album=false
+    local audio_count=$(find "$SOURCE_DIR" -maxdepth 1 -type f \( -iname "*.mp3" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" -o -iname "*.aiff" -o -iname "*.alac" \) 2>/dev/null | wc -l)
+    
+    if [[ $audio_count -gt 0 ]]; then
+        source_is_album=true
+        log $LOG_INFO "Source directory itself appears to be an album with $audio_count audio files"
+    fi
+
     local album_dirs=()
-    while IFS= read -r -d '' album_dir; do
-        album_dirs+=("$album_dir")
-    done < <(find "$SOURCE_DIR" -type d -print0)
+    
+    if [[ "$source_is_album" == "true" ]]; then
+        # If source is an album, process only the source directory
+        album_dirs+=("$SOURCE_DIR")
+    else
+        # Otherwise, find all subdirectories
+        while IFS= read -r -d '' album_dir; do
+            album_dirs+=("$album_dir")
+        done < <(find "$SOURCE_DIR" -type d -print0)
+    fi
 
     if [[ ${#album_dirs[@]} -eq 0 ]]; then
         log $LOG_INFO "No album directories found in $SOURCE_DIR."
@@ -3036,8 +3054,8 @@ main() {
     local skipped_count=0
     
     for album_dir in "${album_dirs[@]}"; do
-        # Skip the source directory itself
-        if [[ "$album_dir" == "$SOURCE_DIR" ]]; then
+        # Skip the source directory itself (unless it's an album)
+        if [[ "$album_dir" == "$SOURCE_DIR" ]] && [[ "$source_is_album" != "true" ]]; then
             continue
         fi
         

@@ -1,18 +1,141 @@
-[2025-08-04 12:30:16] [INFO ] --- ordr.fm Script Started ---
-[2025-08-04 12:30:16] [INFO ] Configuration:
-[2025-08-04 12:30:16] [INFO ]   Source Directory: /home/plex/Music/Artists/Atom Heart/atom heart - devolution
-[2025-08-04 12:30:16] [INFO ]   Destination Directory: /home/plex/Music/sorted_music
-[2025-08-04 12:30:16] [INFO ]   Unsorted Directory Base: /home/plex/Music/Unsorted and Incomplete/unsorted
-[2025-08-04 12:30:16] [INFO ]   Log File: ordr.fm.log
-[2025-08-04 12:30:16] [INFO ]   Verbosity: INFO
-[2025-08-04 12:30:16] [INFO ]   Mode: Dry Run
-[2025-08-04 12:30:16] [INFO ]   Incremental Mode: Disabled
-[2025-08-04 12:30:16] [INFO ]   Duplicate Detection: Disabled
-[2025-08-04 12:30:16] [INFO ] All required dependencies are installed.
-[2025-08-04 12:30:16] [DEBUG]   Discogs Integration: Disabled
-[2025-08-04 12:30:16] [INFO ] (Dry Run) Would create unsorted directory: /home/plex/Music/Unsorted and Incomplete/unsorted/unsorted_20250804_123016
-[2025-08-04 12:30:16] [INFO ] Scanning for album directories in /home/plex/Music/Artists/Atom Heart/atom heart - devolution...
-[2025-08-04 12:30:16] [INFO ] Found 1 potential album directories. Processing...
-[2025-08-04 12:30:16] [INFO ] Processing complete. Processed: 0, Skipped: 0
-[2025-08-04 12:30:16] [INFO ] --- ordr.fm Script Finished ---
-[2025-08-04 12:30:16] [INFO ] Script completed successfully: Processing completed successfully
+[2025-08-04 12:58:17] [INFO ] --- ordr.fm Script Started ---
+[2025-08-04 12:58:17] [INFO ] Configuration:
+[2025-08-04 12:58:17] [INFO ]   Source Directory: /tmp/test_music
+[2025-08-04 12:58:17] [INFO ]   Destination Directory: /home/plex/Music/sorted_music
+[2025-08-04 12:58:17] [INFO ]   Unsorted Directory Base: /home/plex/Music/Unsorted and Incomplete/unsorted
+[2025-08-04 12:58:17] [INFO ]   Log File: ordr.fm.log
+[2025-08-04 12:58:17] [INFO ]   Verbosity: INFO
+[2025-08-04 12:58:17] [INFO ]   Mode: Dry Run
+[2025-08-04 12:58:17] [INFO ]   Incremental Mode: Disabled
+[2025-08-04 12:58:17] [INFO ]   Duplicate Detection: Disabled
+[2025-08-04 12:58:17] [INFO ] All required dependencies are installed.
+[2025-08-04 12:58:17] [INFO ]   Discogs Integration: Enabled
+[2025-08-04 12:58:17] [DEBUG] Discogs integration initialized. Cache: ./discogs_cache, Rate limiter: ./discogs_rate_limiter
+[2025-08-04 12:58:17] [INFO ] (Dry Run) Would create unsorted directory: /home/plex/Music/Unsorted and Incomplete/unsorted/unsorted_20250804_125817
+[2025-08-04 12:58:17] [INFO ] Scanning for album directories in /tmp/test_music...
+[2025-08-04 12:58:17] [INFO ] Found 2 potential album directories. Processing...
+[2025-08-04 12:58:17] [DEBUG] Processing directory: /tmp/test_music/atom heart - devolution
+[2025-08-04 12:58:17] [INFO ] Processing album directory: /tmp/test_music/atom heart - devolution
+[2025-08-04 12:58:17] [DEBUG] Raw exiftool output for '/tmp/test_music/atom heart - devolution':\n[{
+  "SourceFile": "/tmp/test_music/atom heart - devolution/01-imagnecy.mp3",
+  "ExifToolVersion": 12.57,
+  "FileName": "01-imagnecy.mp3",
+  "Directory": "/tmp/test_music/atom heart - devolution",
+  "FileSize": "11 MB",
+  "FileModifyDate": "2025:08:04 12:57:20+10:00",
+  "FileAccessDate": "2025:08:04 12:57:20+10:00",
+  "FileInodeChangeDate": "2025:08:04 12:57:20+10:00",
+  "FilePermissions": "-rwxr-xr-x",
+  "FileType": "MP3",
+  "FileTypeExtension": "mp3",
+  "MIMEType": "audio/mpeg",
+  "MPEGAudioVersion": 1,
+  "AudioLayer": 3,
+  "AudioBitrate": "160 kbps",
+  "SampleRate": 44100,
+  "ChannelMode": "Joint Stereo",
+  "MSStereo": "Off",
+  "IntensityStereo": "Off",
+  "CopyrightFlag": false,
+  "OriginalMedia": false,
+  "Emphasis": "None",
+  "ID3Size": 4736,
+  "Media": "DIG",
+  "Comment": "",
+  "WM_MediaClassSecondaryID": "00000000-0000-0000-0000-000000000000",
+  "WM_MediaClassPrimaryID": "D1607DBC-E323-4BE2-86A1-48A42A28441E",
+  "WM_Provider": "AMG",
+  "WM_ContentID": "8A2CD391-5160-4D10-940D-EFA8CF947D89",
+  "WM_CollectionID": "2F07EF7C-E9FD-40F8-B366-458D7160798C",
+  "WM_CollectionGroupID": "2F07EF7C-E9FD-40F8-B366-458D7160798C",
+  "Publisher": "Source",
+  "WM_UniqueFileIdentifier": "(Binary data 114 bytes, use -b option to extract)",
+  "Track": 1,
+  "Album": "Devolution",
+  "Year": 2001,
+  "Band": "Eyephone",
+  "Title": "imagnecy",
+  "Genre": "Rock",
+  "PeakValue": 32673,
+  "AverageLevel": 2683,
+  "Composer": "Eyephone",
+  "Artist": "Eyephone",
+  "Length": "554.945 s",
+  "DateTimeOriginal": 2001,
+  "Duration": "0:09:15 (approx)"
+},
+{
+  "SourceFile": "/tmp/test_music/atom heart - devolution/INCOMPLETE~02-machines in the valley.mp3",
+  "ExifToolVersion": 12.57,
+  "FileName": "INCOMPLETE~02-machines in the valley.mp3",
+  "Directory": "/tmp/test_music/atom heart - devolution",
+  "FileSize": "1017 kB",
+  "FileModifyDate": "2025:08:04 12:57:20+10:00",
+  "FileAccessDate": "2025:08:04 12:57:20+10:00",
+  "FileInodeChangeDate": "2025:08:04 12:57:20+10:00",
+  "FilePermissions": "-rwxr-xr-x",
+  "FileType": "MP3",
+  "FileTypeExtension": "mp3",
+  "MIMEType": "audio/mpeg",
+  "MPEGAudioVersion": 1,
+  "AudioLayer": 3,
+  "AudioBitrate": "160 kbps",
+  "SampleRate": 44100,
+  "ChannelMode": "Joint Stereo",
+  "MSStereo": "Off",
+  "IntensityStereo": "Off",
+  "CopyrightFlag": false,
+  "OriginalMedia": false,
+  "Emphasis": "None",
+  "ID3Size": 4736,
+  "Media": "DIG",
+  "WM_MediaClassSecondaryID": "00000000-0000-0000-0000-000000000000",
+  "WM_MediaClassPrimaryID": "D1607DBC-E323-4BE2-86A1-48A42A28441E",
+  "WM_Provider": "AMG",
+  "WM_ContentID": "1731A44B-5730-4B05-A7F1-332023E5F1E0",
+  "WM_CollectionID": "2F07EF7C-E9FD-40F8-B366-458D7160798C",
+  "WM_CollectionGroupID": "2F07EF7C-E9FD-40F8-B366-458D7160798C",
+  "Publisher": "Source",
+  "WM_UniqueFileIdentifier": "(Binary data 114 bytes, use -b option to extract)",
+  "Track": 2,
+  "Album": "Devolution",
+  "Year": 2001,
+  "Band": "Eyephone",
+  "Title": "machines in the valley",
+  "Genre": "Rock",
+  "PeakValue": 30369,
+  "AverageLevel": 2171,
+  "Composer": "Eyephone",
+  "Artist": "Eyephone",
+  "Length": "304.613 s",
+  "Comment": "                            ",
+  "DateTimeOriginal": 2001,
+  "Duration": "0:00:51 (approx)"
+}]
+[2025-08-04 12:58:17] [DEBUG] Collected Album Artists: ;
+[2025-08-04 12:58:17] [DEBUG] Collected Artists: Eyephone;Eyephone;
+[2025-08-04 12:58:17] [DEBUG] Collected Albums: Devolution;Devolution;
+[2025-08-04 12:58:17] [DEBUG] Collected Titles: imagnecy;machines in the valley;
+[2025-08-04 12:58:17] [DEBUG] Collected Track Numbers: 1;2;
+[2025-08-04 12:58:17] [DEBUG] Collected Years: 2001;2001;
+[2025-08-04 12:58:17] [DEBUG] Collected Disc Numbers: ;
+[2025-08-04 12:58:17] [DEBUG] Collected File Types: mp3;mp3;
+[2025-08-04 12:58:17] [DEBUG] Determined Album Artist (from Artist tag): Eyephone
+[2025-08-04 12:58:17] [DEBUG] Determined Album Title: Devolution
+[2025-08-04 12:58:17] [DEBUG] Determined Album Year: 2001
+[2025-08-04 12:58:17] [DEBUG] Determined Album Quality: Lossy
+[2025-08-04 12:58:17] [DEBUG] Attempting to enrich metadata with Discogs for: Eyephone - Devolution
+[2025-08-04 12:58:17] [DEBUG] Enriching metadata with Discogs for: Eyephone - Devolution (2001)
+[2025-08-04 12:58:17] [DEBUG] Searching Discogs for: artist:"Eyephone" release_title:"Devolution" year:2001
+[2025-08-04 12:58:17] [WARNING] WARN: No Discogs authentication configured. Using unauthenticated requests (lower rate limit).
+[2025-08-04 12:58:17] [DEBUG] Making Discogs API request to: https://api.discogs.com/database/search?q=artist%3A%22Eyephone%22%20release_title%3A%22Devolution%22%20year%3A2001%0A&type=release&per_page=10
+[2025-08-04 12:58:18] [WARNING] WARN: Discogs API error: You must authenticate to access this resource.
+[2025-08-04 12:58:18] [DEBUG] No Discogs search results found
+[2025-08-04 12:58:18] [DEBUG] No Discogs metadata found for this release
+[2025-08-04 12:58:18] [DEBUG] Mode selected: artist (default fallback)
+[2025-08-04 12:58:18] [DEBUG] Selected organization mode: artist
+[2025-08-04 12:58:18] [INFO ] Proposed new album path for '/tmp/test_music/atom heart - devolution': /home/plex/Music/sorted_music/Lossy/Eyephone/Devolution (2001)
+[2025-08-04 12:58:18] [INFO ] (Dry Run) Would move album directory '/tmp/test_music/atom heart - devolution' to '/home/plex/Music/sorted_music/Lossy/Eyephone/Devolution (2001)'
+[2025-08-04 12:58:18] [INFO ] (Dry Run) Individual files within this album would be renamed as follows:
+[2025-08-04 12:58:18] [INFO ]   - '01-imagnecy.mp3' -> '/home/plex/Music/sorted_music/Lossy/Eyephone/Devolution (2001)/01 - imagnecy.mp3'
+[2025-08-04 12:58:19] [INFO ]   - 'INCOMPLETE~02-machines in the valley.mp3' -> '/home/plex/Music/sorted_music/Lossy/Eyephone/Devolution (2001)/02 - machines in the valley.mp3'
