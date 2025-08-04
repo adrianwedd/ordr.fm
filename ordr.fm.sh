@@ -1201,11 +1201,34 @@ CREATE TABLE IF NOT EXISTS organization_stats (
     compilation_count INTEGER DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS move_operations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation_id TEXT UNIQUE NOT NULL,
+    source_path TEXT NOT NULL,
+    dest_path TEXT NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status TEXT DEFAULT 'IN_PROGRESS', -- 'IN_PROGRESS', 'SUCCESS', 'FAILED', 'ROLLED_BACK', 'ROLLBACK_FAILED'
+    error_message TEXT
+);
+
+CREATE TABLE IF NOT EXISTS file_renames (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    operation_id TEXT NOT NULL,
+    old_path TEXT NOT NULL,
+    new_path TEXT NOT NULL,
+    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (operation_id) REFERENCES move_operations(operation_id)
+);
+
 CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist);
 CREATE INDEX IF NOT EXISTS idx_albums_label ON albums(label);
 CREATE INDEX IF NOT EXISTS idx_albums_quality ON albums(quality);
 CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
 CREATE INDEX IF NOT EXISTS idx_moves_source ON moves(source_path);
+CREATE INDEX IF NOT EXISTS idx_move_operations_id ON move_operations(operation_id);
+CREATE INDEX IF NOT EXISTS idx_move_operations_status ON move_operations(status);
+CREATE INDEX IF NOT EXISTS idx_file_renames_operation ON file_renames(operation_id);
 CREATE INDEX IF NOT EXISTS idx_artist_aliases_name ON artist_aliases(artist_name);
 EOF
     
@@ -2417,6 +2440,313 @@ move_to_unsorted() {
     fi
 }
 
+# --- File Move Operations ---
+
+# perform_album_move: Performs atomic move operation for an album directory
+# Arguments:
+#   $1: source album directory path
+#   $2: destination album directory path  
+#   $3: exiftool output JSON for track-level operations
+# Returns: 0 on success, 1 on failure
+perform_album_move() {
+    local source_dir="$1"
+    local dest_dir="$2"
+    local exiftool_output="$3"
+    local operation_id="move_$(date +%s)_$$"
+    
+    log $LOG_INFO "Starting atomic move operation: $operation_id"
+    log $LOG_DEBUG "Source: $source_dir"
+    log $LOG_DEBUG "Destination: $dest_dir"
+    
+    # Validate inputs
+    if [[ ! -d "$source_dir" ]]; then
+        log $LOG_ERROR "Source directory does not exist: $source_dir"
+        return 1
+    fi
+    
+    if [[ -e "$dest_dir" ]]; then
+        log $LOG_ERROR "Destination already exists: $dest_dir"
+        return 1
+    fi
+    
+    # Create destination parent directory
+    local dest_parent=$(dirname "$dest_dir")
+    if ! mkdir -p "$dest_parent"; then
+        log $LOG_ERROR "Failed to create destination parent directory: $dest_parent"
+        return 1
+    fi
+    
+    # Record move operation in database for rollback
+    local move_record=$(create_move_record "$operation_id" "$source_dir" "$dest_dir")
+    if [[ $? -ne 0 ]]; then
+        log $LOG_ERROR "Failed to create move record in database"
+        return 1
+    fi
+    
+    # Perform atomic move with progress tracking
+    log $LOG_INFO "Moving album files..."
+    if perform_atomic_directory_move "$source_dir" "$dest_dir" "$operation_id"; then
+        # Rename individual files according to metadata
+        if rename_tracks_in_album "$dest_dir" "$exiftool_output" "$operation_id"; then
+            # Update move record as successful
+            update_move_record_status "$operation_id" "SUCCESS"
+            log $LOG_INFO "Album move completed successfully: $operation_id"
+            return 0
+        else
+            log $LOG_ERROR "Track renaming failed, rolling back move operation"
+            rollback_move_operation "$operation_id"
+            return 1
+        fi
+    else
+        log $LOG_ERROR "Directory move failed, rolling back operation"
+        rollback_move_operation "$operation_id"
+        return 1
+    fi
+}
+
+# perform_atomic_directory_move: Moves directory atomically using rsync
+# Arguments:
+#   $1: source directory
+#   $2: destination directory  
+#   $3: operation ID for tracking
+# Returns: 0 on success, 1 on failure
+perform_atomic_directory_move() {
+    local source_dir="$1"
+    local dest_dir="$2"
+    local operation_id="$3"
+    
+    log $LOG_DEBUG "Performing atomic directory move: $operation_id"
+    
+    # Use rsync for atomic move with verification
+    # --archive preserves permissions, timestamps, etc.
+    # --verbose for detailed logging
+    # --progress for progress tracking
+    # --checksum for integrity verification
+    local rsync_options="--archive --verbose --progress --checksum --remove-source-files"
+    
+    if [[ $VERBOSITY -ge $LOG_DEBUG ]]; then
+        rsync_options="$rsync_options --stats"
+    fi
+    
+    # Create temporary destination to ensure atomicity
+    local temp_dest="${dest_dir}.tmp.${operation_id}"
+    
+    log $LOG_INFO "Using rsync to move directory atomically..."
+    if rsync $rsync_options "$source_dir/" "$temp_dest/"; then
+        # Atomic rename to final destination
+        if mv "$temp_dest" "$dest_dir"; then
+            # Remove empty source directory
+            if rmdir "$source_dir" 2>/dev/null; then
+                log $LOG_DEBUG "Successfully removed source directory: $source_dir"
+            else
+                log $LOG_WARNING "Could not remove source directory (may not be empty): $source_dir"
+            fi
+            return 0
+        else
+            log $LOG_ERROR "Failed to rename temporary directory to final destination"
+            # Cleanup temporary directory
+            rm -rf "$temp_dest" 2>/dev/null
+            return 1
+        fi
+    else
+        log $LOG_ERROR "rsync failed during directory move"
+        # Cleanup temporary directory if it exists
+        rm -rf "$temp_dest" 2>/dev/null
+        return 1
+    fi
+}
+
+# rename_tracks_in_album: Renames individual tracks according to metadata
+# Arguments:
+#   $1: album directory path
+#   $2: exiftool output JSON
+#   $3: operation ID for tracking
+# Returns: 0 on success, 1 on failure
+rename_tracks_in_album() {
+    local album_dir="$1"
+    local exiftool_output="$2"
+    local operation_id="$3"
+    
+    log $LOG_DEBUG "Renaming tracks in album: $album_dir"
+    
+    local rename_count=0
+    local rename_errors=0
+    
+    # Process each track from exiftool output
+    echo "$exiftool_output" | jq -c '.[]' | while IFS= read -r track_json; do
+        local track_artist=$(echo "$track_json" | jq -r '.Artist // empty')
+        local track_title=$(echo "$track_json" | jq -r '.Title // empty')
+        local track_number=$(echo "$track_json" | jq -r '.Track // empty')
+        local track_disc_number=$(echo "$track_json" | jq -r '.DiscNumber // empty')
+        local track_ext=$(echo "$track_json" | jq -r '.FileTypeExtension // empty')
+        local original_filename=$(echo "$track_json" | jq -r '.FileName // empty')
+        local current_file_path="${album_dir}/${original_filename}"
+        
+        # Skip if file doesn't exist (may have been processed already)
+        if [[ ! -f "$current_file_path" ]]; then
+            log $LOG_WARNING "Track file not found, skipping: $current_file_path"
+            continue
+        fi
+        
+        # Generate new filename using same logic as dry-run
+        local sanitized_track_title=$(sanitize_filename "$track_title")
+        local formatted_track_number=""
+        
+        if [[ -n "$track_number" ]]; then
+            formatted_track_number=$(printf "%02d - " "$track_number")
+        fi
+        
+        local new_track_filename="${formatted_track_number}${sanitized_track_title}.${track_ext}"
+        
+        # Handle disc subdirectories
+        local track_dest_dir="$album_dir"
+        if [[ -n "$track_disc_number" && "$track_disc_number" != "1" ]]; then
+            local formatted_disc_number="Disc $(sanitize_filename "$track_disc_number")"
+            track_dest_dir="${album_dir}/${formatted_disc_number}"
+            mkdir -p "$track_dest_dir"
+        fi
+        
+        local new_track_path="${track_dest_dir}/${new_track_filename}"
+        
+        # Skip if already correctly named
+        if [[ "$current_file_path" == "$new_track_path" ]]; then
+            log $LOG_DEBUG "Track already correctly named: $original_filename"
+            continue
+        fi
+        
+        # Check for destination conflicts
+        if [[ -e "$new_track_path" && "$current_file_path" != "$new_track_path" ]]; then
+            log $LOG_ERROR "Destination file already exists: $new_track_path"
+            ((rename_errors++))
+            continue
+        fi
+        
+        # Perform the rename
+        log $LOG_INFO "Renaming: '$original_filename' -> '$(basename "$new_track_path")'"
+        if mv "$current_file_path" "$new_track_path"; then
+            # Record the rename operation for potential rollback
+            record_file_rename "$operation_id" "$current_file_path" "$new_track_path"
+            ((rename_count++))
+        else
+            log $LOG_ERROR "Failed to rename: $original_filename"
+            ((rename_errors++))
+        fi
+    done
+    
+    log $LOG_INFO "Track renaming completed: $rename_count renamed, $rename_errors errors"
+    
+    # Return success if no errors occurred
+    if [[ $rename_errors -eq 0 ]]; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# create_move_record: Records move operation in database for rollback capability
+# Arguments:
+#   $1: operation ID
+#   $2: source path
+#   $3: destination path
+# Returns: 0 on success, 1 on failure
+create_move_record() {
+    local operation_id="$1"
+    local source_path="$2"
+    local dest_path="$3"
+    
+    # Initialize metadata database if not exists
+    init_metadata_db
+    
+    # Insert move record
+    local sql="INSERT INTO move_operations (operation_id, source_path, dest_path, timestamp, status) 
+               VALUES ('$operation_id', '$source_path', '$dest_path', datetime('now'), 'IN_PROGRESS');"
+    
+    if sqlite3 "$METADATA_DB" "$sql"; then
+        log $LOG_DEBUG "Created move record: $operation_id"
+        return 0
+    else
+        log $LOG_ERROR "Failed to create move record in database"
+        return 1
+    fi
+}
+
+# update_move_record_status: Updates move operation status
+# Arguments:
+#   $1: operation ID
+#   $2: new status (SUCCESS, FAILED, ROLLED_BACK)
+# Returns: 0 on success, 1 on failure
+update_move_record_status() {
+    local operation_id="$1"
+    local status="$2"
+    
+    local sql="UPDATE move_operations SET status='$status', updated_at=datetime('now') 
+               WHERE operation_id='$operation_id';"
+    
+    if sqlite3 "$METADATA_DB" "$sql"; then
+        log $LOG_DEBUG "Updated move record status: $operation_id -> $status"
+        return 0
+    else
+        log $LOG_ERROR "Failed to update move record status"
+        return 1
+    fi
+}
+
+# record_file_rename: Records individual file rename for rollback
+# Arguments:
+#   $1: operation ID
+#   $2: old file path
+#   $3: new file path
+# Returns: 0 on success, 1 on failure
+record_file_rename() {
+    local operation_id="$1"
+    local old_path="$2"
+    local new_path="$3"
+    
+    local sql="INSERT INTO file_renames (operation_id, old_path, new_path, timestamp) 
+               VALUES ('$operation_id', '$old_path', '$new_path', datetime('now'));"
+    
+    sqlite3 "$METADATA_DB" "$sql" || log $LOG_WARNING "Failed to record file rename"
+}
+
+# rollback_move_operation: Rolls back a failed move operation
+# Arguments:
+#   $1: operation ID
+# Returns: 0 on success, 1 on failure
+rollback_move_operation() {
+    local operation_id="$1"
+    
+    log $LOG_WARNING "Rolling back move operation: $operation_id"
+    
+    # Get move record details
+    local move_record=$(sqlite3 "$METADATA_DB" -separator '|' \
+        "SELECT source_path, dest_path FROM move_operations WHERE operation_id='$operation_id';")
+    
+    if [[ -z "$move_record" ]]; then
+        log $LOG_ERROR "Move record not found for rollback: $operation_id"
+        return 1
+    fi
+    
+    local source_path=$(echo "$move_record" | cut -d'|' -f1)
+    local dest_path=$(echo "$move_record" | cut -d'|' -f2)
+    
+    # Attempt to restore from destination back to source
+    if [[ -d "$dest_path" && ! -d "$source_path" ]]; then
+        log $LOG_INFO "Restoring directory: $dest_path -> $source_path"
+        if mv "$dest_path" "$source_path"; then
+            update_move_record_status "$operation_id" "ROLLED_BACK"
+            log $LOG_INFO "Successfully rolled back move operation: $operation_id"
+            return 0
+        else
+            log $LOG_ERROR "Failed to rollback directory move: $operation_id"
+            return 1
+        fi
+    else
+        log $LOG_WARNING "Cannot rollback - source exists or destination missing: $operation_id"
+        update_move_record_status "$operation_id" "ROLLBACK_FAILED"
+        return 1
+    fi
+}
+
 # --- Album Processing Logic ---
 
 # process_album_directory: Analyzes a single directory assumed to be an album.
@@ -2725,8 +3055,15 @@ process_album_directory() {
             log $LOG_INFO "  - '$original_filename' -> '$proposed_track_path'"
         done
     else
-        # Actual move logic will go here later
-        log $LOG_INFO "(Live Run) Album move/rename logic not yet implemented."
+        # Actual move logic - atomic operations with rollback capability
+        log $LOG_INFO "(Live Run) Moving album directory '$album_dir' to '$proposed_album_path'"
+        
+        if perform_album_move "$album_dir" "$proposed_album_path" "$exiftool_output"; then
+            log $LOG_INFO "Successfully moved album: $(basename "$album_dir")"
+        else
+            log $LOG_ERROR "Failed to move album: $(basename "$album_dir")"
+            return 1
+        fi
     fi
 }
 
