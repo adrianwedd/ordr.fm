@@ -40,6 +40,21 @@ NOTIFY_EMAIL="" # Email address for notifications
 NOTIFY_WEBHOOK="" # Webhook URL for notifications
 LOCK_FILE="" # Path to lock file for concurrent run prevention
 
+# Discogs API integration variables
+DISCOGS_ENABLED=0 # Flag to enable Discogs metadata enrichment
+DISCOGS_USER_TOKEN="" # User token for Discogs API
+DISCOGS_CONSUMER_KEY="" # Consumer key for Discogs API
+DISCOGS_CONSUMER_SECRET="" # Consumer secret for Discogs API
+DISCOGS_CACHE_DIR="" # Directory for API response cache
+DISCOGS_CACHE_EXPIRY=24 # Cache expiration in hours
+DISCOGS_RATE_LIMIT=60 # API rate limit (requests per minute)
+DISCOGS_CONFIDENCE_THRESHOLD=0.7 # Confidence threshold for metadata acceptance
+DISCOGS_CATALOG_NUMBERS=1 # Enable catalog number extraction
+DISCOGS_REMIX_ARTISTS=1 # Enable remix artist extraction
+DISCOGS_LABEL_SERIES=1 # Enable label series identification
+DISCOGS_RATE_LIMITER_FILE="" # Rate limiter state file
+DISCOGS_LAST_REQUEST_TIME=0 # Last API request timestamp
+
 # Define log levels
 readonly LOG_QUIET=0
 readonly LOG_INFO=1
@@ -79,7 +94,7 @@ get_log_level_name() {
 # Function to check for required dependencies
 check_dependencies() {
     local missing_deps=()
-    for cmd in "exiftool" "jq" "rsync" "md5sum" "sqlite3"; do
+    for cmd in "exiftool" "jq" "rsync" "md5sum" "sqlite3" "curl" "bc"; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_deps+=("$cmd")
         fi
@@ -100,6 +115,431 @@ sanitize_filename() {
     # Trim leading/trailing spaces and replace multiple spaces with a single space
     sanitized=$(echo "$sanitized" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[[:space:]]\+/ /g')
     echo "$sanitized"
+}
+
+# --- Discogs API Integration Functions ---
+
+# Initialize Discogs integration settings
+init_discogs() {
+    if [[ $DISCOGS_ENABLED -eq 0 ]]; then
+        return 0
+    fi
+    
+    # Set up cache directory
+    if [[ -z "$DISCOGS_CACHE_DIR" ]]; then
+        DISCOGS_CACHE_DIR="$(dirname "$LOG_FILE")/discogs_cache"
+    fi
+    
+    # Create cache directory if it doesn't exist
+    if [[ ! -d "$DISCOGS_CACHE_DIR" ]]; then
+        mkdir -p "$DISCOGS_CACHE_DIR" || {
+            log $LOG_WARNING "WARN: Could not create Discogs cache directory: $DISCOGS_CACHE_DIR. Disabling caching."
+            DISCOGS_CACHE_DIR=""
+        }
+    fi
+    
+    # Set up rate limiter file
+    if [[ -z "$DISCOGS_RATE_LIMITER_FILE" ]]; then
+        DISCOGS_RATE_LIMITER_FILE="$(dirname "$LOG_FILE")/discogs_rate_limiter"
+    fi
+    
+    # Initialize rate limiter file if it doesn't exist
+    if [[ ! -f "$DISCOGS_RATE_LIMITER_FILE" ]]; then
+        echo "0" > "$DISCOGS_RATE_LIMITER_FILE"
+    fi
+    
+    log $LOG_DEBUG "Discogs integration initialized. Cache: $DISCOGS_CACHE_DIR, Rate limiter: $DISCOGS_RATE_LIMITER_FILE"
+}
+
+# Rate limiter for Discogs API requests
+discogs_rate_limit() {
+    if [[ $DISCOGS_ENABLED -eq 0 ]]; then
+        return 0
+    fi
+    
+    local current_time=$(date +%s)
+    local last_request_time
+    
+    # Read last request time from file
+    if [[ -f "$DISCOGS_RATE_LIMITER_FILE" ]]; then
+        last_request_time=$(cat "$DISCOGS_RATE_LIMITER_FILE" 2>/dev/null || echo "0")
+    else
+        last_request_time=0
+    fi
+    
+    # Calculate time since last request
+    local time_diff=$((current_time - last_request_time))
+    local min_interval=$((60 / DISCOGS_RATE_LIMIT))  # seconds between requests
+    
+    if [[ $time_diff -lt $min_interval ]]; then
+        local sleep_time=$((min_interval - time_diff))
+        log $LOG_DEBUG "Rate limiting: sleeping for $sleep_time seconds"
+        sleep $sleep_time
+    fi
+    
+    # Update last request time
+    echo "$current_time" > "$DISCOGS_RATE_LIMITER_FILE"
+}
+
+# Generate cache key for Discogs API request
+discogs_cache_key() {
+    local artist="$1"
+    local album="$2"
+    local year="$3"
+    
+    # Create a normalized cache key
+    local normalized_artist=$(echo "$artist" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+    local normalized_album=$(echo "$album" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+    local key="${normalized_artist}_${normalized_album}_${year:-0000}"
+    
+    echo "$key" | md5sum | cut -d' ' -f1
+}
+
+# Check if cached response exists and is valid
+discogs_cache_get() {
+    local cache_key="$1"
+    
+    if [[ -z "$DISCOGS_CACHE_DIR" || ! -d "$DISCOGS_CACHE_DIR" ]]; then
+        return 1
+    fi
+    
+    local cache_file="$DISCOGS_CACHE_DIR/$cache_key.json"
+    
+    if [[ ! -f "$cache_file" ]]; then
+        return 1
+    fi
+    
+    # Check if cache is expired
+    local cache_age_hours=$(( ($(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0)) / 3600 ))
+    
+    if [[ $cache_age_hours -gt $DISCOGS_CACHE_EXPIRY ]]; then
+        log $LOG_DEBUG "Discogs cache expired for key: $cache_key (age: ${cache_age_hours}h)"
+        rm -f "$cache_file"
+        return 1
+    fi
+    
+    log $LOG_DEBUG "Using cached Discogs response for key: $cache_key"
+    cat "$cache_file"
+    return 0
+}
+
+# Store response in cache
+discogs_cache_set() {
+    local cache_key="$1"
+    local response="$2"
+    
+    if [[ -z "$DISCOGS_CACHE_DIR" || ! -d "$DISCOGS_CACHE_DIR" ]]; then
+        return 1
+    fi
+    
+    local cache_file="$DISCOGS_CACHE_DIR/$cache_key.json"
+    
+    echo "$response" > "$cache_file"
+    log $LOG_DEBUG "Cached Discogs response for key: $cache_key"
+}
+
+# Make authenticated request to Discogs API
+discogs_api_request() {
+    local endpoint="$1"
+    local cache_key="$2"
+    
+    if [[ $DISCOGS_ENABLED -eq 0 ]]; then
+        return 1
+    fi
+    
+    # Try cache first
+    if [[ -n "$cache_key" ]]; then
+        local cached_response
+        if cached_response=$(discogs_cache_get "$cache_key"); then
+            echo "$cached_response"
+            return 0
+        fi
+    fi
+    
+    # Apply rate limiting
+    discogs_rate_limit
+    
+    local api_url="https://api.discogs.com${endpoint}"
+    local auth_header=""
+    local user_agent="ordr.fm/1.0 +https://github.com/adrianwedd/ordr.fm"
+    
+    # Set up authentication
+    if [[ -n "$DISCOGS_USER_TOKEN" ]]; then
+        auth_header="Authorization: Discogs token=${DISCOGS_USER_TOKEN}"
+    elif [[ -n "$DISCOGS_CONSUMER_KEY" && -n "$DISCOGS_CONSUMER_SECRET" ]]; then
+        auth_header="Authorization: Discogs key=${DISCOGS_CONSUMER_KEY}, secret=${DISCOGS_CONSUMER_SECRET}"
+    else
+        log $LOG_WARNING "WARN: No Discogs authentication configured. Using unauthenticated requests (lower rate limit)."
+    fi
+    
+    log $LOG_DEBUG "Making Discogs API request to: $api_url"
+    
+    # Make the API request
+    local response
+    if [[ -n "$auth_header" ]]; then
+        response=$(curl -s -H "User-Agent: $user_agent" -H "$auth_header" "$api_url" 2>/dev/null)
+    else
+        response=$(curl -s -H "User-Agent: $user_agent" "$api_url" 2>/dev/null)
+    fi
+    
+    local curl_exit_code=$?
+    
+    if [[ $curl_exit_code -ne 0 ]]; then
+        log $LOG_WARNING "WARN: Discogs API request failed with curl exit code: $curl_exit_code"
+        return 1
+    fi
+    
+    if [[ -z "$response" ]]; then
+        log $LOG_WARNING "WARN: Empty response from Discogs API"
+        return 1
+    fi
+    
+    # Check for API errors
+    local error_message=$(echo "$response" | jq -r '.message // empty' 2>/dev/null)
+    if [[ -n "$error_message" ]]; then
+        log $LOG_WARNING "WARN: Discogs API error: $error_message"
+        return 1
+    fi
+    
+    # Cache successful response
+    if [[ -n "$cache_key" ]]; then
+        discogs_cache_set "$cache_key" "$response"
+    fi
+    
+    echo "$response"
+    return 0
+}
+
+# Search for releases on Discogs
+discogs_search_releases() {
+    local artist="$1"
+    local album="$2"
+    local year="$3"
+    
+    if [[ $DISCOGS_ENABLED -eq 0 ]]; then
+        return 1
+    fi
+    
+    # Build search query
+    local query="artist:\"$artist\" release_title:\"$album\""
+    if [[ -n "$year" ]]; then
+        query="$query year:$year"
+    fi
+    
+    # URL encode the query
+    local encoded_query=$(echo "$query" | jq -sRr @uri)
+    local endpoint="/database/search?q=$encoded_query&type=release&per_page=10"
+    
+    local cache_key=$(discogs_cache_key "$artist" "$album" "$year")
+    
+    log $LOG_DEBUG "Searching Discogs for: $query"
+    
+    discogs_api_request "$endpoint" "$cache_key"
+}
+
+# Get detailed release information from Discogs
+discogs_get_release() {
+    local release_id="$1"
+    
+    if [[ $DISCOGS_ENABLED -eq 0 || -z "$release_id" ]]; then
+        return 1
+    fi
+    
+    local endpoint="/releases/$release_id"
+    local cache_key="release_${release_id}"
+    
+    log $LOG_DEBUG "Getting Discogs release details for ID: $release_id"
+    
+    discogs_api_request "$endpoint" "$cache_key"
+}
+
+# Extract enhanced metadata from Discogs release data
+extract_discogs_metadata() {
+    local release_json="$1"
+    
+    if [[ -z "$release_json" ]]; then
+        return 1
+    fi
+    
+    # Extract basic information
+    local discogs_artist=$(echo "$release_json" | jq -r '.artists[0].name // empty' 2>/dev/null)
+    local discogs_title=$(echo "$release_json" | jq -r '.title // empty' 2>/dev/null)
+    local discogs_year=$(echo "$release_json" | jq -r '.year // empty' 2>/dev/null)
+    local discogs_label=$(echo "$release_json" | jq -r '.labels[0].name // empty' 2>/dev/null)
+    local discogs_catalog=$(echo "$release_json" | jq -r '.labels[0].catno // empty' 2>/dev/null)
+    local discogs_genre=$(echo "$release_json" | jq -r '.genres[0] // empty' 2>/dev/null)
+    local discogs_style=$(echo "$release_json" | jq -r '.styles[0] // empty' 2>/dev/null)
+    
+    # Extract remix artists if enabled
+    local remix_artists=""
+    if [[ $DISCOGS_REMIX_ARTISTS -eq 1 ]]; then
+        remix_artists=$(echo "$release_json" | jq -r '.tracklist[]? | .title' 2>/dev/null | grep -i "remix\|rmx" | head -5 | tr '\n' ';' || echo "")
+    fi
+    
+    # Extract label series information if enabled
+    local label_series=""
+    if [[ $DISCOGS_LABEL_SERIES -eq 1 ]]; then
+        label_series=$(echo "$release_json" | jq -r '.series[]?.name // empty' 2>/dev/null | head -1)
+    fi
+    
+    # Create enhanced metadata JSON
+    local enhanced_metadata=$(jq -n \
+        --arg artist "$discogs_artist" \
+        --arg title "$discogs_title" \
+        --arg year "$discogs_year" \
+        --arg label "$discogs_label" \
+        --arg catalog "$discogs_catalog" \
+        --arg genre "$discogs_genre" \
+        --arg style "$discogs_style" \
+        --arg remix_artists "$remix_artists" \
+        --arg label_series "$label_series" \
+        '{
+            artist: $artist,
+            title: $title,
+            year: $year,
+            label: $label,
+            catalog_number: $catalog,
+            genre: $genre,
+            style: $style,
+            remix_artists: $remix_artists,
+            label_series: $label_series
+        }')
+    
+    echo "$enhanced_metadata"
+}
+
+# Calculate confidence score for Discogs metadata match
+calculate_discogs_confidence() {
+    local local_artist="$1"
+    local local_album="$2"
+    local local_year="$3"
+    local discogs_metadata="$4"
+    
+    if [[ -z "$discogs_metadata" ]]; then
+        echo "0.0"
+        return
+    fi
+    
+    local discogs_artist=$(echo "$discogs_metadata" | jq -r '.artist // empty')
+    local discogs_title=$(echo "$discogs_metadata" | jq -r '.title // empty')
+    local discogs_year=$(echo "$discogs_metadata" | jq -r '.year // empty')
+    
+    local confidence=0.0
+    local max_score=3.0
+    
+    # Artist matching (weight: 1.0)
+    if [[ -n "$local_artist" && -n "$discogs_artist" ]]; then
+        # Normalize both artists for comparison
+        local norm_local_artist=$(echo "$local_artist" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+        local norm_discogs_artist=$(echo "$discogs_artist" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+        
+        local artist_similarity=0.0
+        if [[ "$norm_local_artist" == "$norm_discogs_artist" ]]; then
+            artist_similarity=1.0
+        elif [[ "$norm_local_artist" == *"$norm_discogs_artist"* ]] || [[ "$norm_discogs_artist" == *"$norm_local_artist"* ]]; then
+            artist_similarity=0.7
+        else
+            artist_similarity=0.0
+        fi
+        
+        confidence=$(echo "$confidence + $artist_similarity" | bc -l 2>/dev/null || echo "$confidence")
+    fi
+    
+    # Album matching (weight: 1.0)
+    if [[ -n "$local_album" && -n "$discogs_title" ]]; then
+        # Normalize both titles for comparison
+        local norm_local=$(echo "$local_album" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+        local norm_discogs=$(echo "$discogs_title" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
+        
+        local album_similarity=0.0
+        if [[ "$norm_local" == "$norm_discogs" ]]; then
+            album_similarity=1.0
+        elif [[ "$norm_local" == *"$norm_discogs"* ]] || [[ "$norm_discogs" == *"$norm_local"* ]]; then
+            album_similarity=0.7
+        else
+            album_similarity=0.0
+        fi
+        
+        confidence=$(echo "$confidence + $album_similarity" | bc -l 2>/dev/null || echo "$confidence")
+    fi
+    
+    # Year matching (weight: 1.0)
+    if [[ -n "$local_year" && -n "$discogs_year" ]]; then
+        if [[ "$local_year" == "$discogs_year" ]]; then
+            confidence=$(echo "$confidence + 1.0" | bc -l 2>/dev/null || echo "$confidence")
+        elif [[ $((local_year - discogs_year)) -ge -2 && $((local_year - discogs_year)) -le 2 ]]; then
+            confidence=$(echo "$confidence + 0.5" | bc -l 2>/dev/null || echo "$confidence")
+        fi
+    fi
+    
+    # Normalize to 0.0-1.0 range
+    local final_confidence=$(echo "scale=2; $confidence / $max_score" | bc -l 2>/dev/null || echo "0.00")
+    
+    echo "$final_confidence"
+}
+
+# Main function to enrich metadata with Discogs data
+enrich_metadata_with_discogs() {
+    local album_artist="$1"
+    local album_title="$2"
+    local album_year="$3"
+    
+    if [[ $DISCOGS_ENABLED -eq 0 ]]; then
+        echo "{}"
+        return 0
+    fi
+    
+    log $LOG_DEBUG "Enriching metadata with Discogs for: $album_artist - $album_title ($album_year)"
+    
+    # Search for releases
+    local search_results
+    search_results=$(discogs_search_releases "$album_artist" "$album_title" "$album_year")
+    
+    if [[ -z "$search_results" ]]; then
+        log $LOG_DEBUG "No Discogs search results found"
+        echo "{}"
+        return 0
+    fi
+    
+    # Get the first (most relevant) result
+    local first_result_id=$(echo "$search_results" | jq -r '.results[0].id // empty' 2>/dev/null)
+    
+    if [[ -z "$first_result_id" ]]; then
+        log $LOG_DEBUG "No valid Discogs release ID found in search results"
+        echo "{}"
+        return 0
+    fi
+    
+    # Get detailed release information
+    local release_details
+    release_details=$(discogs_get_release "$first_result_id")
+    
+    if [[ -z "$release_details" ]]; then
+        log $LOG_DEBUG "Could not retrieve Discogs release details for ID: $first_result_id"
+        echo "{}"
+        return 0
+    fi
+    
+    # Extract enhanced metadata
+    local enhanced_metadata
+    enhanced_metadata=$(extract_discogs_metadata "$release_details")
+    
+    if [[ -z "$enhanced_metadata" ]]; then
+        log $LOG_DEBUG "Could not extract enhanced metadata from Discogs release"
+        echo "{}"
+        return 0
+    fi
+    
+    # Calculate confidence score
+    local confidence
+    confidence=$(calculate_discogs_confidence "$album_artist" "$album_title" "$album_year" "$enhanced_metadata")
+    
+    # Add confidence score to metadata
+    enhanced_metadata=$(echo "$enhanced_metadata" | jq --arg conf "$confidence" '. + {confidence: ($conf | tonumber)}')
+    
+    log $LOG_DEBUG "Discogs metadata enrichment completed with confidence: $confidence"
+    
+    echo "$enhanced_metadata"
 }
 
 # --- State Database Functions for Incremental Processing ---
@@ -1309,23 +1749,98 @@ process_album_directory() {
     fi
     log $LOG_DEBUG "Determined Album Quality: $album_quality"
 
+    # --- Enrich Metadata with Discogs ---
+    local discogs_metadata="{}"
+    local catalog_number=""
+    local enhanced_artist="$album_artist"
+    local enhanced_title="$album_title"
+    local enhanced_year="$album_year"
+    
+    if [[ $DISCOGS_ENABLED -eq 1 ]]; then
+        log $LOG_DEBUG "Attempting to enrich metadata with Discogs for: $album_artist - $album_title"
+        discogs_metadata=$(enrich_metadata_with_discogs "$album_artist" "$album_title" "$album_year")
+        
+        if [[ "$discogs_metadata" != "{}" ]]; then
+            local confidence=$(echo "$discogs_metadata" | jq -r '.confidence // 0.0')
+            local confidence_threshold=$(echo "$DISCOGS_CONFIDENCE_THRESHOLD" | bc -l 2>/dev/null || echo "0.7")
+            
+            log $LOG_DEBUG "Discogs metadata confidence: $confidence (threshold: $confidence_threshold)"
+            
+            # Use Discogs metadata if confidence is above threshold
+            if [[ $(echo "$confidence >= $confidence_threshold" | bc -l 2>/dev/null) -eq 1 ]]; then
+                log $LOG_INFO "Using Discogs metadata (high confidence: $confidence)"
+                
+                local discogs_artist=$(echo "$discogs_metadata" | jq -r '.artist // empty')
+                local discogs_title=$(echo "$discogs_metadata" | jq -r '.title // empty')
+                local discogs_year=$(echo "$discogs_metadata" | jq -r '.year // empty')
+                
+                # Override with Discogs data if available and non-empty
+                if [[ -n "$discogs_artist" ]]; then
+                    enhanced_artist="$discogs_artist"
+                    log $LOG_DEBUG "Enhanced artist from Discogs: $enhanced_artist"
+                fi
+                
+                if [[ -n "$discogs_title" ]]; then
+                    enhanced_title="$discogs_title"
+                    log $LOG_DEBUG "Enhanced title from Discogs: $enhanced_title"
+                fi
+                
+                if [[ -n "$discogs_year" ]]; then
+                    enhanced_year="$discogs_year"
+                    log $LOG_DEBUG "Enhanced year from Discogs: $enhanced_year"
+                fi
+                
+                # Extract catalog number if enabled
+                if [[ $DISCOGS_CATALOG_NUMBERS -eq 1 ]]; then
+                    catalog_number=$(echo "$discogs_metadata" | jq -r '.catalog_number // empty')
+                    if [[ -n "$catalog_number" ]]; then
+                        log $LOG_DEBUG "Found catalog number from Discogs: $catalog_number"
+                    fi
+                fi
+                
+                # Log additional metadata for electronic music enthusiasts
+                local label=$(echo "$discogs_metadata" | jq -r '.label // empty')
+                local genre=$(echo "$discogs_metadata" | jq -r '.genre // empty')
+                local style=$(echo "$discogs_metadata" | jq -r '.style // empty')
+                local remix_artists=$(echo "$discogs_metadata" | jq -r '.remix_artists // empty')
+                local label_series=$(echo "$discogs_metadata" | jq -r '.label_series // empty')
+                
+                [[ -n "$label" ]] && log $LOG_DEBUG "Discogs label: $label"
+                [[ -n "$genre" ]] && log $LOG_DEBUG "Discogs genre: $genre"
+                [[ -n "$style" ]] && log $LOG_DEBUG "Discogs style: $style"
+                [[ -n "$remix_artists" ]] && log $LOG_DEBUG "Discogs remix artists: $remix_artists"
+                [[ -n "$label_series" ]] && log $LOG_DEBUG "Discogs label series: $label_series"
+            else
+                log $LOG_DEBUG "Discogs metadata available but confidence too low ($confidence < $confidence_threshold)"
+            fi
+        else
+            log $LOG_DEBUG "No Discogs metadata found for this release"
+        fi
+    fi
+
     # --- Construct New Path ---
     # Use profile-specific organization pattern if available
-    
-    local catalog_number=""  # TODO: Extract from metadata if available
     local proposed_album_path
     
     if [[ -n "$PROFILE_NAME" ]] && command -v apply_profile_organization >/dev/null 2>&1; then
-        proposed_album_path=$(apply_profile_organization "$album_artist" "$album_title" "$album_year" "$album_quality" "$catalog_number")
+        proposed_album_path=$(apply_profile_organization "$enhanced_artist" "$enhanced_title" "$enhanced_year" "$album_quality" "$catalog_number")
     else
-        # Default organization pattern
-        local sanitized_album_artist=$(sanitize_filename "$album_artist")
-        local sanitized_album_title=$(sanitize_filename "$album_title")
+        # Default organization pattern with enhanced metadata
+        local sanitized_album_artist=$(sanitize_filename "$enhanced_artist")
+        local sanitized_album_title=$(sanitize_filename "$enhanced_title")
         local sanitized_album_year=""
-        if [[ -n "$album_year" ]]; then
-            sanitized_album_year=" ($album_year)"
+        if [[ -n "$enhanced_year" ]]; then
+            sanitized_album_year=" ($enhanced_year)"
         fi
-        local new_album_dir_name="${sanitized_album_title}${sanitized_album_year}"
+        
+        # Include catalog number in directory name if available
+        local catalog_suffix=""
+        if [[ -n "$catalog_number" ]]; then
+            local sanitized_catalog=$(sanitize_filename "$catalog_number")
+            catalog_suffix=" [$sanitized_catalog]"
+        fi
+        
+        local new_album_dir_name="${sanitized_album_title}${sanitized_album_year}${catalog_suffix}"
         proposed_album_path="${DEST_DIR}/${album_quality}/${sanitized_album_artist}/${new_album_dir_name}"
     fi
 
@@ -1473,6 +1988,36 @@ parse_arguments() {
                 LOCK_FILE="$2"
                 shift 2
                 ;;
+            --discogs)
+                DISCOGS_ENABLED=1
+                shift
+                ;;
+            --no-discogs)
+                DISCOGS_ENABLED=0
+                shift
+                ;;
+            --discogs-token)
+                DISCOGS_USER_TOKEN="$2"
+                DISCOGS_ENABLED=1
+                shift 2
+                ;;
+            --discogs-key)
+                DISCOGS_CONSUMER_KEY="$2"
+                DISCOGS_ENABLED=1
+                shift 2
+                ;;
+            --discogs-secret)
+                DISCOGS_CONSUMER_SECRET="$2"
+                shift 2
+                ;;
+            --discogs-cache-dir)
+                DISCOGS_CACHE_DIR="$2"
+                shift 2
+                ;;
+            --discogs-confidence)
+                DISCOGS_CONFIDENCE_THRESHOLD="$2"
+                shift 2
+                ;;
             -h|--help)
                 show_help
                 exit 0
@@ -1521,6 +2066,15 @@ show_help() {
     echo "  --notify-email EMAIL    Send email notifications to EMAIL"
     echo "  --notify-webhook URL    Send webhook notifications to URL"
     echo "  --lock-file FILE        Path to lock file (prevents concurrent runs)"
+    echo ""
+    echo "Discogs API Integration:"
+    echo "  --discogs               Enable Discogs metadata enrichment"
+    echo "  --no-discogs            Disable Discogs metadata enrichment"
+    echo "  --discogs-token TOKEN   Discogs user token for authentication"
+    echo "  --discogs-key KEY       Discogs consumer key for authentication"
+    echo "  --discogs-secret SECRET Discogs consumer secret"
+    echo "  --discogs-cache-dir DIR Directory for API response cache"
+    echo "  --discogs-confidence N  Confidence threshold for accepting metadata (0.0-1.0)"
     echo ""
     echo "  -h, --help              Display this help message"
     echo ""
@@ -1607,6 +2161,14 @@ main() {
         fi
         log $LOG_INFO "  Duplicates Database: $DUPLICATES_DB"
         init_duplicates_db "$DUPLICATES_DB"
+    fi
+
+    # Initialize Discogs API integration
+    if [[ $DISCOGS_ENABLED -eq 1 ]]; then
+        log $LOG_INFO "  Discogs Integration: Enabled"
+        init_discogs
+    else
+        log $LOG_DEBUG "  Discogs Integration: Disabled"
     fi
 
     # Create timestamped unsorted directory for this run
