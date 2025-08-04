@@ -1,0 +1,45 @@
+# Logrotate configuration for ordr.fm
+/var/log/ordr.fm/*.log {
+    # Rotate daily
+    daily
+    
+    # Keep 30 days of logs
+    rotate 30
+    
+    # Compress old logs
+    compress
+    delaycompress
+    
+    # Don't rotate if empty
+    notifempty
+    
+    # Don't fail if log file is missing
+    missingok
+    
+    # Create new log file with correct permissions
+    create 644 plex plex
+    
+    # Use date as suffix
+    dateext
+    dateformat -%Y%m%d
+    
+    # Run after rotation
+    postrotate
+        # Send SIGUSR1 to running ordr.fm processes to reopen log files
+        /usr/bin/pkill -SIGUSR1 -f "ordr.fm.sh" || true
+    endscript
+}
+
+# Rotate state and duplicate databases weekly
+/var/log/ordr.fm/*.db {
+    weekly
+    rotate 4
+    compress
+    notifempty
+    missingok
+    create 644 plex plex
+    dateext
+    
+    # Only rotate if not currently in use
+    copytruncate
+}

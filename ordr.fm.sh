@@ -31,6 +31,14 @@ FORCE_REPROCESS_DIR="" # Directory to force reprocess
 FIND_DUPLICATES=0 # Flag to enable duplicate detection analysis mode
 RESOLVE_DUPLICATES=0 # Flag to enable automatic duplicate resolution
 DUPLICATES_DB="" # Path to duplicates database
+PROFILE_NAME="" # Active configuration profile name
+PROFILES_DIR="" # Directory containing profile configurations
+LIST_PROFILES=0 # Flag to list available profiles
+BATCH_MODE=0 # Flag for fully automated batch operation
+VALIDATE_CONFIG=0 # Flag to validate configuration and exit
+NOTIFY_EMAIL="" # Email address for notifications
+NOTIFY_WEBHOOK="" # Webhook URL for notifications
+LOCK_FILE="" # Path to lock file for concurrent run prevention
 
 # Define log levels
 readonly LOG_QUIET=0
@@ -651,6 +659,503 @@ resolve_duplicates() {
     return 0
 }
 
+# --- Configuration Profile Functions ---
+
+# Load a configuration profile
+load_profile() {
+    local profile_name="$1"
+    local profiles_dir="$2"
+    local profile_file="$profiles_dir/$profile_name.conf"
+    
+    if [[ ! -f "$profile_file" ]]; then
+        log $LOG_ERROR "Profile '$profile_name' not found at: $profile_file"
+        return 1
+    fi
+    
+    log $LOG_INFO "Loading profile: $profile_name"
+    log $LOG_DEBUG "Profile file: $profile_file"
+    
+    # Source the profile configuration
+    source "$profile_file"
+    
+    # Set profile-specific variables
+    PROFILE_NAME="$profile_name"
+    
+    log $LOG_DEBUG "Profile '$profile_name' loaded successfully"
+    return 0
+}
+
+# List available configuration profiles
+list_profiles() {
+    local profiles_dir="$1"
+    
+    if [[ ! -d "$profiles_dir" ]]; then
+        echo "No profiles directory found at: $profiles_dir"
+        echo "Create profiles by adding .conf files to this directory."
+        return 1
+    fi
+    
+    echo "Available Configuration Profiles:"
+    echo "=================================="
+    
+    local profile_count=0
+    for profile_file in "$profiles_dir"/*.conf; do
+        if [[ -f "$profile_file" ]]; then
+            local profile_name=$(basename "$profile_file" .conf)
+            local description=""
+            
+            # Try to extract description from profile file
+            if grep -q "^# DESCRIPTION:" "$profile_file"; then
+                description=$(grep "^# DESCRIPTION:" "$profile_file" | cut -d: -f2- | sed 's/^ *//')
+            fi
+            
+            echo "  $profile_name${description:+ - $description}"
+            profile_count=$((profile_count + 1))
+        fi
+    done
+    
+    if [[ $profile_count -eq 0 ]]; then
+        echo "  No profiles found in $profiles_dir"
+        echo ""
+        echo "Create a profile by copying ordr.fm.conf to $profiles_dir/<name>.conf"
+    else
+        echo ""
+        echo "Usage: ./ordr.fm.sh --profile <name> [other options]"
+    fi
+    
+    return 0
+}
+
+# Initialize default profiles directory and create sample profiles
+init_profiles() {
+    local profiles_dir="$1"
+    
+    mkdir -p "$profiles_dir" || {
+        log $LOG_ERROR "Could not create profiles directory: $profiles_dir"
+        return 1
+    }
+    
+    # Create default profile if it doesn't exist
+    if [[ ! -f "$profiles_dir/default.conf" ]]; then
+        log $LOG_INFO "Creating default profile: $profiles_dir/default.conf"
+        cp "$CONFIG_FILE" "$profiles_dir/default.conf"
+    fi
+    
+    # Create sample profiles if they don't exist
+    create_sample_profiles "$profiles_dir"
+    
+    return 0
+}
+
+# Create sample configuration profiles
+create_sample_profiles() {
+    local profiles_dir="$1"
+    
+    # Vinyl rips profile
+    if [[ ! -f "$profiles_dir/vinyl.conf" ]]; then
+        cat > "$profiles_dir/vinyl.conf" <<'EOF'
+# DESCRIPTION: Configuration for vinyl rip organization
+# Profile optimized for vinyl rips and analog sources
+
+# Source and destination directories
+SOURCE_DIR="/home/plex/Music/Vinyl Rips"
+DEST_DIR="/home/plex/Music/Vinyl"
+UNSORTED_DIR_BASE="/home/plex/Music/Vinyl/Unsorted"
+
+# Vinyl-specific settings
+LOG_FILE="ordr.fm.vinyl.log"
+VERBOSITY=1
+
+# Incremental processing (recommended for large vinyl collections)
+INCREMENTAL_MODE=1
+STATE_DB="ordr.fm.vinyl.state.db"
+
+# Duplicate detection (common with vinyl rips)
+FIND_DUPLICATES=0
+DUPLICATES_DB="ordr.fm.vinyl.duplicates.db"
+
+# Profile-specific organization pattern
+PROFILE_ORGANIZATION_PATTERN="{quality}/{artist}/{album_year} - {album}"
+PROFILE_TRACK_PATTERN="{disc}{track_num} - {title}"
+
+# Quality classification for vinyl (more forgiving of artifacts)
+PROFILE_QUALITY_VINYL_MODE=1
+PROFILE_ACCEPT_MIXED_QUALITY=1
+EOF
+        log $LOG_DEBUG "Created vinyl profile: $profiles_dir/vinyl.conf"
+    fi
+    
+    # Digital purchases profile
+    if [[ ! -f "$profiles_dir/purchases.conf" ]]; then
+        cat > "$profiles_dir/purchases.conf" <<'EOF'
+# DESCRIPTION: Configuration for digital music purchases
+# Profile optimized for purchased digital music (Bandcamp, iTunes, etc.)
+
+# Source and destination directories
+SOURCE_DIR="/home/plex/Music/Downloads/Purchases"
+DEST_DIR="/home/plex/Music/Digital"
+UNSORTED_DIR_BASE="/home/plex/Music/Digital/Unsorted"
+
+# Digital purchases settings
+LOG_FILE="ordr.fm.purchases.log"
+VERBOSITY=1
+
+# Incremental processing
+INCREMENTAL_MODE=1
+STATE_DB="ordr.fm.purchases.state.db"
+
+# Duplicate detection (less common but still useful)
+FIND_DUPLICATES=0
+DUPLICATES_DB="ordr.fm.purchases.duplicates.db"
+
+# Profile-specific organization pattern (include catalog numbers)
+PROFILE_ORGANIZATION_PATTERN="{quality}/{artist}/{album_year} - {album}{catalog}"
+PROFILE_TRACK_PATTERN="{track_num:02d} - {title}"
+
+# Quality classification for digital purchases (strict quality requirements)
+PROFILE_QUALITY_STRICT_MODE=1
+PROFILE_ACCEPT_MIXED_QUALITY=0
+PROFILE_REQUIRE_LOSSLESS=0
+EOF
+        log $LOG_DEBUG "Created purchases profile: $profiles_dir/purchases.conf"
+    fi
+    
+    # Downloads/rips profile
+    if [[ ! -f "$profiles_dir/downloads.conf" ]]; then
+        cat > "$profiles_dir/downloads.conf" <<'EOF'
+# DESCRIPTION: Configuration for various downloads and rips
+# Profile for mixed sources (YouTube rips, SoundCloud, etc.)
+
+# Source and destination directories
+SOURCE_DIR="/home/plex/Music/Downloads/Mixed"
+DEST_DIR="/home/plex/Music/Downloads"
+UNSORTED_DIR_BASE="/home/plex/Music/Downloads/Unsorted"
+
+# Downloads settings
+LOG_FILE="ordr.fm.downloads.log"
+VERBOSITY=2
+
+# Incremental processing
+INCREMENTAL_MODE=1
+STATE_DB="ordr.fm.downloads.state.db"
+
+# Duplicate detection (very important for downloads)
+FIND_DUPLICATES=1
+DUPLICATES_DB="ordr.fm.downloads.duplicates.db"
+
+# Profile-specific organization pattern (simplified for varied quality)
+PROFILE_ORGANIZATION_PATTERN="{artist}/{album}{album_year_suffix}"
+PROFILE_TRACK_PATTERN="{track_num} - {title}"
+
+# Quality classification for downloads (very permissive)
+PROFILE_QUALITY_PERMISSIVE_MODE=1
+PROFILE_ACCEPT_MIXED_QUALITY=1
+PROFILE_ACCEPT_LOW_QUALITY=1
+EOF
+        log $LOG_DEBUG "Created downloads profile: $profiles_dir/downloads.conf"
+    fi
+}
+
+# Apply profile-specific directory organization pattern
+apply_profile_organization() {
+    local album_artist="$1"
+    local album_title="$2" 
+    local album_year="$3"
+    local album_quality="$4"
+    local catalog_number="$5"
+    
+    # Use profile-specific pattern if available, otherwise use default
+    local pattern="${PROFILE_ORGANIZATION_PATTERN:-{quality}/{artist}/{album}{album_year_suffix}}"
+    
+    # Sanitize inputs
+    local clean_artist=$(sanitize_filename "$album_artist")
+    local clean_title=$(sanitize_filename "$album_title")
+    local clean_quality=$(sanitize_filename "$album_quality")
+    local clean_catalog=$(sanitize_filename "$catalog_number")
+    
+    # Build year suffix
+    local year_suffix=""
+    if [[ -n "$album_year" ]]; then
+        year_suffix=" ($album_year)"
+    fi
+    
+    # Build catalog suffix
+    local catalog_suffix=""
+    if [[ -n "$catalog_number" ]]; then
+        catalog_suffix=" [$clean_catalog]"
+    fi
+    
+    # Apply pattern substitutions
+    local result="$pattern"
+    result="${result//\{quality\}/$clean_quality}"
+    result="${result//\{artist\}/$clean_artist}"
+    result="${result//\{album\}/$clean_title}"
+    result="${result//\{album_year\}/$album_year}"
+    result="${result//\{album_year_suffix\}/$year_suffix}"
+    result="${result//\{catalog\}/$catalog_suffix}"
+    
+    echo "$DEST_DIR/$result"
+}
+
+# Apply profile-specific track naming pattern
+apply_profile_track_naming() {
+    local track_number="$1"
+    local track_title="$2"
+    local disc_number="$3"
+    local file_extension="$4"
+    
+    # Use profile-specific pattern if available, otherwise use default
+    local pattern="${PROFILE_TRACK_PATTERN:-{track_num:02d} - {title}}"
+    
+    # Sanitize inputs
+    local clean_title=$(sanitize_filename "$track_title")
+    
+    # Format track number
+    local formatted_track=""
+    if [[ -n "$track_number" ]]; then
+        if [[ "$pattern" == *"{track_num:02d}"* ]]; then
+            formatted_track=$(printf "%02d" "$track_number")
+        else
+            formatted_track="$track_number"
+        fi
+    fi
+    
+    # Format disc prefix
+    local disc_prefix=""
+    if [[ -n "$disc_number" && "$disc_number" != "1" ]]; then
+        disc_prefix="D${disc_number}-"
+    fi
+    
+    # Apply pattern substitutions
+    local result="$pattern"
+    result="${result//\{track_num:02d\}/$formatted_track}"
+    result="${result//\{track_num\}/$track_number}"
+    result="${result//\{title\}/$clean_title}"
+    result="${result//\{disc\}/$disc_prefix}"
+    
+    echo "$result.$file_extension"
+}
+
+# --- Automation and Batch Processing Functions ---
+
+# Acquire lock file to prevent concurrent runs
+acquire_lock() {
+    local lock_file="$1"
+    local max_wait="${2:-300}" # Default 5 minutes
+    local wait_time=0
+    
+    # Create lock directory if it doesn't exist
+    mkdir -p "$(dirname "$lock_file")" 2>/dev/null
+    
+    while [[ -f "$lock_file" ]]; do
+        if [[ $wait_time -ge $max_wait ]]; then
+            log $LOG_ERROR "Could not acquire lock file: $lock_file (timeout after ${max_wait}s)"
+            return 1
+        fi
+        
+        # Check if the process holding the lock is still running
+        if [[ -f "$lock_file" ]]; then
+            local lock_pid=$(cat "$lock_file" 2>/dev/null)
+            if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
+                log $LOG_WARNING "Removing stale lock file: $lock_file (PID $lock_pid no longer running)"
+                rm -f "$lock_file"
+                break
+            fi
+        fi
+        
+        log $LOG_INFO "Waiting for lock file: $lock_file (${wait_time}s elapsed)"
+        sleep 5
+        wait_time=$((wait_time + 5))
+    done
+    
+    # Create lock file with current PID
+    echo $$ > "$lock_file" || {
+        log $LOG_ERROR "Could not create lock file: $lock_file"
+        return 1
+    }
+    
+    log $LOG_DEBUG "Acquired lock file: $lock_file (PID $$)"
+    return 0
+}
+
+# Release lock file
+release_lock() {
+    local lock_file="$1"
+    
+    if [[ -f "$lock_file" ]]; then
+        local lock_pid=$(cat "$lock_file" 2>/dev/null)
+        if [[ "$lock_pid" == "$$" ]]; then
+            rm -f "$lock_file"
+            log $LOG_DEBUG "Released lock file: $lock_file"
+        else
+            log $LOG_WARNING "Lock file PID mismatch: expected $$, found $lock_pid"
+        fi
+    fi
+}
+
+# Validate configuration before processing
+validate_configuration() {
+    local errors=0
+    
+    log $LOG_INFO "Validating configuration..."
+    
+    # Check required directories
+    if [[ ! -d "$SOURCE_DIR" ]]; then
+        log $LOG_ERROR "Source directory does not exist: $SOURCE_DIR"
+        errors=$((errors + 1))
+    fi
+    
+    # Check if destination directory parent exists
+    if [[ ! -d "$(dirname "$DEST_DIR")" ]]; then
+        log $LOG_ERROR "Destination directory parent does not exist: $(dirname "$DEST_DIR")"
+        errors=$((errors + 1))
+    fi
+    
+    # Check if unsorted directory parent exists
+    if [[ ! -d "$(dirname "$UNSORTED_DIR_BASE")" ]]; then
+        log $LOG_ERROR "Unsorted directory parent does not exist: $(dirname "$UNSORTED_DIR_BASE")"
+        errors=$((errors + 1))
+    fi
+    
+    # Check log file directory
+    if [[ ! -d "$(dirname "$LOG_FILE")" ]]; then
+        if ! mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null; then
+            log $LOG_ERROR "Cannot create log directory: $(dirname "$LOG_FILE")"
+            errors=$((errors + 1))
+        fi
+    fi
+    
+    # Check write permissions
+    if [[ ! -w "$(dirname "$LOG_FILE")" ]]; then
+        log $LOG_ERROR "No write permission for log directory: $(dirname "$LOG_FILE")"
+        errors=$((errors + 1))
+    fi
+    
+    # Check profile configuration if specified
+    if [[ -n "$PROFILE_NAME" ]]; then
+        local profile_file="$PROFILES_DIR/$PROFILE_NAME.conf"
+        if [[ ! -f "$profile_file" ]]; then
+            log $LOG_ERROR "Profile configuration file not found: $profile_file"
+            errors=$((errors + 1))
+        fi
+    fi
+    
+    # Check notification settings
+    if [[ -n "$NOTIFY_EMAIL" ]]; then
+        if ! command -v mail >/dev/null 2>&1 && ! command -v sendmail >/dev/null 2>&1; then
+            log $LOG_WARNING "Email notification requested but no mail command found"
+        fi
+    fi
+    
+    if [[ -n "$NOTIFY_WEBHOOK" ]]; then
+        if ! command -v curl >/dev/null 2>&1; then
+            log $LOG_WARNING "Webhook notification requested but curl not found"
+        fi
+    fi
+    
+    if [[ $errors -eq 0 ]]; then
+        log $LOG_INFO "Configuration validation passed"
+        return 0
+    else
+        log $LOG_ERROR "Configuration validation failed with $errors error(s)"
+        return 1
+    fi
+}
+
+# Send notification about processing results
+send_notification() {
+    local subject="$1"
+    local message="$2"
+    local status="$3" # success, warning, error
+    
+    # Email notification
+    if [[ -n "$NOTIFY_EMAIL" ]]; then
+        if command -v mail >/dev/null 2>&1; then
+            echo "$message" | mail -s "$subject" "$NOTIFY_EMAIL"
+            log $LOG_DEBUG "Email notification sent to: $NOTIFY_EMAIL"
+        elif command -v sendmail >/dev/null 2>&1; then
+            {
+                echo "To: $NOTIFY_EMAIL"
+                echo "Subject: $subject"
+                echo ""
+                echo "$message"
+            } | sendmail "$NOTIFY_EMAIL"
+            log $LOG_DEBUG "Email notification sent via sendmail to: $NOTIFY_EMAIL"
+        else
+            log $LOG_WARNING "Could not send email notification (no mail command found)"
+        fi
+    fi
+    
+    # Webhook notification
+    if [[ -n "$NOTIFY_WEBHOOK" ]] && command -v curl >/dev/null 2>&1; then
+        local webhook_payload=$(cat <<EOF
+{
+    "text": "$subject",
+    "attachments": [{
+        "color": "$([[ "$status" == "success" ]] && echo "good" || [[ "$status" == "warning" ]] && echo "warning" || echo "danger")",
+        "text": "$message",
+        "ts": $(date +%s)
+    }]
+}
+EOF
+)
+        
+        if curl -s -X POST -H "Content-Type: application/json" -d "$webhook_payload" "$NOTIFY_WEBHOOK" >/dev/null; then
+            log $LOG_DEBUG "Webhook notification sent to: $NOTIFY_WEBHOOK"
+        else
+            log $LOG_WARNING "Failed to send webhook notification"
+        fi
+    fi
+}
+
+# Setup signal handlers for graceful shutdown
+setup_signal_handlers() {
+    trap 'handle_signal SIGTERM' TERM
+    trap 'handle_signal SIGINT' INT
+    trap 'handle_signal SIGQUIT' QUIT
+}
+
+# Handle shutdown signals
+handle_signal() {
+    local signal="$1"
+    log $LOG_INFO "Received $signal signal, shutting down gracefully..."
+    
+    # Release lock file if we have one
+    if [[ -n "$LOCK_FILE" ]]; then
+        release_lock "$LOCK_FILE"
+    fi
+    
+    # Send notification about early termination
+    if [[ $BATCH_MODE -eq 1 ]]; then
+        send_notification "ordr.fm Process Terminated" "Processing was interrupted by $signal signal" "warning"
+    fi
+    
+    log $LOG_INFO "--- ordr.fm Script Terminated ---"
+    exit 130
+}
+
+# Standard exit codes for automation
+exit_with_code() {
+    local code="$1"
+    local message="$2"
+    
+    # Release lock file if we have one
+    if [[ -n "$LOCK_FILE" ]]; then
+        release_lock "$LOCK_FILE"
+    fi
+    
+    case "$code" in
+        0) log $LOG_INFO "Script completed successfully: $message" ;;
+        1) log $LOG_ERROR "Script failed with errors: $message" ;;
+        2) log $LOG_ERROR "Configuration error: $message" ;;
+        3) log $LOG_ERROR "Permission error: $message" ;;
+        4) log $LOG_ERROR "Dependency error: $message" ;;
+        *) log $LOG_ERROR "Script failed with unknown error code $code: $message" ;;
+    esac
+    
+    exit "$code"
+}
+
 # move_to_unsorted: Moves an album directory to the unsorted area.
 # Arguments:
 #   $1: The absolute path to the album directory to move.
@@ -805,17 +1310,24 @@ process_album_directory() {
     log $LOG_DEBUG "Determined Album Quality: $album_quality"
 
     # --- Construct New Path ---
-    # Referencing SPECIFICATIONS.md: "Naming Conventions" -> "Directory Structure"
-
-    local sanitized_album_artist=$(sanitize_filename "$album_artist")
-    local sanitized_album_title=$(sanitize_filename "$album_title")
-    local sanitized_album_year=""
-    if [[ -n "$album_year" ]]; then
-        sanitized_album_year=" ($album_year)"
+    # Use profile-specific organization pattern if available
+    
+    local catalog_number=""  # TODO: Extract from metadata if available
+    local proposed_album_path
+    
+    if [[ -n "$PROFILE_NAME" ]] && command -v apply_profile_organization >/dev/null 2>&1; then
+        proposed_album_path=$(apply_profile_organization "$album_artist" "$album_title" "$album_year" "$album_quality" "$catalog_number")
+    else
+        # Default organization pattern
+        local sanitized_album_artist=$(sanitize_filename "$album_artist")
+        local sanitized_album_title=$(sanitize_filename "$album_title")
+        local sanitized_album_year=""
+        if [[ -n "$album_year" ]]; then
+            sanitized_album_year=" ($album_year)"
+        fi
+        local new_album_dir_name="${sanitized_album_title}${sanitized_album_year}"
+        proposed_album_path="${DEST_DIR}/${album_quality}/${sanitized_album_artist}/${new_album_dir_name}"
     fi
-
-    local new_album_dir_name="${sanitized_album_title}${sanitized_album_year}"
-    local proposed_album_path="${DEST_DIR}/${album_quality}/${sanitized_album_artist}/${new_album_dir_name}"
 
     log $LOG_INFO "Proposed new album path for '$album_dir': $proposed_album_path"
 
@@ -833,18 +1345,25 @@ process_album_directory() {
             local track_ext=$(echo "$track_json" | jq -r '.FileTypeExtension // empty')
             local original_filename=$(echo "$track_json" | jq -r '.FileName // empty')
 
-            local sanitized_track_title=$(sanitize_filename "$track_title")
-            local formatted_track_number=""
-            if [[ -n "$track_number" ]]; then
-                formatted_track_number=$(printf "%02d - " "$track_number")
+            # Use profile-specific track naming if available
+            local new_track_filename
+            if [[ -n "$PROFILE_NAME" ]] && command -v apply_profile_track_naming >/dev/null 2>&1; then
+                new_track_filename=$(apply_profile_track_naming "$track_number" "$track_title" "$track_disc_number" "$track_ext")
+            else
+                # Default track naming pattern
+                local sanitized_track_title=$(sanitize_filename "$track_title")
+                local formatted_track_number=""
+                if [[ -n "$track_number" ]]; then
+                    formatted_track_number=$(printf "%02d - " "$track_number")
+                fi
+                new_track_filename="${formatted_track_number}${sanitized_track_title}.${track_ext}"
             fi
 
+            # Handle disc subdirectories
             local formatted_disc_number=""
-            if [[ -n "$track_disc_number" ]]; then
+            if [[ -n "$track_disc_number" && "$track_disc_number" != "1" ]]; then
                 formatted_disc_number="Disc $(sanitize_filename "$track_disc_number")"
             fi
-
-            local new_track_filename="${formatted_track_number}${sanitized_track_title}.${track_ext}"
             local proposed_track_path="${proposed_album_path}"
             if [[ -n "$formatted_disc_number" ]]; then
                 proposed_track_path="${proposed_track_path}/${formatted_disc_number}"
@@ -921,6 +1440,39 @@ parse_arguments() {
                 DUPLICATES_DB="$2"
                 shift 2
                 ;;
+            --profile)
+                PROFILE_NAME="$2"
+                shift 2
+                ;;
+            --list-profiles)
+                LIST_PROFILES=1
+                shift
+                ;;
+            --profiles-dir)
+                PROFILES_DIR="$2"
+                shift 2
+                ;;
+            --batch)
+                BATCH_MODE=1
+                VERBOSITY=$LOG_QUIET  # Reduce output in batch mode
+                shift
+                ;;
+            --validate-config)
+                VALIDATE_CONFIG=1
+                shift
+                ;;
+            --notify-email)
+                NOTIFY_EMAIL="$2"
+                shift 2
+                ;;
+            --notify-webhook)
+                NOTIFY_WEBHOOK="$2"
+                shift 2
+                ;;
+            --lock-file)
+                LOCK_FILE="$2"
+                shift 2
+                ;;
             -h|--help)
                 show_help
                 exit 0
@@ -958,6 +1510,18 @@ show_help() {
     echo "  --resolve-duplicates    Automatically resolve duplicates (remove lower quality)"
     echo "  --duplicates-db FILE    Path to duplicates database (default: ordr.fm.duplicates.db)"
     echo ""
+    echo "Configuration Profiles:"
+    echo "  --profile NAME          Use configuration profile NAME"
+    echo "  --list-profiles         List available configuration profiles"
+    echo "  --profiles-dir DIR      Directory containing profile configurations"
+    echo ""
+    echo "Automation & Batch Processing:"
+    echo "  --batch                 Enable batch mode (fully automated, minimal output)"
+    echo "  --validate-config       Validate configuration and exit"
+    echo "  --notify-email EMAIL    Send email notifications to EMAIL"
+    echo "  --notify-webhook URL    Send webhook notifications to URL"
+    echo "  --lock-file FILE        Path to lock file (prevents concurrent runs)"
+    echo ""
     echo "  -h, --help              Display this help message"
     echo ""
     echo "Configuration can also be set in $CONFIG_FILE"
@@ -966,6 +1530,46 @@ show_help() {
 # --- Main Logic ---
 main() {
     parse_arguments "$@"
+
+    # Handle profiles directory setup
+    if [[ -z "$PROFILES_DIR" ]]; then
+        PROFILES_DIR="$(dirname "$CONFIG_FILE")/profiles"
+    fi
+
+    # Handle --list-profiles command
+    if [[ $LIST_PROFILES -eq 1 ]]; then
+        list_profiles "$PROFILES_DIR"
+        exit 0
+    fi
+
+    # Load configuration profile if specified
+    if [[ -n "$PROFILE_NAME" ]]; then
+        # Initialize profiles directory if it doesn't exist
+        init_profiles "$PROFILES_DIR"
+        
+        # Load the specified profile
+        load_profile "$PROFILE_NAME" "$PROFILES_DIR" || exit_with_code 2 "Failed to load profile: $PROFILE_NAME"
+    fi
+
+    # Setup automation features
+    if [[ $BATCH_MODE -eq 1 ]]; then
+        setup_signal_handlers
+        
+        # Set default lock file if not specified
+        if [[ -z "$LOCK_FILE" ]]; then
+            LOCK_FILE="$(dirname "$LOG_FILE")/ordr.fm.lock"
+        fi
+        
+        # Acquire lock to prevent concurrent runs
+        acquire_lock "$LOCK_FILE" || exit_with_code 1 "Could not acquire lock file"
+    fi
+
+    # Handle --validate-config command
+    if [[ $VALIDATE_CONFIG -eq 1 ]]; then
+        validate_configuration || exit_with_code 2 "Configuration validation failed"
+        echo "Configuration validation passed"
+        exit 0
+    fi
 
     # Create log file directory if it doesn't exist
     mkdir -p "$(dirname "$LOG_FILE")" || { echo "FATAL: Could not create log directory: $(dirname "$LOG_FILE")"; exit 1; }
@@ -983,6 +1587,7 @@ main() {
     log $LOG_INFO "  Incremental Mode: $([[ $INCREMENTAL_MODE -eq 1 ]] && echo "Enabled" || echo "Disabled")"
     [[ -n "$SINCE_DATE" ]] && log $LOG_INFO "  Since Date: $SINCE_DATE"
     log $LOG_INFO "  Duplicate Detection: $([[ $FIND_DUPLICATES -eq 1 || $RESOLVE_DUPLICATES -eq 1 ]] && echo "Enabled" || echo "Disabled")"
+    [[ -n "$PROFILE_NAME" ]] && log $LOG_INFO "  Active Profile: $PROFILE_NAME"
 
     check_dependencies
 
@@ -1105,6 +1710,20 @@ main() {
     fi
 
     log $LOG_INFO "--- ordr.fm Script Finished ---"
+    
+    # Send completion notification in batch mode
+    if [[ $BATCH_MODE -eq 1 ]]; then
+        local notification_message="Processing completed successfully.
+Processed: $processed_count albums
+Skipped: $skipped_count albums
+Profile: ${PROFILE_NAME:-default}
+Duration: $SECONDS seconds"
+        
+        send_notification "ordr.fm Processing Complete" "$notification_message" "success"
+    fi
+    
+    # Exit with success code
+    exit_with_code 0 "Processing completed successfully"
 } 
 
 # Execute main function

@@ -1,0 +1,30 @@
+[Unit]
+Description=ordr.fm Music Organization Service
+After=network.target
+Wants=ordr.fm.timer
+
+[Service]
+Type=oneshot
+User=plex
+Group=plex
+WorkingDirectory=/opt/ordr.fm
+ExecStartPre=/opt/ordr.fm/ordr.fm.sh --validate-config
+ExecStart=/opt/ordr.fm/ordr.fm.sh --batch --incremental --profile vinyl
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ordr.fm
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/home/plex/Music /var/log/ordr.fm
+
+# Resource limits
+MemoryLimit=1G
+TimeoutStartSec=3600
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

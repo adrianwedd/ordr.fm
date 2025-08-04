@@ -1,0 +1,23 @@
+# Example crontab entries for ordr.fm automation
+# Edit with: crontab -e
+
+# Run vinyl processing every 6 hours with email notifications
+0 */6 * * * /opt/ordr.fm/ordr.fm.sh --batch --incremental --profile vinyl --notify-email admin@example.com
+
+# Run downloads processing daily at 2 AM with duplicate detection
+0 2 * * * /opt/ordr.fm/ordr.fm.sh --batch --incremental --profile downloads --find-duplicates
+
+# Run purchases processing weekly on Sunday at 3 AM
+0 3 * * 0 /opt/ordr.fm/ordr.fm.sh --batch --incremental --profile purchases
+
+# Validate configuration daily at 1 AM (useful for monitoring)
+0 1 * * * /opt/ordr.fm/ordr.fm.sh --validate-config --profile vinyl || echo "ordr.fm configuration validation failed" | mail -s "ordr.fm Config Error" admin@example.com
+
+# Clean up old lock files (failsafe, runs every hour)
+15 * * * * find /var/log/ordr.fm -name "*.lock" -mtime +1 -delete
+
+# Generate duplicate report weekly on Saturday at 4 AM
+0 4 * * 6 /opt/ordr.fm/ordr.fm.sh --batch --find-duplicates --notify-email admin@example.com
+
+# Example with webhook notification (Slack, Discord, etc.)
+# 0 */12 * * * /opt/ordr.fm/ordr.fm.sh --batch --incremental --profile vinyl --notify-webhook "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
