@@ -1,0 +1,57 @@
+# Sensitive configuration
+ordr.fm.conf.local
+*.conf.local
+*_local.conf
+
+# API tokens and secrets
+.env
+.env.local
+*.token
+*.secret
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+ordr.fm.log*
+test_runs/
+backup_logs/
+
+# Cache directories
+discogs_cache/
+.cache/
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*.swo
+*~
+
+# Backup markers
+.backup_marker
+
+# Test output
+test_output/
+/tmp/test_music/
+
+# Rate limiters
+discogs_rate_limiter
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor directories
+.vscode/
+.idea/
+*.sublime-*
+
+# Node modules (for visualization)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

@@ -7,19 +7,6 @@ set -e
 # Default configuration file path
 CONFIG_FILE="$(dirname "$0")/ordr.fm.conf"
 
-# Load defaults from config file if it exists
-if [[ -f "$CONFIG_FILE" ]]; then
-    source "$CONFIG_FILE"
-else
-    echo "Warning: Configuration file not found at $CONFIG_FILE. Using hardcoded defaults." >&2
-    # Hardcoded defaults if config file is missing
-    SOURCE_DIR="/home/plex/Music/Unsorted and Incomplete"
-    DEST_DIR="/home/plex/Music/sorted_music"
-    UNSORTED_DIR_BASE="/home/plex/Music/Unsorted and Incomplete/unsorted"
-    LOG_FILE="/home/plex/Music/ordr.fm.log"
-    VERBOSITY=1
-fi
-
 # --- Global Variables ---
 DRY_RUN=1 # Default to dry run for safety
 MOVE_FILES=0 # Flag to enable actual file movement
@@ -77,6 +64,33 @@ ARTIST_ALIAS_GROUPS="" # Artist alias grouping configuration
 GROUP_ARTIST_ALIASES=0 # Flag to enable alias grouping
 USE_PRIMARY_ARTIST_NAME=1 # Use primary name for aliases
 
+# --- Load Configuration Files ---
+# Load defaults from config file if it exists
+if [[ -f "$CONFIG_FILE" ]]; then
+    source "$CONFIG_FILE"
+else
+    echo "Warning: Configuration file not found at $CONFIG_FILE. Using hardcoded defaults." >&2
+    # Hardcoded defaults if config file is missing
+    SOURCE_DIR="/home/plex/Music/Unsorted and Incomplete"
+    DEST_DIR="/home/plex/Music/sorted_music"
+    UNSORTED_DIR_BASE="/home/plex/Music/Unsorted and Incomplete/unsorted"
+    LOG_FILE="/home/plex/Music/ordr.fm.log"
+    VERBOSITY=1
+fi
+
+# Load local config overrides if they exist (for sensitive data like API tokens)
+LOCAL_CONFIG_FILE="$(dirname "$0")/ordr.fm.conf.local"
+if [[ -f "$LOCAL_CONFIG_FILE" ]]; then
+    source "$LOCAL_CONFIG_FILE"
+    # Don't log the token itself for security
+    if [[ -n "$DISCOGS_USER_TOKEN" ]]; then
+        echo "Info: Loaded local configuration with Discogs token (hidden for security)" >&2
+    fi
+    # Debug artist alias configuration
+    echo "Debug: GROUP_ARTIST_ALIASES=$GROUP_ARTIST_ALIASES" >&2
+    echo "Debug: First 100 chars of ARTIST_ALIAS_GROUPS: ${ARTIST_ALIAS_GROUPS:0:100}..." >&2
+fi
+
 # Define log levels
 readonly LOG_QUIET=0
 readonly LOG_INFO=1
@@ -97,7 +111,7 @@ log() {
 
     # Write to console based on verbosity
     if [[ $VERBOSITY -ge $level ]]; then
-        echo "$message"
+        echo "$message" >&2
     fi
 }
 
@@ -942,35 +956,67 @@ get_vinyl_position() {
 resolve_artist_alias() {
     local artist_name="$1"
     
+    log $LOG_DEBUG "resolve_artist_alias called with: '$artist_name'"
+    
     if [[ $GROUP_ARTIST_ALIASES -eq 0 ]] || [[ -z "$ARTIST_ALIAS_GROUPS" ]]; then
+        log $LOG_DEBUG "Artist alias resolution disabled or no groups configured"
         echo "$artist_name"
         return
     fi
     
     # Normalize the artist name for comparison
     local normalized_input=$(echo "$artist_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
+    log $LOG_DEBUG "Normalized input: '$normalized_input'"
     
-    # Parse alias groups
-    IFS='|' read -ra GROUPS <<< "$ARTIST_ALIAS_GROUPS"
-    for group in "${GROUPS[@]}"; do
-        IFS=',' read -ra ALIASES <<< "$group"
+    # Debug what we're actually getting
+    log $LOG_DEBUG "Raw ARTIST_ALIAS_GROUPS (length ${#ARTIST_ALIAS_GROUPS}): '$ARTIST_ALIAS_GROUPS'"
+    
+    # Check if the string contains the expected content
+    if [[ "$ARTIST_ALIAS_GROUPS" == *"00110100 01010100"* ]]; then
+        log $LOG_DEBUG "String contains binary Four Tet alias"
+    else
+        log $LOG_DEBUG "WARNING: String missing binary Four Tet alias!"
+    fi
+    
+    # Parse alias groups - use awk which should handle this correctly
+    local alias_groups_array=()
+    while IFS= read -r group; do
+        alias_groups_array+=("$group")
+    done < <(echo "$ARTIST_ALIAS_GROUPS" | awk -F'|' '{for(i=1;i<=NF;i++) print $i}')
+    
+    log $LOG_DEBUG "Found ${#alias_groups_array[@]} alias groups to check"
+    if [[ ${#alias_groups_array[@]} -gt 0 ]]; then
+        log $LOG_DEBUG "First group: '${alias_groups_array[0]}'"
+        log $LOG_DEBUG "Last group: '${alias_groups_array[-1]}'"
+    fi
+    
+    for group in "${alias_groups_array[@]}"; do
+        # Split on comma using awk  
+        local current_aliases_array=()
+        while IFS= read -r alias; do
+            current_aliases_array+=("$alias")
+        done < <(echo "$group" | awk -F',' '{for(i=1;i<=NF;i++) print $i}')
+        
+        log $LOG_DEBUG "Checking group with ${#current_aliases_array[@]} aliases: first few are '${current_aliases_array[0]}' '${current_aliases_array[1]}' '${current_aliases_array[2]}'"
         
         # Check if input matches any alias in this group
-        for alias in "${ALIASES[@]}"; do
+        for alias in "${current_aliases_array[@]}"; do
             # Trim whitespace and normalize
             alias=$(echo "$alias" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
             local normalized_alias=$(echo "$alias" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
+            log $LOG_DEBUG "Comparing normalized input '$normalized_input' with normalized alias '$normalized_alias' (from '$alias')"
             
             if [[ "$normalized_input" == "$normalized_alias" ]]; then
                 if [[ $USE_PRIMARY_ARTIST_NAME -eq 1 ]]; then
                     # Return the primary (first) artist in the group
-                    local primary="${ALIASES[0]}"
+                    local primary="${current_aliases_array[0]}"
                     primary=$(echo "$primary" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-                    log $LOG_DEBUG "Resolved alias '$artist_name' to primary artist '$primary'"
+                    log $LOG_INFO "MATCH FOUND! Resolved alias '$artist_name' to primary artist '$primary'"
                     echo "$primary"
                     return
                 else
                     # Return the matched name as-is
+                    log $LOG_DEBUG "Match found but USE_PRIMARY_ARTIST_NAME=0, returning original"
                     echo "$artist_name"
                     return
                 fi
@@ -979,6 +1025,7 @@ resolve_artist_alias() {
     done
     
     # No alias match found, return original
+    log $LOG_DEBUG "No alias match found for '$artist_name'"
     echo "$artist_name"
 }
 
@@ -2508,9 +2555,14 @@ process_album_directory() {
     # Resolve artist aliases if enabled
     local resolved_artist="$album_artist"
     if [[ $GROUP_ARTIST_ALIASES -eq 1 ]]; then
+        log $LOG_DEBUG "Attempting to resolve artist alias for: '$album_artist'"
+        log $LOG_DEBUG "GROUP_ARTIST_ALIASES=$GROUP_ARTIST_ALIASES"
+        log $LOG_DEBUG "ARTIST_ALIAS_GROUPS='$ARTIST_ALIAS_GROUPS'"
         resolved_artist=$(resolve_artist_alias "$album_artist")
         if [[ "$resolved_artist" != "$album_artist" ]]; then
             log $LOG_INFO "Resolved artist alias: '$album_artist' -> '$resolved_artist'"
+        else
+            log $LOG_DEBUG "No alias resolution for '$album_artist' (returned same value)"
         fi
     fi
     
@@ -2519,8 +2571,8 @@ process_album_directory() {
     local enhanced_year="$album_year"
     
     if [[ $DISCOGS_ENABLED -eq 1 ]]; then
-        log $LOG_DEBUG "Attempting to enrich metadata with Discogs for: $album_artist - $album_title"
-        discogs_metadata=$(enrich_metadata_with_discogs "$album_artist" "$album_title" "$album_year")
+        log $LOG_DEBUG "Attempting to enrich metadata with Discogs for: $resolved_artist - $album_title (was: $album_artist)"
+        discogs_metadata=$(enrich_metadata_with_discogs "$resolved_artist" "$album_title" "$album_year")
         
         if [[ "$discogs_metadata" != "{}" ]]; then
             local confidence=$(echo "$discogs_metadata" | jq -r '.confidence // 0.0')
