@@ -1,0 +1,68 @@
+[0;34m[SAFETY][0m Performing safety checks...
+[0;34m[SAFETY][0m Checking backup status...
+[1;33m[WARN][0m No backup marker found
+[0;34m[SAFETY][0m Safety checks passed ✅
+[0;36m[TEST][0m Starting comprehensive dry-run tests
+[0;36m[TEST][0m Test 1: atom_collection
+[0;32m[INFO][0m Path: /home/plex/Music/Artists/Atom Heart
+[0;32m[INFO][0m Running ordr.fm in dry-run mode...
+Unknown option: Schmidt,Atom
+Usage: ordr.fm.sh [OPTIONS]
+Organizes music files based on metadata.
+
+Options:
+  -s, --source DIR        Source directory to scan for music (default: /home/plex/Music/Artists/Atom Heart)
+  -d, --destination DIR   Destination directory for organized music (default: /home/pi/repos/ordr.fm/test_runs/simulated_dest)
+  -u, --unsorted DIR      Base directory for unsorted/problematic music (default: /home/plex/Music/Unsorted and Incomplete/unsorted)
+  -l, --log-file FILE     Path to the log file (default: /home/pi/repos/ordr.fm/test_runs/logs/atom_collection_20250804_122219.log)
+  -v, --verbose           Enable verbose output (DEBUG level logging)
+  --move                  Execute file moves/renames (default: dry-run only)
+  --dry-run               Simulate operations without moving files (default)
+
+Incremental Processing:
+  --incremental           Enable incremental processing mode
+  --since DATE            Process only files newer than DATE (YYYY-MM-DD format)
+  --state-db FILE         Path to state database (default: ordr.fm.state.db)
+  --force-reprocess DIR   Force reprocessing of specific directory
+
+Duplicate Detection:
+  --find-duplicates       Find and report duplicate albums (analysis only)
+  --resolve-duplicates    Automatically resolve duplicates (remove lower quality)
+  --duplicates-db FILE    Path to duplicates database (default: ordr.fm.duplicates.db)
+
+Configuration Profiles:
+  --profile NAME          Use configuration profile NAME
+  --list-profiles         List available configuration profiles
+  --profiles-dir DIR      Directory containing profile configurations
+
+Automation & Batch Processing:
+  --batch                 Enable batch mode (fully automated, minimal output)
+  --validate-config       Validate configuration and exit
+  --notify-email EMAIL    Send email notifications to EMAIL
+  --notify-webhook URL    Send webhook notifications to URL
+  --lock-file FILE        Path to lock file (prevents concurrent runs)
+
+Discogs API Integration:
+  --discogs               Enable Discogs metadata enrichment
+  --no-discogs            Disable Discogs metadata enrichment
+  --discogs-token TOKEN   Discogs user token for authentication
+  --discogs-key KEY       Discogs consumer key for authentication
+  --discogs-secret SECRET Discogs consumer secret
+  --discogs-cache-dir DIR Directory for API response cache
+  --discogs-confidence N  Confidence threshold for accepting metadata (0.0-1.0)
+
+Electronic Music Organization:
+  --organization-mode MODE    Set organization mode (artist|label|series|hybrid)
+  --enable-remixes           Separate organization for remixes
+  --enable-compilations      Special handling for compilations/VA releases
+  --enable-vinyl-markers     Add vinyl side markers (A1, B2, etc.) to tracks
+  --enable-underground       Special handling for white labels/promos
+  --enable-electronic        Enable ALL electronic music features (hybrid mode)
+  --group-aliases            Enable artist alias grouping
+  --alias-groups GROUPS      Set artist alias groups (see config for format)
+
+  -h|--help              Display this help message
+
+Configuration can also be set in /home/pi/repos/ordr.fm/ordr.fm.conf
+[0;31m[ERROR][0m Test failed with error code 1
+[0;32m[INFO][0m Analyzing test results...

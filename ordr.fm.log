@@ -1,18 +1,18 @@
-[2025-08-04 11:57:09] [INFO ] --- ordr.fm Script Started ---
-[2025-08-04 11:57:09] [INFO ] Configuration:
-[2025-08-04 11:57:09] [INFO ]   Source Directory: tests/electronic_test
-[2025-08-04 11:57:09] [INFO ]   Destination Directory: tests/output
-[2025-08-04 11:57:09] [INFO ]   Unsorted Directory Base: /home/plex/Music/Unsorted and Incomplete/unsorted
-[2025-08-04 11:57:09] [INFO ]   Log File: ordr.fm.log
-[2025-08-04 11:57:09] [INFO ]   Verbosity: INFO
-[2025-08-04 11:57:09] [INFO ]   Mode: Dry Run
-[2025-08-04 11:57:09] [INFO ]   Incremental Mode: Disabled
-[2025-08-04 11:57:09] [INFO ]   Duplicate Detection: Disabled
-[2025-08-04 11:57:09] [INFO ] All required dependencies are installed.
-[2025-08-04 11:57:09] [DEBUG]   Discogs Integration: Disabled
-[2025-08-04 11:57:09] [INFO ] (Dry Run) Would create unsorted directory: /home/plex/Music/Unsorted and Incomplete/unsorted/unsorted_20250804_115709
-[2025-08-04 11:57:09] [INFO ] Scanning for album directories in tests/electronic_test...
-[2025-08-04 11:57:09] [INFO ] Found 15 potential album directories. Processing...
-[2025-08-04 11:57:09] [DEBUG] Processing directory: tests/electronic_test/aliases
-[2025-08-04 11:57:09] [INFO ] Processing album directory: tests/electronic_test/aliases
-[2025-08-04 11:57:09] [INFO ] SKIP: No audio files found in 'tests/electronic_test/aliases'. Skipping.
+[2025-08-04 12:30:16] [INFO ] --- ordr.fm Script Started ---
+[2025-08-04 12:30:16] [INFO ] Configuration:
+[2025-08-04 12:30:16] [INFO ]   Source Directory: /home/plex/Music/Artists/Atom Heart/atom heart - devolution
+[2025-08-04 12:30:16] [INFO ]   Destination Directory: /home/plex/Music/sorted_music
+[2025-08-04 12:30:16] [INFO ]   Unsorted Directory Base: /home/plex/Music/Unsorted and Incomplete/unsorted
+[2025-08-04 12:30:16] [INFO ]   Log File: ordr.fm.log
+[2025-08-04 12:30:16] [INFO ]   Verbosity: INFO
+[2025-08-04 12:30:16] [INFO ]   Mode: Dry Run
+[2025-08-04 12:30:16] [INFO ]   Incremental Mode: Disabled
+[2025-08-04 12:30:16] [INFO ]   Duplicate Detection: Disabled
+[2025-08-04 12:30:16] [INFO ] All required dependencies are installed.
+[2025-08-04 12:30:16] [DEBUG]   Discogs Integration: Disabled
+[2025-08-04 12:30:16] [INFO ] (Dry Run) Would create unsorted directory: /home/plex/Music/Unsorted and Incomplete/unsorted/unsorted_20250804_123016
+[2025-08-04 12:30:16] [INFO ] Scanning for album directories in /home/plex/Music/Artists/Atom Heart/atom heart - devolution...
+[2025-08-04 12:30:16] [INFO ] Found 1 potential album directories. Processing...
+[2025-08-04 12:30:16] [INFO ] Processing complete. Processed: 0, Skipped: 0
+[2025-08-04 12:30:16] [INFO ] --- ordr.fm Script Finished ---
+[2025-08-04 12:30:16] [INFO ] Script completed successfully: Processing completed successfully

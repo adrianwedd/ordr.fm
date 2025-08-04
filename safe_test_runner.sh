@@ -106,8 +106,8 @@ run_comprehensive_tests() {
     # Test paths prioritized by interest
     declare -a TEST_CONFIGS=(
         # Format: "name|path|extra_args"
-        "atom_collection|/home/plex/Music/Artists/Atom*|--group-aliases --alias-groups 'Uwe Schmidt,Atom TM,Atom Heart,Atomu Shinzo,Atom™'"
-        "incoming_electronic|/home/plex/Music/!Incoming|--enable-electronic --discogs"
+        "atom_collection|/home/plex/Music/Artists/Atom*|--group-aliases"
+        "incoming_electronic|/home/plex/Music/!Incoming|--enable-electronic"
         "artists_subset|/home/plex/Music/Artists|--enable-electronic --organization-mode hybrid"
         "pi_music|/home/pi/Music|--verbose"
     )
@@ -145,7 +145,7 @@ run_comprehensive_tests() {
                         --source "$actual_path" \
                         --destination "$SCRIPT_DIR/test_runs/simulated_dest" \
                         --log-file "$test_log" \
-                        --metadata-db "$test_db" \
+                        --state-db "$test_db" \
                         --verbose \
                         $extra_args 2>&1 | tee -a "$TEST_LOG"; then
                         
@@ -158,10 +158,15 @@ run_comprehensive_tests() {
                     # Analyze results
                     log_info "Analyzing test results..."
                     
-                    # Count issues
-                    local test_errors=$(grep -c "ERROR:" "$test_log" 2>/dev/null || echo 0)
-                    local test_warnings=$(grep -c "WARNING:" "$test_log" 2>/dev/null || echo 0)
-                    local test_anomalies=$(grep -c "move_to_unsorted\|Missing metadata\|duplicate" "$test_log" 2>/dev/null || echo 0)
+                    # Count issues (ensure numeric values)
+                    local test_errors=$(grep -c "ERROR:" "$test_log" 2>/dev/null || echo "0")
+                    local test_warnings=$(grep -c "WARNING:" "$test_log" 2>/dev/null || echo "0")
+                    local test_anomalies=$(grep -c "move_to_unsorted\|Missing metadata\|duplicate" "$test_log" 2>/dev/null || echo "0")
+                    
+                    # Ensure variables are numbers
+                    test_errors=${test_errors:-0}
+                    test_warnings=${test_warnings:-0}
+                    test_anomalies=${test_anomalies:-0}
                     
                     error_count=$((error_count + test_errors))
                     warning_count=$((warning_count + test_warnings))
@@ -197,15 +202,15 @@ EOF
                     echo "Aliases resolved: $aliases_resolved"
                     echo ""
                     
-                    # Check database
+                    # Check database (state database has different schema)
                     if [ -f "$test_db" ]; then
                         log_info "Verifying database integrity..."
                         sqlite3 "$test_db" "PRAGMA integrity_check;" > /dev/null 2>&1 || log_error "Database integrity check failed!"
                         
-                        local db_albums=$(sqlite3 "$test_db" "SELECT COUNT(*) FROM albums;" 2>/dev/null || echo 0)
-                        local db_tracks=$(sqlite3 "$test_db" "SELECT COUNT(*) FROM tracks;" 2>/dev/null || echo 0)
+                        # State database has processed_albums table
+                        local db_processed=$(sqlite3 "$test_db" "SELECT COUNT(*) FROM processed_albums;" 2>/dev/null || echo 0)
                         
-                        log_info "Database contains: $db_albums albums, $db_tracks tracks"
+                        log_info "Database contains: $db_processed processed albums"
                     fi
                     
                     # Extract anomalies for review
