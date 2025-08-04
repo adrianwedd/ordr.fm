@@ -2655,7 +2655,7 @@ create_move_record() {
     local dest_path="$3"
     
     # Initialize metadata database if not exists
-    init_metadata_db
+    METADATA_DB=$(init_metadata_db)
     
     # Insert move record
     local sql="INSERT INTO move_operations (operation_id, source_path, dest_path, timestamp, status) 
@@ -2745,6 +2745,172 @@ rollback_move_operation() {
         update_move_record_status "$operation_id" "ROLLBACK_FAILED"
         return 1
     fi
+}
+
+# list_move_operations: Lists all move operations with their status
+# No arguments
+# Returns: 0 on success
+list_move_operations() {
+    # Initialize metadata database if not exists
+    METADATA_DB=$(init_metadata_db)
+    
+    echo "Move Operations History:"
+    echo "======================="
+    
+    # Get total count
+    local total_count=$(sqlite3 "$METADATA_DB" "SELECT COUNT(*) FROM move_operations;")
+    
+    if [[ $total_count -eq 0 ]]; then
+        echo "No move operations found in database."
+        return 0
+    fi
+    
+    echo "Total operations: $total_count"
+    echo ""
+    
+    # List recent operations with formatted output
+    sqlite3 "$METADATA_DB" -header -column <<EOF
+SELECT 
+    SUBSTR(operation_id, 1, 20) || '...' AS 'Operation ID',
+    SUBSTR(source_path, MAX(1, LENGTH(source_path) - 40)) AS 'Source (last 40 chars)',
+    status AS 'Status',
+    DATETIME(timestamp, 'localtime') AS 'Timestamp'
+FROM move_operations 
+ORDER BY timestamp DESC 
+LIMIT 20;
+EOF
+    
+    echo ""
+    echo "Status Legend:"
+    echo "  IN_PROGRESS  - Operation currently running"
+    echo "  SUCCESS      - Completed successfully"
+    echo "  FAILED       - Failed during execution"
+    echo "  ROLLED_BACK  - Successfully rolled back"
+    echo "  ROLLBACK_FAILED - Rollback failed"
+    echo ""
+    echo "Use --undo <operation_id> to rollback a successful operation"
+    echo "Use --undo-last to rollback the most recent successful operation"
+}
+
+# undo_move_operation: Manually undo a specific move operation
+# Arguments:
+#   $1: operation ID to undo
+# Returns: 0 on success, 1 on failure
+undo_move_operation() {
+    local operation_id="$1"
+    
+    # Initialize metadata database if not exists
+    METADATA_DB=$(init_metadata_db)
+    
+    echo "Undoing move operation: $operation_id"
+    echo ""
+    
+    # Get operation details
+    local operation_details=$(sqlite3 "$METADATA_DB" -separator '|' \
+        "SELECT operation_id, source_path, dest_path, status, timestamp FROM move_operations WHERE operation_id LIKE '%$operation_id%';")
+    
+    if [[ -z "$operation_details" ]]; then
+        echo "❌ Error: Operation ID not found: $operation_id"
+        echo ""
+        echo "Use --list-operations to see available operations"
+        return 1
+    fi
+    
+    # Handle multiple matches
+    local match_count=$(echo "$operation_details" | wc -l)
+    if [[ $match_count -gt 1 ]]; then
+        echo "❌ Error: Multiple operations match '$operation_id':"
+        echo "$operation_details" | while IFS='|' read -r op_id source dest status timestamp; do
+            echo "  - $op_id ($status)"
+        done
+        echo ""
+        echo "Please provide a more specific operation ID"
+        return 1
+    fi
+    
+    # Parse operation details
+    IFS='|' read -r full_op_id source_path dest_path status timestamp <<< "$operation_details"
+    
+    echo "Operation Details:"
+    echo "  ID: $full_op_id"
+    echo "  Source: $source_path"
+    echo "  Destination: $dest_path"
+    echo "  Status: $status"
+    echo "  Date: $(date -d "$timestamp" 2>/dev/null || echo "$timestamp")"
+    echo ""
+    
+    # Check if operation can be undone
+    if [[ "$status" != "SUCCESS" ]]; then
+        echo "❌ Error: Cannot undo operation with status '$status'"
+        echo "Only successful operations can be manually undone"
+        return 1
+    fi
+    
+    # Verify destination still exists and source doesn't
+    if [[ ! -d "$dest_path" ]]; then
+        echo "❌ Error: Destination directory no longer exists: $dest_path"
+        echo "Cannot perform undo operation"
+        return 1
+    fi
+    
+    if [[ -d "$source_path" ]]; then
+        echo "❌ Error: Source directory still exists: $source_path"
+        echo "This could indicate a partial or failed operation"
+        echo "Manual intervention may be required"
+        return 1
+    fi
+    
+    # Confirm with user
+    echo "⚠️  WARNING: This will move the album back to its original location"
+    echo ""
+    read -p "Are you sure you want to undo this operation? (y/N): " -n 1 -r
+    echo
+    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+        echo "Undo operation cancelled by user"
+        return 1
+    fi
+    
+    echo ""
+    echo "🔄 Performing undo operation..."
+    
+    # Perform the undo using the existing rollback function
+    if rollback_move_operation "$full_op_id"; then
+        echo "✅ Successfully undone move operation: $full_op_id"
+        echo ""
+        echo "Album restored to: $source_path"
+        return 0
+    else
+        echo "❌ Failed to undo move operation: $full_op_id"
+        echo "Check logs for details"
+        return 1
+    fi
+}
+
+# undo_last_move_operation: Undoes the most recent successful move operation
+# No arguments
+# Returns: 0 on success, 1 on failure
+undo_last_move_operation() {
+    # Initialize metadata database if not exists
+    METADATA_DB=$(init_metadata_db)
+    
+    echo "Finding most recent successful move operation..."
+    
+    # Get the most recent successful operation
+    local last_operation=$(sqlite3 "$METADATA_DB" -separator '|' \
+        "SELECT operation_id FROM move_operations WHERE status='SUCCESS' ORDER BY timestamp DESC LIMIT 1;")
+    
+    if [[ -z "$last_operation" ]]; then
+        echo "❌ No successful move operations found"
+        echo ""
+        echo "Use --list-operations to see all operations"
+        return 1
+    fi
+    
+    echo "Most recent successful operation: $last_operation"
+    echo ""
+    
+    # Use the regular undo function
+    undo_move_operation "$last_operation"
 }
 
 # --- Album Processing Logic ---
@@ -3230,6 +3396,24 @@ parse_arguments() {
                 GROUP_ARTIST_ALIASES=1
                 shift 2
                 ;;
+            --list-operations)
+                list_move_operations
+                exit 0
+                ;;
+            --undo)
+                if [[ -n "$2" ]]; then
+                    undo_move_operation "$2"
+                else
+                    echo "Error: --undo requires an operation ID"
+                    echo "Use --list-operations to see available operations"
+                    exit 1
+                fi
+                exit $?
+                ;;
+            --undo-last)
+                undo_last_move_operation
+                exit $?
+                ;;
             -h|--help)
                 show_help
                 exit 0
@@ -3297,6 +3481,11 @@ show_help() {
     echo "  --enable-electronic        Enable ALL electronic music features (hybrid mode)"
     echo "  --group-aliases            Enable artist alias grouping"
     echo "  --alias-groups GROUPS      Set artist alias groups (see config for format)"
+    echo ""
+    echo "Undo/Rollback Operations:"
+    echo "  --list-operations          List all move operations with status"
+    echo "  --undo OPERATION_ID        Undo a specific move operation by ID"
+    echo "  --undo-last                Undo the most recent successful move operation"
     echo ""
     echo "  -h|--help              Display this help message"
     echo ""
