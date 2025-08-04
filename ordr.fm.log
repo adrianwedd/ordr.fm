@@ -1,0 +1,18 @@
+[2025-08-04 11:44:46] [INFO ] --- ordr.fm Script Started ---
+[2025-08-04 11:44:46] [INFO ] Configuration:
+[2025-08-04 11:44:46] [INFO ]   Source Directory: .
+[2025-08-04 11:44:46] [INFO ]   Destination Directory: /home/plex/Music/sorted_music
+[2025-08-04 11:44:46] [INFO ]   Unsorted Directory Base: /home/plex/Music/Unsorted and Incomplete/unsorted
+[2025-08-04 11:44:46] [INFO ]   Log File: ordr.fm.log
+[2025-08-04 11:44:46] [INFO ]   Verbosity: DEBUG
+[2025-08-04 11:44:46] [INFO ]   Mode: Dry Run
+[2025-08-04 11:44:46] [INFO ]   Incremental Mode: Disabled
+[2025-08-04 11:44:46] [INFO ]   Duplicate Detection: Disabled
+[2025-08-04 11:44:46] [INFO ] All required dependencies are installed.
+[2025-08-04 11:44:46] [DEBUG]   Discogs Integration: Disabled
+[2025-08-04 11:44:46] [INFO ] (Dry Run) Would create unsorted directory: /home/plex/Music/Unsorted and Incomplete/unsorted/unsorted_20250804_114446
+[2025-08-04 11:44:46] [INFO ] Scanning for album directories in ....
+[2025-08-04 11:44:46] [INFO ] Found 83 potential album directories. Processing...
+[2025-08-04 11:44:46] [DEBUG] Processing directory: ./test_source
+[2025-08-04 11:44:46] [INFO ] Processing album directory: ./test_source
+[2025-08-04 11:44:46] [INFO ] SKIP: No audio files found in './test_source'. Skipping.
