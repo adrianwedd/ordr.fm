@@ -24,6 +24,10 @@ fi
 DRY_RUN=1 # Default to dry run for safety
 MOVE_FILES=0 # Flag to enable actual file movement
 UNSORTED_DIR="" # Will be set in main() with timestamp
+INCREMENTAL_MODE=0 # Flag to enable incremental processing
+SINCE_DATE="" # Process files newer than this date
+STATE_DB="" # Path to state tracking database
+FORCE_REPROCESS_DIR="" # Directory to force reprocess
 
 # Define log levels
 readonly LOG_QUIET=0
@@ -64,7 +68,7 @@ get_log_level_name() {
 # Function to check for required dependencies
 check_dependencies() {
     local missing_deps=()
-    for cmd in "exiftool" "jq" "rsync" "md5sum"; do
+    for cmd in "exiftool" "jq" "rsync" "md5sum" "sqlite3"; do
         if ! command -v "$cmd" &> /dev/null; then
             missing_deps+=("$cmd")
         fi
@@ -85,6 +89,123 @@ sanitize_filename() {
     # Trim leading/trailing spaces and replace multiple spaces with a single space
     sanitized=$(echo "$sanitized" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[[:space:]]\+/ /g')
     echo "$sanitized"
+}
+
+# --- State Database Functions for Incremental Processing ---
+
+# Initialize the state tracking database
+init_state_db() {
+    local state_db="$1"
+    
+    if [[ ! -f "$state_db" ]]; then
+        log $LOG_INFO "Creating state database: $state_db"
+        sqlite3 "$state_db" <<EOF
+CREATE TABLE IF NOT EXISTS processed_directories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    directory_path TEXT UNIQUE NOT NULL,
+    last_modified INTEGER NOT NULL,
+    directory_hash TEXT NOT NULL,
+    processed_at INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS processed_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path TEXT UNIQUE NOT NULL,
+    file_size INTEGER NOT NULL,
+    file_hash TEXT NOT NULL,
+    last_modified INTEGER NOT NULL,
+    processed_at INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_dir_path ON processed_directories(directory_path);
+CREATE INDEX IF NOT EXISTS idx_dir_modified ON processed_directories(last_modified);
+CREATE INDEX IF NOT EXISTS idx_file_path ON processed_files(file_path);
+CREATE INDEX IF NOT EXISTS idx_file_hash ON processed_files(file_hash);
+EOF
+        log $LOG_INFO "State database initialized successfully"
+    else
+        log $LOG_DEBUG "State database already exists: $state_db"
+    fi
+}
+
+# Check if a directory needs processing based on modification time
+directory_needs_processing() {
+    local dir_path="$1"
+    local state_db="$2"
+    local current_mtime=$(stat -c "%Y" "$dir_path" 2>/dev/null || echo "0")
+    local current_hash=$(find "$dir_path" -maxdepth 1 -type f -exec stat -c "%Y %s %n" {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
+    
+    local stored_info=$(sqlite3 "$state_db" "SELECT last_modified, directory_hash, status FROM processed_directories WHERE directory_path = \"$dir_path\";" 2>/dev/null)
+    
+    if [[ -z "$stored_info" ]]; then
+        log $LOG_DEBUG "Directory '$dir_path' not found in state database - needs processing"
+        return 0
+    fi
+    
+    local stored_mtime=$(echo "$stored_info" | cut -d'|' -f1)
+    local stored_hash=$(echo "$stored_info" | cut -d'|' -f2)
+    local stored_status=$(echo "$stored_info" | cut -d'|' -f3)
+    
+    if [[ "$stored_status" != "success" ]]; then
+        log $LOG_DEBUG "Directory '$dir_path' previously failed - needs reprocessing"
+        return 0
+    fi
+    
+    if [[ "$current_mtime" -gt "$stored_mtime" ]] || [[ "$current_hash" != "$stored_hash" ]]; then
+        log $LOG_DEBUG "Directory '$dir_path' has been modified - needs processing"
+        return 0
+    fi
+    
+    log $LOG_DEBUG "Directory '$dir_path' unchanged since last processing - skipping"
+    return 1
+}
+
+# Record directory processing result in state database
+record_directory_processing() {
+    local dir_path="$1"
+    local status="$2"
+    local state_db="$3"
+    local current_mtime=$(stat -c "%Y" "$dir_path" 2>/dev/null || echo "0")
+    local current_hash=$(find "$dir_path" -maxdepth 1 -type f -exec stat -c "%Y %s %n" {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
+    local processed_at=$(date +%s)
+    
+    sqlite3 "$state_db" <<EOF
+INSERT OR REPLACE INTO processed_directories 
+(directory_path, last_modified, directory_hash, processed_at, status) 
+VALUES ("$dir_path", $current_mtime, "$current_hash", $processed_at, "$status");
+EOF
+    
+    log $LOG_DEBUG "Recorded processing result for '$dir_path': $status"
+}
+
+# Check if processing should continue based on --since date filter
+should_process_since_date() {
+    local dir_path="$1"
+    local since_date="$2"
+    
+    if [[ -z "$since_date" ]]; then
+        return 0
+    fi
+    
+    local since_timestamp=$(date -d "$since_date" +%s 2>/dev/null)
+    if [[ $? -ne 0 ]]; then
+        log $LOG_WARNING "Invalid --since date format: $since_date"
+        return 0
+    fi
+    
+    local dir_mtime=$(stat -c "%Y" "$dir_path" 2>/dev/null || echo "0")
+    
+    if [[ "$dir_mtime" -ge "$since_timestamp" ]]; then
+        log $LOG_DEBUG "Directory '$dir_path' modified since $since_date - processing"
+        return 0
+    else
+        log $LOG_DEBUG "Directory '$dir_path' not modified since $since_date - skipping"
+        return 1
+    fi
 }
 
 # move_to_unsorted: Moves an album directory to the unsorted area.
@@ -329,6 +450,22 @@ parse_arguments() {
                 MOVE_FILES=0 # Ensure no moves if --dry-run is present
                 shift
                 ;;
+            --incremental)
+                INCREMENTAL_MODE=1
+                shift
+                ;;
+            --since)
+                SINCE_DATE="$2"
+                shift 2
+                ;;
+            --state-db)
+                STATE_DB="$2"
+                shift 2
+                ;;
+            --force-reprocess)
+                FORCE_REPROCESS_DIR="$2"
+                shift 2
+                ;;
             -h|--help)
                 show_help
                 exit 0
@@ -354,6 +491,13 @@ show_help() {
     echo "  -v, --verbose           Enable verbose output (DEBUG level logging)"
     echo "  --move                  Execute file moves/renames (default: dry-run only)"
     echo "  --dry-run               Simulate operations without moving files (default)"
+    echo ""
+    echo "Incremental Processing:"
+    echo "  --incremental           Enable incremental processing mode"
+    echo "  --since DATE            Process only files newer than DATE (YYYY-MM-DD format)"
+    echo "  --state-db FILE         Path to state database (default: ordr.fm.state.db)"
+    echo "  --force-reprocess DIR   Force reprocessing of specific directory"
+    echo ""
     echo "  -h, --help              Display this help message"
     echo ""
     echo "Configuration can also be set in $CONFIG_FILE"
@@ -376,8 +520,19 @@ main() {
     log $LOG_INFO "  Log File: $LOG_FILE"
     log $LOG_INFO "  Verbosity: $(get_log_level_name $VERBOSITY)"
     log $LOG_INFO "  Mode: $([[ $DRY_RUN -eq 1 ]] && echo "Dry Run" || echo "Live Run")"
+    log $LOG_INFO "  Incremental Mode: $([[ $INCREMENTAL_MODE -eq 1 ]] && echo "Enabled" || echo "Disabled")"
+    [[ -n "$SINCE_DATE" ]] && log $LOG_INFO "  Since Date: $SINCE_DATE"
 
     check_dependencies
+
+    # Initialize state database for incremental processing
+    if [[ $INCREMENTAL_MODE -eq 1 ]]; then
+        if [[ -z "$STATE_DB" ]]; then
+            STATE_DB="$(dirname "$LOG_FILE")/ordr.fm.state.db"
+        fi
+        log $LOG_INFO "  State Database: $STATE_DB"
+        init_state_db "$STATE_DB"
+    fi
 
     # Create timestamped unsorted directory for this run
     local TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -408,11 +563,50 @@ main() {
     fi
 
     log $LOG_INFO "Found ${#album_dirs[@]} potential album directories. Processing..."
+    
+    local processed_count=0
+    local skipped_count=0
+    
     for album_dir in "${album_dirs[@]}"; do
-        process_album_directory "$album_dir"
+        # Skip the source directory itself
+        if [[ "$album_dir" == "$SOURCE_DIR" ]]; then
+            continue
+        fi
+        
+        # Skip if --since date filter doesn't match
+        if [[ -n "$SINCE_DATE" ]] && ! should_process_since_date "$album_dir" "$SINCE_DATE"; then
+            ((skipped_count++))
+            continue
+        fi
+        
+        # Skip if incremental mode and directory doesn't need processing (unless force reprocessing)
+        if [[ $INCREMENTAL_MODE -eq 1 ]] && [[ "$album_dir" != "$FORCE_REPROCESS_DIR"* ]] && ! directory_needs_processing "$album_dir" "$STATE_DB"; then
+            ((skipped_count++))
+            continue
+        fi
+        
+        # Process the album directory
+        log $LOG_DEBUG "Processing directory: $album_dir"
+        
+        if process_album_directory "$album_dir"; then
+            # Record successful processing
+            if [[ $INCREMENTAL_MODE -eq 1 ]]; then
+                record_directory_processing "$album_dir" "success" "$STATE_DB"
+            fi
+            ((processed_count++))
+        else
+            # Record failed processing
+            if [[ $INCREMENTAL_MODE -eq 1 ]]; then
+                record_directory_processing "$album_dir" "failed" "$STATE_DB"
+            fi
+            log $LOG_WARNING "Failed to process directory: $album_dir"
+        fi
     done
+    
+    log $LOG_INFO "Processing complete. Processed: $processed_count, Skipped: $skipped_count"
 
     log $LOG_INFO "--- ordr.fm Script Finished ---"
 } 
 
-    
+# Execute main function
+main "$@"
