@@ -26,25 +26,95 @@ The inspiration for this project comes from the common challenge of managing lar
 *   **Filename Sanitization:** Automatically cleans up problematic characters in generated filenames and directory names.
 *   **Handling of Incomplete/Untagged Files:** Moves files with insufficient metadata to a dedicated "Unsorted" area for manual review.
 
+## Quick Start
+
+For a quick start, use our interactive setup wizard:
+
+```bash
+./setup_wizard.sh
+```
+
+Or check out the [Quick Start Guide](QUICKSTART.md).
+
 ## Installation
 
-This script will be a Bash script with dependencies on standard command-line tools.
+### System Requirements
+
+*   **OS**: Linux (Ubuntu 20.04+, Debian 10+) or macOS 10.15+
+*   **Shell**: Bash 4.0+ or Zsh 5.0+
+*   **CPU**: 2+ cores (4+ recommended for parallel processing)
+*   **RAM**: 2GB minimum (4GB+ recommended)
 
 ### Dependencies
 
-*   `exiftool`: For extracting comprehensive metadata from audio files.
-*   `jq`: For parsing JSON output from `exiftool` efficiently.
-*   `rsync`: For robust file copying/moving.
+Required:
+*   `exiftool` (v12.0+): For extracting comprehensive metadata from audio files
+*   `jq` (v1.6+): For parsing JSON output from `exiftool` efficiently
+*   `sqlite3` (v3.31+): For database operations
 
-Installation instructions for these dependencies will be provided here.
+Optional:
+*   `parallel`: For enhanced parallel processing performance
+*   `rsync`: For robust file copying/moving
+*   `bc`: For statistics calculations
+*   `curl`: For Discogs API integration
 
-### Getting the Script
+### Quick Install
 
-Once developed, the script will be available for download or cloning from this repository.
+```bash
+# Ubuntu/Debian
+sudo apt-get update
+sudo apt-get install -y exiftool jq sqlite3 parallel bc rsync curl
+
+# macOS
+brew install exiftool jq sqlite parallel bc rsync curl
+
+# Clone repository
+git clone https://github.com/adrianwedd/ordr.fm.git
+cd ordr.fm
+
+# Run system check
+./system_check.sh
+
+# Run setup wizard
+./setup_wizard.sh
+```
 
 ## Usage
 
-Detailed usage instructions, including command-line arguments for dry-run, verbose logging, and actual execution, will be provided here.
+### Interactive Tools
+
+1. **Setup Wizard** - Configure ordr.fm interactively:
+   ```bash
+   ./setup_wizard.sh
+   ```
+
+2. **Command Builder** - Build complex commands easily:
+   ```bash
+   ./command_builder.sh
+   ```
+
+3. **System Check** - Verify your system is ready:
+   ```bash
+   ./system_check.sh
+   ```
+
+### Basic Commands
+
+```bash
+# Preview organization (safe dry-run)
+./ordr.fm.modular.sh --source /music/unsorted --destination /music/organized
+
+# Actually organize music
+./ordr.fm.modular.sh --source /music/unsorted --destination /music/organized --move
+
+# Use parallel processing for speed
+./ordr.fm.modular.sh --source /music/unsorted --destination /music/organized --parallel --move
+
+# Electronic music with Discogs enrichment
+./ordr.fm.modular.sh --enable-electronic --discogs --move
+```
+
+See [Full Documentation](docs/DEPLOYMENT.md) for advanced usage.
 
 ## Contributing
 
