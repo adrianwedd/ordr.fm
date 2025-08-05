@@ -1,16 +1,18 @@
 name: Security Alert Management
 
 on:
-  # Trigger when code scanning alerts are created or updated
-  code_scanning_alert:
-    types: [created, appeared_in_branch, reopened]
-  
   # Allow manual trigger for testing
   workflow_dispatch:
   
   # Run on schedule to check for new alerts
   schedule:
     - cron: '0 */6 * * *'  # Every 6 hours
+  
+  # Run when security alerts are found
+  workflow_run:
+    workflows: ["CodeQL"]
+    types:
+      - completed
 
 permissions:
   issues: write
