@@ -1,0 +1,91 @@
+# Git and version control
+.git
+.gitignore
+.gitattributes
+
+# Documentation
+README.md
+CHANGELOG.md
+docs/
+*.md
+
+# Logs and temporary files
+/*.log
+*.log
+logs/
+tmp/
+temp/
+.tmp
+
+# Cache directories
+node_modules/
+.npm
+.cache
+cache/
+discogs_cache/
+server/cache/
+
+# Test files and directories
+test*/
+tests/
+spec/
+coverage/
+.nyc_output
+
+# Development files
+.env
+.env.local
+.env.*.local
+*.pid
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Build artifacts
+dist/
+build/
+*.tar.gz
+*.zip
+
+# Database files (will be mounted as volumes)
+*.db
+*.sqlite
+*.sqlite3
+
+# Backup files
+*.backup
+*.bak
+backup*/
+
+# Package lock files (we copy package.json separately)
+package-lock.json
+yarn.lock
+
+# Large media files that might be in test directories
+*.mp3
+*.flac
+*.wav
+*.m4a
+*.aac
+*.ogg
+
+# Specific to this project
+backup_*.log
+ordr.fm.log*
+discogs_rate_limiter
+visualization/node_modules/
+server_test.log

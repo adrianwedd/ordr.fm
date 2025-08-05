@@ -1,0 +1,119 @@
+name: Feature Request
+description: Suggest a new feature for ordr.fm
+title: "[FEATURE] "
+labels: ["enhancement", "feature-request"]
+assignees: ["adrianwedd"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting a new feature! Please provide as much detail as possible to help us understand your request.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem Description
+      description: What problem does this feature solve? What use case does it address?
+      placeholder: Describe the problem or use case this feature would address...
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed Solution
+      description: Describe the feature you'd like to see implemented
+      placeholder: Describe your proposed solution in detail...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which component would this feature affect?
+      options:
+        - Music organization logic
+        - Web interface/dashboard
+        - API integration (Discogs/MusicBrainz)
+        - Database/metadata handling
+        - Docker deployment
+        - Configuration system
+        - Visualization/reporting
+        - File handling/safety
+        - Performance optimization
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      description: How important is this feature to you?
+      options:
+        - Low - Nice to have
+        - Medium - Would improve my workflow
+        - High - Essential for my use case
+        - Critical - Blocking my usage
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative Solutions
+      description: Have you considered any alternative solutions or workarounds?
+      placeholder: Describe any alternatives you've considered...
+
+  - type: textarea
+    id: examples
+    attributes:
+      label: Examples/Use Cases
+      description: Provide specific examples of how this feature would be used
+      placeholder: |
+        Example 1: When organizing electronic music...
+        Example 2: For large collections with...
+
+  - type: dropdown
+    id: music_type
+    attributes:
+      label: Music Collection Type
+      description: What type of music collection would benefit from this feature?
+      multiple: true
+      options:
+        - Electronic/Dance music
+        - Rock/Pop music
+        - Classical music
+        - Jazz music
+        - Hip-hop/Rap music
+        - World music
+        - Podcasts/Audiobooks
+        - Mixed genres
+        - Other
+
+  - type: checkboxes
+    id: implementation
+    attributes:
+      label: Implementation Willingness
+      description: Would you be willing to help with implementation?
+      options:
+        - label: I would be willing to test this feature
+        - label: I could help with documentation
+        - label: I could contribute code (with guidance)
+        - label: I could provide sample data for testing
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues to make sure this is not a duplicate
+          required: true
+        - label: I have read the project documentation to understand current capabilities
+          required: true
+        - label: This feature aligns with the project's goals of music organization
+          required: true

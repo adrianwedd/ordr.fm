@@ -1,0 +1,137 @@
+name: Deployment Help
+description: Get help with Docker deployment or setup issues
+title: "[DEPLOYMENT] "
+labels: ["help-wanted", "docker", "deployment"]
+assignees: ["adrianwedd"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Need help getting ordr.fm up and running? Please provide details about your setup and what's not working.
+
+  - type: dropdown
+    id: deployment_type
+    attributes:
+      label: Deployment Method
+      description: How are you trying to deploy ordr.fm?
+      options:
+        - Docker Compose (recommended)
+        - Docker run commands
+        - Native installation (no Docker)
+        - Kubernetes
+        - Docker Swarm
+        - Other container orchestration
+    validations:
+      required: true
+
+  - type: textarea
+    id: issue
+    attributes:
+      label: What's Not Working?
+      description: Describe the specific issue you're encountering
+      placeholder: Describe your deployment issue in detail...
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps_taken
+    attributes:
+      label: Steps You've Tried
+      description: What steps have you already attempted?
+      placeholder: |
+        1. Downloaded docker-compose.yml
+        2. Created .env file with paths
+        3. Ran `docker-compose up -d`
+        4. Got error message...
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: System Information
+      description: Details about your system
+      value: |
+        - OS and version: [e.g., Ubuntu 22.04, macOS 13.0, Windows 11 + WSL2]
+        - Docker version: [run `docker --version`]
+        - Docker Compose version: [run `docker-compose --version`]
+        - Available disk space: [e.g., 500GB free]
+        - RAM: [e.g., 16GB]
+        - Architecture: [e.g., x86_64, ARM64, Raspberry Pi]
+    validations:
+      required: true
+
+  - type: textarea
+    id: configuration
+    attributes:
+      label: Configuration Files
+      description: Share your configuration (remove any sensitive tokens)
+      placeholder: |
+        # Contents of your .env file (without tokens):
+        MUSIC_SOURCE_DIR=/path/to/music
+        MUSIC_DEST_DIR=/path/to/organized
+        # etc.
+        
+        # Any custom docker-compose overrides:
+        # (paste relevant sections)
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error Logs
+      description: Paste any error messages or relevant log output
+      placeholder: |
+        # Docker logs:
+        docker-compose logs ordr-fm
+        
+        # System logs if relevant:
+        # (paste error messages here)
+      render: text
+
+  - type: dropdown
+    id: music_size
+    attributes:
+      label: Music Collection Size
+      description: Approximately how large is your music collection?
+      options:
+        - Small (< 1,000 albums)
+        - Medium (1,000 - 10,000 albums)
+        - Large (10,000 - 50,000 albums)
+        - Very Large (> 50,000 albums)
+        - Just testing with samples
+
+  - type: textarea
+    id: paths
+    attributes:
+      label: Directory Structure
+      description: Show your music directory structure (example paths only, no personal info)
+      placeholder: |
+        /music/
+        ├── unsorted/
+        │   ├── Artist - Album (Year)/
+        │   └── Various files...
+        ├── organized/ (destination)
+        └── review/ (unsorted output)
+
+  - type: checkboxes
+    id: documentation
+    attributes:
+      label: Documentation Check
+      description: Have you reviewed the documentation?
+      options:
+        - label: I have read the Docker deployment guide (docs/DOCKER.md)
+        - label: I have checked the README.md for prerequisites
+        - label: I have followed the quick start instructions
+        - label: I have checked existing issues for similar problems
+
+  - type: dropdown
+    id: urgency
+    attributes:
+      label: Urgency
+      description: How urgent is this for you?
+      options:
+        - Low - Learning/experimenting
+        - Medium - Want to organize my collection soon
+        - High - Need this working for a project
+        - Critical - Production system down

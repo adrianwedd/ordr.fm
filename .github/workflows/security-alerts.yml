@@ -1,0 +1,268 @@
+name: Security Alert Management
+
+on:
+  # Trigger when code scanning alerts are created or updated
+  code_scanning_alert:
+    types: [created, appeared_in_branch, reopened]
+  
+  # Allow manual trigger for testing
+  workflow_dispatch:
+  
+  # Run on schedule to check for new alerts
+  schedule:
+    - cron: '0 */6 * * *'  # Every 6 hours
+
+permissions:
+  issues: write
+  security-events: read
+  contents: read
+
+jobs:
+  process-security-alerts:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Process CodeQL Alerts
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const owner = context.repo.owner;
+          const repo = context.repo.repo;
+          
+          // Function to create issue from alert
+          async function createIssueFromAlert(alert) {
+            // Check if issue already exists for this alert
+            const searchQuery = `repo:${owner}/${repo} is:issue "CodeQL Alert #${alert.number}"`;
+            const existingIssues = await github.rest.search.issuesAndPullRequests({
+              q: searchQuery
+            });
+            
+            if (existingIssues.data.total_count > 0) {
+              console.log(`Issue already exists for alert #${alert.number}`);
+              return;
+            }
+            
+            // Determine severity label
+            const severityLabel = alert.rule.severity === 'error' ? 'security-critical' : 
+                                 alert.rule.severity === 'warning' ? 'security-high' : 'security-medium';
+            
+            // Create issue body
+            const issueBody = `## 🚨 CodeQL Security Alert #${alert.number}
+            
+            ### Alert Details
+            - **Rule**: ${alert.rule.name}
+            - **Severity**: ${alert.rule.severity.toUpperCase()}
+            - **Category**: ${alert.rule.tags.join(', ')}
+            - **File**: \`${alert.most_recent_instance.location.path}:${alert.most_recent_instance.location.start_line}\`
+            - **Status**: ${alert.state}
+            
+            ### Description
+            ${alert.rule.description}
+            
+            ### Code Location
+            \`\`\`${alert.most_recent_instance.location.path.split('.').pop()}
+            ${alert.most_recent_instance.message.text}
+            \`\`\`
+            
+            **File**: [${alert.most_recent_instance.location.path}](https://github.com/${owner}/${repo}/blob/${alert.most_recent_instance.commit_sha}/${alert.most_recent_instance.location.path}#L${alert.most_recent_instance.location.start_line})
+            
+            ### Recommendation
+            ${alert.rule.help || 'Please review and fix this security issue according to best practices.'}
+            
+            ### Auto-Generated Fix (if applicable)
+            ${alert.most_recent_instance.classifications ? '✅ Auto-fix available' : '❌ Manual fix required'}
+            
+            ---
+            *This issue was automatically created from CodeQL security alert #${alert.number}*
+            `;
+            
+            // Create the issue
+            const issue = await github.rest.issues.create({
+              owner,
+              repo,
+              title: `[Security] ${alert.rule.name} in ${alert.most_recent_instance.location.path}`,
+              body: issueBody,
+              labels: ['security', severityLabel, 'codeql-alert'],
+              assignees: ['adrianwedd'] // Assign to repo owner
+            });
+            
+            console.log(`Created issue #${issue.data.number} for alert #${alert.number}`);
+            
+            // Add comment with fix suggestions if available
+            if (alert.rule.help_uri) {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: issue.data.number,
+                body: `📚 **Additional Resources**\n\nFor more information on fixing this issue, see: ${alert.rule.help_uri}`
+              });
+            }
+          }
+          
+          try {
+            // Get all open security alerts
+            const alerts = await github.rest.codeScanning.listAlertsForRepo({
+              owner,
+              repo,
+              state: 'open',
+              per_page: 100
+            });
+            
+            console.log(`Found ${alerts.data.length} open security alerts`);
+            
+            // Process each alert
+            for (const alert of alerts.data) {
+              await createIssueFromAlert(alert);
+              
+              // Rate limit: wait 1 second between issue creations
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            
+            // Summary comment
+            if (context.eventName === 'code_scanning_alert') {
+              const summary = `✅ Processed ${alerts.data.length} security alerts`;
+              core.notice(summary);
+            }
+            
+          } catch (error) {
+            core.error(`Error processing security alerts: ${error.message}`);
+            throw error;
+          }
+
+    - name: Group Similar Alerts
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          // Group similar rate limiting issues
+          const rateLimitIssues = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            labels: 'security,codeql-alert',
+            state: 'open',
+            per_page: 100
+          });
+          
+          const rateLimitGroup = rateLimitIssues.data.filter(issue => 
+            issue.title.includes('Missing rate limiting')
+          );
+          
+          if (rateLimitGroup.length > 3) {
+            // Create meta-issue for grouped alerts
+            const metaIssueBody = `## 🔒 Grouped Security Alert: Missing Rate Limiting
+            
+            ### Summary
+            Multiple endpoints are missing rate limiting protection. This is a systematic issue that should be addressed holistically.
+            
+            ### Affected Endpoints (${rateLimitGroup.length} total)
+            ${rateLimitGroup.map(issue => `- [ ] ${issue.title.replace('[Security] ', '')}`).join('\n')}
+            
+            ### Recommended Solution
+            Implement application-wide rate limiting using \`express-rate-limit\` or similar middleware.
+            
+            \`\`\`javascript
+            const rateLimit = require('express-rate-limit');
+            
+            const limiter = rateLimit({
+              windowMs: 15 * 60 * 1000, // 15 minutes
+              max: 100 // limit each IP to 100 requests per windowMs
+            });
+            
+            app.use('/api/', limiter);
+            \`\`\`
+            
+            ### Related Issues
+            ${rateLimitGroup.map(issue => `- #${issue.number}`).join('\n')}
+            `;
+            
+            const metaIssue = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '[Security] Systematic Missing Rate Limiting - Multiple Endpoints',
+              body: metaIssueBody,
+              labels: ['security', 'security-critical', 'codeql-alert', 'meta-issue'],
+              assignees: ['adrianwedd']
+            });
+            
+            console.log(`Created meta-issue #${metaIssue.data.number} for grouped rate limiting alerts`);
+          }
+
+    - name: Create Security Summary
+      if: github.event_name == 'schedule'
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          // Get security metrics
+          const openAlerts = await github.rest.codeScanning.listAlertsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'open'
+          });
+          
+          const closedAlerts = await github.rest.codeScanning.listAlertsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'closed'
+          });
+          
+          const securityIssues = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            labels: 'security',
+            state: 'all'
+          });
+          
+          // Create summary
+          const summary = `## 📊 Security Status Report
+          
+          ### CodeQL Alerts
+          - **Open Alerts**: ${openAlerts.data.length}
+          - **Resolved Alerts**: ${closedAlerts.data.length}
+          - **Total Security Issues**: ${securityIssues.data.length}
+          
+          ### Alert Breakdown by Severity
+          ${['error', 'warning', 'note'].map(severity => {
+            const count = openAlerts.data.filter(a => a.rule.severity === severity).length;
+            return `- **${severity.toUpperCase()}**: ${count}`;
+          }).join('\n')}
+          
+          ### Recent Activity
+          - Last scan: ${new Date().toISOString()}
+          - Auto-created issues: ${securityIssues.data.filter(i => i.body.includes('automatically created from CodeQL')).length}
+          
+          ---
+          *This summary is generated automatically every 6 hours*
+          `;
+          
+          // Update or create security status issue
+          const statusIssues = await github.rest.issues.listForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            labels: 'security-status',
+            state: 'open'
+          });
+          
+          if (statusIssues.data.length > 0) {
+            // Update existing status issue
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: statusIssues.data[0].number,
+              body: summary
+            });
+          } else {
+            // Create new status issue
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '📊 Security Status Dashboard',
+              body: summary,
+              labels: ['security-status', 'documentation'],
+              pinned: true
+            });
+          }

@@ -1,0 +1,112 @@
+name: Bug Report
+description: Report a bug or issue with ordr.fm
+title: "[BUG] "
+labels: ["bug", "triage"]
+assignees: ["adrianwedd"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug! Please fill out the information below to help us diagnose and fix the issue.
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Bug Description
+      description: A clear and concise description of what the bug is.
+      placeholder: Describe the issue you're experiencing...
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to Reproduce
+      description: Steps to reproduce the behavior
+      placeholder: |
+        1. Run command '...'
+        2. Navigate to '...'
+        3. See error
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected Behavior
+      description: What you expected to happen
+      placeholder: Describe what should have happened...
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual Behavior
+      description: What actually happened
+      placeholder: Describe what actually happened...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      description: Which component is affected?
+      options:
+        - Bash script (ordr.fm.sh)
+        - Web interface (Node.js server)
+        - Docker deployment
+        - Database/metadata
+        - Discogs integration
+        - MusicBrainz integration
+        - File organization
+        - Documentation
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Information about your environment
+      value: |
+        - OS: [e.g., Ubuntu 22.04, macOS 13.0, Windows 11]
+        - Docker version: [e.g., 24.0.5]
+        - ordr.fm version: [e.g., v2.1.0]
+        - Node.js version: [e.g., 18.17.0]
+        - How you're running ordr.fm: [Docker, native, etc.]
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log Output
+      description: Relevant log output or error messages
+      placeholder: Paste log output here...
+      render: text
+
+  - type: textarea
+    id: sample
+    attributes:
+      label: Sample Data (if applicable)
+      description: Sample file names or metadata that cause the issue (remove any personal info)
+      placeholder: Example album/artist names that reproduce the issue...
+
+  - type: checkboxes
+    id: checklist
+    attributes:
+      label: Checklist
+      description: Please confirm the following
+      options:
+        - label: I have searched existing issues to make sure this is not a duplicate
+          required: true
+        - label: I have read the documentation (README.md, SPECIFICATIONS.md)
+          required: true
+        - label: I have included relevant log output or error messages
+          required: false
+        - label: I can consistently reproduce this issue
+          required: false

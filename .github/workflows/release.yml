@@ -1,0 +1,163 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Extract version from tag
+        VERSION=${GITHUB_REF#refs/tags/}
+        
+        # Get previous tag
+        PREV_TAG=$(git describe --tags --abbrev=0 ${{ github.ref }}^)
+        
+        # Generate changelog
+        echo "## Changes since $PREV_TAG" > CHANGELOG_CURRENT.md
+        echo "" >> CHANGELOG_CURRENT.md
+        
+        # Get commits between tags
+        git log --pretty=format:"- %s (%h)" $PREV_TAG..${{ github.ref }} >> CHANGELOG_CURRENT.md
+        
+        # Set output for release notes
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "changelog<<EOF" >> $GITHUB_OUTPUT
+        cat CHANGELOG_CURRENT.md >> $GITHUB_OUTPUT
+        echo "EOF" >> $GITHUB_OUTPUT
+
+    - name: Create GitHub Release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: ordr.fm ${{ steps.changelog.outputs.version }}
+        body: |
+          # ordr.fm ${{ steps.changelog.outputs.version }}
+          
+          🎵 **The Ultimate Music Organization System**
+          
+          ## Docker Installation
+          ```bash
+          docker pull ghcr.io/${{ github.repository }}:${{ steps.changelog.outputs.version }}
+          ```
+          
+          ## Quick Start
+          ```bash
+          # Download docker-compose.yml
+          curl -O https://raw.githubusercontent.com/${{ github.repository }}/${{ github.ref_name }}/docker-compose.yml
+          
+          # Configure your music paths
+          cp .env.example .env && nano .env
+          
+          # Start the web interface
+          docker-compose up -d
+          ```
+          
+          ${{ steps.changelog.outputs.changelog }}
+          
+          ## Features in this release:
+          - 🐳 Complete Docker deployment with multi-arch support
+          - 🌐 Node.js web interface with MusicBrainz integration
+          - 🎛️ Real-time organization dashboard with D3.js visualizations
+          - 📊 SQLite database for metadata tracking and undo operations
+          - 🔄 Artist relationship mapping and alias resolution
+          - 🏷️ Advanced electronic music organization with label routing
+          - 🔒 Security-hardened container with non-root user
+          - 📋 Comprehensive documentation and deployment guides
+          
+          ## Documentation
+          - [Docker Deployment Guide](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/DOCKER.md)
+          - [Technical Specifications](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/SPECIFICATIONS.md)
+          - [Project Overview](https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/README.md)
+        draft: false
+        prerelease: ${{ contains(github.ref, '-') }}
+
+  build-release-assets:
+    runs-on: ubuntu-latest
+    needs: create-release
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Create release bundle
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/}
+        
+        # Create deployment bundle
+        mkdir -p release/ordr.fm-$VERSION
+        
+        # Copy essential files for standalone deployment
+        cp docker-compose.yml release/ordr.fm-$VERSION/
+        cp .env.example release/ordr.fm-$VERSION/
+        cp -r docs release/ordr.fm-$VERSION/
+        cp README.md release/ordr.fm-$VERSION/
+        cp SPECIFICATIONS.md release/ordr.fm-$VERSION/
+        
+        # Create installation script
+        cat > release/ordr.fm-$VERSION/install.sh << 'EOF'
+        #!/bin/bash
+        set -e
+        
+        echo "🎵 Installing ordr.fm $VERSION"
+        
+        # Check Docker
+        if ! command -v docker &> /dev/null; then
+            echo "❌ Docker is required but not installed"
+            exit 1
+        fi
+        
+        # Check Docker Compose
+        if ! command -v docker-compose &> /dev/null; then
+            echo "❌ Docker Compose is required but not installed"
+            exit 1
+        fi
+        
+        # Create .env if it doesn't exist
+        if [ ! -f .env ]; then
+            cp .env.example .env
+            echo "✅ Created .env configuration file"
+            echo "⚠️  Please edit .env with your music directory paths"
+        fi
+        
+        # Pull latest image
+        docker-compose pull
+        
+        echo "✅ ordr.fm $VERSION installed successfully!"
+        echo "📖 Read docs/DOCKER.md for usage instructions"
+        echo "🚀 Run 'docker-compose up -d' to start"
+        EOF
+        chmod +x release/ordr.fm-$VERSION/install.sh
+        
+        # Create archive
+        cd release
+        tar -czf ordr.fm-$VERSION.tar.gz ordr.fm-$VERSION/
+        
+        echo "VERSION=$VERSION" >> $GITHUB_ENV
+
+    - name: Upload release assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ needs.create-release.outputs.upload_url }}
+        asset_path: release/ordr.fm-${{ env.VERSION }}.tar.gz
+        asset_name: ordr.fm-${{ env.VERSION }}.tar.gz
+        asset_content_type: application/gzip

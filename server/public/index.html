@@ -1,0 +1,289 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ordr.fm - Music Relationship Explorer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #0a0a0a;
+            color: #fff;
+            overflow-x: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #1e1e1e, #2a2a2a);
+            padding: 1rem 2rem;
+            border-bottom: 1px solid #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .logo {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: #ff6b35;
+        }
+        
+        .stats {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.9rem;
+            color: #aaa;
+        }
+        
+        .stat-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 0.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 4px;
+        }
+        
+        .stat-value {
+            font-size: 1.2rem;
+            font-weight: bold;
+            color: #fff;
+        }
+        
+        .main-container {
+            display: flex;
+            height: calc(100vh - 70px);
+        }
+        
+        .sidebar {
+            width: 300px;
+            background: #1a1a1a;
+            border-right: 1px solid #333;
+            padding: 1rem;
+            overflow-y: auto;
+        }
+        
+        .visualization {
+            flex: 1;
+            position: relative;
+            background: #111;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .viz-header {
+            padding: 1rem;
+            background: #1a1a1a;
+            border-bottom: 1px solid #333;
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+        }
+        
+        .viz-controls button {
+            padding: 0.5rem 1rem;
+            background: #ff6b35;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+        }
+        
+        .viz-controls button:hover {
+            background: #e55a2b;
+        }
+        
+        .viz-controls button.secondary {
+            background: #333;
+        }
+        
+        .viz-controls button.secondary:hover {
+            background: #444;
+        }
+        
+        .viz-canvas {
+            flex: 1;
+            position: relative;
+        }
+        
+        #network-svg {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .section {
+            margin-bottom: 2rem;
+        }
+        
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin-bottom: 0.5rem;
+            color: #ff6b35;
+        }
+        
+        .album-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .album-item {
+            padding: 0.5rem;
+            background: rgba(255, 255, 255, 0.05);
+            margin-bottom: 0.5rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .album-item:hover {
+            background: rgba(255, 107, 53, 0.1);
+        }
+        
+        .album-title {
+            font-weight: bold;
+            font-size: 0.9rem;
+        }
+        
+        .album-artist {
+            color: #aaa;
+            font-size: 0.8rem;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 4px;
+            background: #333;
+            border-radius: 2px;
+            overflow: hidden;
+            margin: 1rem 0;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #ff6b35;
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        .status-message {
+            padding: 1rem;
+            background: rgba(255, 107, 53, 0.1);
+            border: 1px solid rgba(255, 107, 53, 0.2);
+            border-radius: 4px;
+            margin: 1rem 0;
+            font-size: 0.9rem;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #333;
+            border-radius: 50%;
+            border-top-color: #ff6b35;
+            animation: spin 1s ease-in-out infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .node {
+            cursor: pointer;
+            stroke: #333;
+            stroke-width: 2px;
+        }
+        
+        .node.artist {
+            fill: #ff6b35;
+        }
+        
+        .node.label {
+            fill: #35a7ff;
+        }
+        
+        .node.genre {
+            fill: #35ff6b;
+        }
+        
+        .link {
+            stroke: #666;
+            stroke-opacity: 0.7;
+            stroke-width: 2px;
+        }
+        
+        .node-label {
+            fill: #fff;
+            font-size: 12px;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="logo">🎵 ordr.fm</div>
+        <div class="stats" id="stats">
+            <div class="stat-item">
+                <div class="stat-value" id="stat-albums">-</div>
+                <div>Albums</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="stat-artists">-</div>
+                <div>Artists</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-value" id="stat-mapped">-</div>
+                <div>MB Mapped</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="sidebar">
+            <div class="section">
+                <div class="section-title">Controls</div>
+                <div class="viz-controls">
+                    <button onclick="loadNetworkVisualization()">Load Network</button>
+                    <button class="secondary" onclick="startBatchEnrichment()">Enrich Albums</button>
+                    <button class="secondary" onclick="loadStats()">Refresh Stats</button>
+                </div>
+                <div class="progress-bar" id="progress-bar" style="display: none;">
+                    <div class="progress-fill" id="progress-fill"></div>
+                </div>
+                <div id="status-message"></div>
+            </div>
+
+            <div class="section">
+                <div class="section-title">Recent Albums</div>
+                <div class="album-list" id="album-list">
+                    <div class="loading"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="visualization">
+            <div class="viz-header">
+                <h3>Relationship Network</h3>
+                <div class="viz-controls">
+                    <button onclick="resetZoom()">Reset Zoom</button>
+                    <button class="secondary" onclick="pauseSimulation()">Pause</button>
+                </div>
+            </div>
+            <div class="viz-canvas">
+                <svg id="network-svg"></svg>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

@@ -5,6 +5,81 @@ All notable changes to ordr.fm will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.0] - 2025-08-05
+
+### 🚀 Major Features Added - Node.js Integration & Relationship Visualization
+
+This release introduces a complete Node.js web interface with MusicBrainz integration, transforming ordr.fm into a comprehensive music relationship discovery and visualization platform.
+
+#### MusicBrainz Integration & Relationship Mapping
+- **Complete MusicBrainz API Client** (`server/lib/musicbrainz.js`)
+  - Artist relationship extraction and processing
+  - Release matching with advanced confidence scoring  
+  - Artist alias resolution and grouping
+  - Comprehensive caching system (7-day TTL)
+  - Rate limiting (1 req/second) respecting MusicBrainz guidelines
+
+#### Node.js Web Server & API
+- **REST API Server** (`server/server.js`) with 15+ endpoints
+  - Album browsing with advanced filtering and pagination
+  - Real-time MusicBrainz enrichment (single and batch)
+  - Artist relationship network data for visualization
+  - Comprehensive statistics and coverage reporting
+- **WebSocket Support** for real-time updates
+  - Live progress tracking during batch operations
+  - Automatic UI refresh when data changes
+  - Event-driven architecture for responsive experience
+
+#### Interactive Web Visualization
+- **Professional Dashboard** (`server/public/index.html`)
+  - Live collection statistics and enrichment status
+  - Album browser with filtering and search
+  - Batch processing controls with progress tracking
+- **D3.js Network Graphs** (`server/public/js/app.js`)
+  - Interactive force-directed artist collaboration networks
+  - Zoom, pan, and node manipulation controls
+  - Real-time updates during metadata enrichment
+  - Export capabilities (JSON, SVG, PNG)
+
+### 📊 Extended Database Schema
+- **MusicBrainz Entity Tables** (`server/database/schema.sql`)
+  - Artists with aliases and relationship tracking
+  - Releases with comprehensive metadata storage
+  - Works for classical music composition relationships
+  - Labels with hierarchical organization support
+- **Relationship Tables**  
+  - Artist-to-artist collaborations and band memberships
+  - Album-to-MusicBrainz release mappings with confidence scores
+  - Comprehensive relationship type definitions
+
+### 📚 Documentation Overhaul
+- **README.md**: Complete rewrite with modern styling and comprehensive feature overview
+- **docs/API.md**: Detailed REST API and WebSocket documentation with examples
+- **docs/USER_GUIDE.md**: Step-by-step user guide with screenshots and workflows  
+- **server/README.md**: Node.js server specific documentation
+- **SPECIFICATIONS.md**: Updated technical specifications including MusicBrainz integration
+
+### 🔧 New API Endpoints
+- `GET /api/albums` - Advanced album filtering and pagination
+- `GET /api/artists/relationships` - Artist relationship data with aliases
+- `POST /api/musicbrainz/enrich-album/:id` - Single album enrichment
+- `POST /api/musicbrainz/batch-enrich` - Batch processing endpoint
+- `GET /api/visualization/network` - Optimized D3.js graph data
+- WebSocket events for real-time updates
+
+### ⚡ Performance & Features
+- **Dual-Source Enhancement**: Combine Discogs and MusicBrainz data
+- **Advanced Confidence Scoring**: Multi-factor algorithm using string similarity
+- **Relationship Discovery**: Artist collaboration networks and label mapping
+- **Batch Processing**: Process hundreds of albums with progress tracking
+- **Classical Music Support**: Composer-performer-work relationships
+
+### 📦 New Dependencies
+- Node.js 16+ required for web interface
+- `express`, `ws`, `sqlite3`, `d3`, `helmet`, development tools
+
+---
+
 ## [2.0.0] - 2025-08-05
 
 ### 🎉 Major Release - Production Ready

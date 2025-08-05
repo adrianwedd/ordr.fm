@@ -1,0 +1,85 @@
+version: '3.8'
+
+services:
+  ordr-fm:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: ordr-fm:latest
+    container_name: ordr-fm
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      # Music directories (customize these paths)
+      - "${MUSIC_SOURCE_DIR:-./data/music}:/app/data/music:ro"
+      - "${MUSIC_DEST_DIR:-./data/organized}:/app/data/organized"
+      - "${MUSIC_UNSORTED_DIR:-./data/unsorted}:/app/data/unsorted"
+      
+      # Configuration and data persistence
+      - "./config:/app/config"
+      - "./data/databases:/app"
+      - "./data/logs:/app/logs"
+      - "./data/cache:/app/cache"
+    environment:
+      # Server configuration
+      - NODE_ENV=production
+      - PORT=3000
+      
+      # API tokens (set these in .env file)
+      - DISCOGS_USER_TOKEN=${DISCOGS_USER_TOKEN:-}
+      - MUSICBRAINZ_USER_AGENT=${MUSICBRAINZ_USER_AGENT:-ordr.fm-docker/2.1.0}
+      
+      # Processing options
+      - ORDR_ENABLE_PARALLEL=${ORDR_ENABLE_PARALLEL:-1}
+      - ORDR_MAX_PARALLEL_JOBS=${ORDR_MAX_PARALLEL_JOBS:-4}
+      - ORDR_ENABLE_ELECTRONIC=${ORDR_ENABLE_ELECTRONIC:-1}
+      
+      # Paths (container paths - don't change)
+      - ORDR_SOURCE_DIR=/app/data/music
+      - ORDR_DEST_DIR=/app/data/organized
+      - ORDR_UNSORTED_DIR=/app/data/unsorted
+      - ORDR_CONFIG_FILE=/app/config/ordr.fm.conf
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - ordr-fm-network
+
+  # Optional: separate organization service for batch processing
+  ordr-fm-organizer:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    image: ordr-fm:latest
+    container_name: ordr-fm-organizer
+    restart: "no"  # Manual execution
+    profiles: ["organize"]  # Only run when specifically requested
+    volumes:
+      - "${MUSIC_SOURCE_DIR:-./data/music}:/app/data/music:ro"
+      - "${MUSIC_DEST_DIR:-./data/organized}:/app/data/organized"
+      - "${MUSIC_UNSORTED_DIR:-./data/unsorted}:/app/data/unsorted"
+      - "./config:/app/config"
+      - "./data/databases:/app"
+      - "./data/logs:/app/logs"
+      - "./data/cache:/app/cache"
+    environment:
+      - DISCOGS_USER_TOKEN=${DISCOGS_USER_TOKEN:-}
+      - MUSICBRAINZ_USER_AGENT=${MUSICBRAINZ_USER_AGENT:-ordr.fm-docker/2.1.0}
+      - ORDR_ENABLE_PARALLEL=${ORDR_ENABLE_PARALLEL:-1}
+      - ORDR_MAX_PARALLEL_JOBS=${ORDR_MAX_PARALLEL_JOBS:-4}
+      - ORDR_ENABLE_ELECTRONIC=${ORDR_ENABLE_ELECTRONIC:-1}
+    command: ["organize", "--enable-electronic", "--discogs", "--move"]
+    networks:
+      - ordr-fm-network
+
+networks:
+  ordr-fm-network:
+    driver: bridge
+
+volumes:
+  ordr-fm-data:
+    driver: local

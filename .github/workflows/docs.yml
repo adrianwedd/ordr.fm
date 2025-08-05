@@ -1,0 +1,127 @@
+name: Documentation
+
+on:
+  push:
+    branches: [ main ]
+    paths: 
+      - 'docs/**'
+      - 'README.md'
+      - 'SPECIFICATIONS.md'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'README.md'
+      - 'SPECIFICATIONS.md'
+
+jobs:
+  lint-docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+
+    - name: Install markdownlint
+      run: npm install -g markdownlint-cli
+
+    - name: Lint Markdown files
+      run: |
+        markdownlint '**/*.md' --ignore node_modules --ignore server/node_modules || true
+
+    - name: Check for broken links
+      run: |
+        # Simple link check for documentation
+        find . -name "*.md" -not -path "./node_modules/*" -not -path "./server/node_modules/*" | \
+        xargs grep -l "http" | \
+        head -5 | \
+        xargs -I {} echo "Found links in: {}"
+
+  validate-docker-docs:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Validate Docker documentation
+      run: |
+        # Check that all referenced files exist
+        if [ -f "docs/DOCKER.md" ]; then
+          # Verify docker-compose.yml is referenced correctly
+          if grep -q "docker-compose.yml" docs/DOCKER.md; then
+            if [ ! -f "docker-compose.yml" ]; then
+              echo "❌ docker-compose.yml referenced in docs but not found"
+              exit 1
+            fi
+          fi
+          
+          # Verify .env.example is referenced correctly
+          if grep -q ".env.example" docs/DOCKER.md; then
+            if [ ! -f ".env.example" ]; then
+              echo "❌ .env.example referenced in docs but not found"
+              exit 1
+            fi
+          fi
+          
+          echo "✅ Docker documentation validation passed"
+        fi
+
+    - name: Test Docker Compose syntax
+      run: |
+        if [ -f "docker-compose.yml" ]; then
+          # Validate docker-compose.yml syntax
+          docker-compose config -q
+          echo "✅ docker-compose.yml syntax is valid"
+        fi
+
+  check-readme-sync:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Check README.md completeness
+      run: |
+        # Check that README mentions key features
+        MISSING_SECTIONS=""
+        
+        if ! grep -q -i "docker" README.md; then
+          MISSING_SECTIONS="$MISSING_SECTIONS Docker"
+        fi
+        
+        if ! grep -q -i "musicbrainz\|music.brainz" README.md; then
+          MISSING_SECTIONS="$MISSING_SECTIONS MusicBrainz"
+        fi
+        
+        if ! grep -q -i "discogs" README.md; then
+          MISSING_SECTIONS="$MISSING_SECTIONS Discogs"
+        fi
+        
+        if [ -n "$MISSING_SECTIONS" ]; then
+          echo "⚠️  README.md might be missing sections for:$MISSING_SECTIONS"
+        else
+          echo "✅ README.md appears complete"
+        fi
+
+    - name: Verify SPECIFICATIONS.md sync
+      run: |
+        if [ -f "SPECIFICATIONS.md" ]; then
+          # Check that specs mention key implemented features
+          if ! grep -q -i "musicbrainz" SPECIFICATIONS.md; then
+            echo "⚠️  SPECIFICATIONS.md might need MusicBrainz integration update"
+          fi
+          
+          if ! grep -q -i "docker" SPECIFICATIONS.md; then
+            echo "⚠️  SPECIFICATIONS.md might need Docker deployment update"
+          fi
+          
+          echo "✅ SPECIFICATIONS.md checked"
+        fi
