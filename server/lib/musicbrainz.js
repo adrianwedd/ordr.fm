@@ -19,10 +19,66 @@ class MusicBrainzClient {
     this.cacheExpiry = options.cacheExpiry || 7 * 24 * 60 * 60 * 1000; // 7 days
     this.lastRequestTime = 0;
     
-    // Ensure cache directory exists
+    // Allowed endpoint prefixes for security
+    this.allowedEndpoints = [
+      '/release',
+      '/artist', 
+      '/work',
+      '/recording',
+      '/label'
+    ];
+    
+    // Initialize cache directory
     this.initializeCache();
   }
 
+  /**
+   * Validate and sanitize MBID (MusicBrainz ID)
+   * MBIDs are UUIDs in format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+   */
+  validateMbid(mbid) {
+    if (!mbid || typeof mbid !== 'string') {
+      throw new Error('Invalid MBID: must be a non-empty string');
+    }
+    
+    // UUID v4 format validation
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(mbid)) {
+      throw new Error('Invalid MBID format: must be a valid UUID');
+    }
+    
+    return mbid.toLowerCase();
+  }
+
+  /**
+   * Validate endpoint to prevent SSRF attacks
+   */
+  validateEndpoint(endpoint) {
+    if (!endpoint || typeof endpoint !== 'string') {
+      throw new Error('Invalid endpoint: must be a non-empty string');
+    }
+    
+    const isAllowed = this.allowedEndpoints.some(allowed => 
+      endpoint.startsWith(allowed)
+    );
+    
+    if (!isAllowed) {
+      throw new Error(`Endpoint not allowed: ${endpoint}. Allowed prefixes: ${this.allowedEndpoints.join(', ')}`);
+    }
+    
+    return endpoint;
+  }
+
+  /**
+   * Safely format log messages to prevent format string injection
+   */
+  safeLog(level, message, ...args) {
+    const sanitizedArgs = args.map(arg => 
+      typeof arg === 'string' ? arg.replace(/%/g, '%%') : arg
+    );
+    console[level](message, ...sanitizedArgs);
+  }
+    
   async initializeCache() {
     try {
       await fs.mkdir(this.cacheDir, { recursive: true });
@@ -91,20 +147,23 @@ class MusicBrainzClient {
    * Make HTTP request to MusicBrainz API
    */
   async makeRequest(endpoint, params = {}) {
-    const cacheKey = this.generateCacheKey(endpoint, params);
+    // Validate endpoint to prevent SSRF attacks
+    const validatedEndpoint = this.validateEndpoint(endpoint);
+    
+    const cacheKey = this.generateCacheKey(validatedEndpoint, params);
     
     // Try cache first
     const cachedResponse = await this.getCachedResponse(cacheKey);
     if (cachedResponse) {
-      console.log(`Using cached MusicBrainz response for ${endpoint}`);
+      console.log(`Using cached MusicBrainz response for %s`, validatedEndpoint);
       return cachedResponse;
     }
 
     await this.rateLimitDelay();
 
     return new Promise((resolve, reject) => {
-      // Build URL with parameters
-      const url = new URL(endpoint, this.baseUrl);
+      // Build URL with parameters - endpoint is now validated
+      const url = new URL(validatedEndpoint, this.baseUrl);
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
           url.searchParams.append(key, value);
@@ -194,6 +253,9 @@ class MusicBrainzClient {
    * Get detailed release information
    */
   async getRelease(mbid, includes = ['artists', 'labels', 'recordings']) {
+    // Validate MBID to prevent injection attacks
+    const validatedMbid = this.validateMbid(mbid);
+    
     const params = {
       fmt: 'json'
     };
@@ -203,9 +265,9 @@ class MusicBrainzClient {
     }
 
     try {
-      return await this.makeRequest(`/release/${mbid}`, params);
+      return await this.makeRequest(`/release/${validatedMbid}`, params);
     } catch (err) {
-      console.error(`Failed to get MusicBrainz release ${mbid}:`, err);
+      this.safeLog('error', 'Failed to get MusicBrainz release %s:', validatedMbid, err);
       return null;
     }
   }
@@ -214,6 +276,9 @@ class MusicBrainzClient {
    * Get artist information with relationships
    */
   async getArtist(mbid, includes = ['aliases', 'relationships']) {
+    // Validate MBID to prevent injection attacks
+    const validatedMbid = this.validateMbid(mbid);
+    
     const params = {
       fmt: 'json'
     };
@@ -223,9 +288,9 @@ class MusicBrainzClient {
     }
 
     try {
-      return await this.makeRequest(`/artist/${mbid}`, params);
+      return await this.makeRequest(`/artist/${validatedMbid}`, params);
     } catch (err) {
-      console.error(`Failed to get MusicBrainz artist ${mbid}:`, err);
+      this.safeLog('error', 'Failed to get MusicBrainz artist %s:', validatedMbid, err);
       return null;
     }
   }
@@ -234,6 +299,9 @@ class MusicBrainzClient {
    * Get work (composition) information
    */
   async getWork(mbid, includes = ['relationships']) {
+    // Validate MBID to prevent injection attacks
+    const validatedMbid = this.validateMbid(mbid);
+    
     const params = {
       fmt: 'json'
     };
@@ -243,9 +311,9 @@ class MusicBrainzClient {
     }
 
     try {
-      return await this.makeRequest(`/work/${mbid}`, params);
+      return await this.makeRequest(`/work/${validatedMbid}`, params);
     } catch (err) {
-      console.error(`Failed to get MusicBrainz work ${mbid}:`, err);
+      this.safeLog('error', 'Failed to get MusicBrainz work %s:', validatedMbid, err);
       return null;
     }
   }
