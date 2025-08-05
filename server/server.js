@@ -16,6 +16,7 @@ const cors = require('cors');
 const helmet = require('helmet');
 const compression = require('compression');
 const morgan = require('morgan');
+const rateLimit = require('express-rate-limit');
 const path = require('path');
 const fs = require('fs');
 
@@ -45,6 +46,38 @@ const musicBrainzClient = new MusicBrainzClient({
   rateLimit: 1000 // 1 second between requests
 });
 
+// Rate limiting configuration
+const limiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000, // 15 minutes
+  max: parseInt(process.env.RATE_LIMIT_MAX) || 100, // limit each IP to 100 requests per windowMs
+  message: {
+    error: 'Too many requests from this IP, please try again later.',
+    retryAfter: Math.ceil((parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000) / 1000)
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Stricter rate limits for resource-intensive endpoints
+const strictLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: parseInt(process.env.STRICT_RATE_LIMIT_MAX) || 20, // limit to 20 requests per hour
+  message: {
+    error: 'Rate limit exceeded for this endpoint. Please try again later.',
+    retryAfter: 3600
+  },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Health check limiter (higher limits for monitoring)
+const healthLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 1000, // Allow many health checks
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Middleware
 app.use(helmet({
   contentSecurityPolicy: {
@@ -61,6 +94,9 @@ app.use(cors());
 app.use(morgan('combined'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Apply rate limiting to API routes
+app.use('/api/', limiter);
 
 // Serve static files
 app.use('/static', express.static(path.join(__dirname, 'public')));
@@ -92,7 +128,7 @@ async function initializeServices() {
  */
 
 // Health check
-app.get('/health', (req, res) => {
+app.get('/health', healthLimiter, (req, res) => {
   res.json({ 
     status: 'healthy', 
     timestamp: new Date().toISOString(),
@@ -566,7 +602,7 @@ app.post('/api/musicbrainz/enrich-album/:albumId', async (req, res) => {
 });
 
 // Batch enrich albums
-app.post('/api/musicbrainz/batch-enrich', async (req, res) => {
+app.post('/api/musicbrainz/batch-enrich', strictLimiter, async (req, res) => {
   const { limit = 10 } = req.body;
   
   try {
@@ -630,7 +666,7 @@ app.post('/api/musicbrainz/batch-enrich', async (req, res) => {
 });
 
 // Get artist relationship network
-app.get('/api/musicbrainz/network/:mbid', async (req, res) => {
+app.get('/api/musicbrainz/network/:mbid', strictLimiter, async (req, res) => {
   const { mbid } = req.params;
   const { depth = 2 } = req.query;
   

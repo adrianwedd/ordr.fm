@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
@@ -9,6 +10,38 @@ const PORT = process.env.PORT || 3000;
 // Database path from environment or default
 const DB_PATH = process.env.ORDRFM_DB || path.join(__dirname, '..', 'ordr.fm.metadata.db');
 
+// Rate limiting configuration
+const limiter = rateLimit({
+    windowMs: parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000, // 15 minutes
+    max: parseInt(process.env.RATE_LIMIT_MAX) || 100, // limit each IP to 100 requests per windowMs
+    message: {
+        error: 'Too many requests from this IP, please try again later.',
+        retryAfter: Math.ceil((parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000) / 1000)
+    },
+    standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
+    legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+});
+
+// Stricter rate limit for resource-intensive endpoints
+const exportLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000, // 1 hour
+    max: parseInt(process.env.EXPORT_RATE_LIMIT_MAX) || 10, // limit to 10 exports per hour
+    message: {
+        error: 'Export rate limit exceeded. Please try again later.',
+        retryAfter: 3600
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+// Health check has higher limits for monitoring
+const healthLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 1000, // Allow many health checks for monitoring systems
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 // Middleware
 app.use(express.json());
 app.use(express.static('public'));
@@ -18,6 +51,14 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
     next();
+});
+
+// Apply rate limiting to API routes (exclude export which has its own limiter)
+app.use('/api/', (req, res, next) => {
+    if (req.path === '/export' || req.path === '/health') {
+        return next(); // Skip general limiter for export and health
+    }
+    return limiter(req, res, next);
 });
 
 // Database connection helper
@@ -241,7 +282,7 @@ app.get('/api/timeline', (req, res) => {
 });
 
 // Export data as JSON
-app.get('/api/export', (req, res) => {
+app.get('/api/export', exportLimiter, (req, res) => {
     const db = getDb();
     const exportData = {};
     
@@ -269,7 +310,7 @@ app.get('/api/export', (req, res) => {
 });
 
 // Health check
-app.get('/api/health', (req, res) => {
+app.get('/api/health', healthLimiter, (req, res) => {
     // Check if database exists
     fs.access(DB_PATH, fs.constants.R_OK, (err) => {
         if (err) {
