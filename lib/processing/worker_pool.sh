@@ -135,7 +135,7 @@ process_album_job() {
     
     # Source required modules if not already loaded
     if [[ -z "$(type -t process_album_directory)" ]]; then
-        source "$(dirname "${BASH_SOURCE[0]}")/../../ordr.fm.sh" 2>/dev/null || {
+        source "$(dirname "${BASH_SOURCE[0]}")/../parallel_wrapper.sh" --source-only || {
             log_error "Worker $worker_id: Failed to load processing functions"
             return 1
         }

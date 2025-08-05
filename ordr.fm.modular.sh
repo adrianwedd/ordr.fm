@@ -28,6 +28,11 @@ if [[ -f "$SCRIPT_DIR/lib/metadata.sh" ]]; then
     source "$SCRIPT_DIR/lib/metadata.sh"
 fi
 
+# Check if parallel processor exists
+if [[ -f "$SCRIPT_DIR/lib/parallel_processor.sh" ]]; then
+    source "$SCRIPT_DIR/lib/parallel_processor.sh"
+fi
+
 # Global variables with defaults
 VERSION="2.0.0-modular"
 DATE_NOW=$(date +%Y%m%d_%H%M%S)
@@ -53,6 +58,10 @@ ENABLE_ELECTRONIC_ORGANIZATION=0
 ORGANIZATION_MODE="artist"
 SEPARATE_REMIXES=0
 VINYL_SIDE_MARKERS=0
+
+# Parallel processing
+ENABLE_PARALLEL=0
+PARALLEL_JOBS=0  # 0 = auto-detect
 
 # Check dependencies
 check_dependencies() {
@@ -287,6 +296,8 @@ OPTIONS:
     --discogs                 Enable Discogs metadata enrichment
     --organization-mode MODE  Organization mode: artist, label, series, hybrid
     
+    --parallel [JOBS]         Enable parallel processing (optional job count)
+    
     -h, --help                Display this help message
     -V, --version             Display version information
 
@@ -362,6 +373,15 @@ parse_arguments() {
             --organization-mode)
                 ORGANIZATION_MODE="$2"
                 shift 2
+                ;;
+            --parallel)
+                ENABLE_PARALLEL=1
+                if [[ -n "$2" ]] && [[ "$2" =~ ^[0-9]+$ ]]; then
+                    PARALLEL_JOBS="$2"
+                    shift 2
+                else
+                    shift
+                fi
                 ;;
             -h|--help)
                 usage
@@ -469,13 +489,31 @@ main() {
     
     log $LOG_INFO "Found $total_albums potential album directories. Processing..."
     
-    for album_dir in "${album_dirs[@]}"; do
-        if process_album_directory "$album_dir"; then
-            ((processed++))
+    # Choose processing method
+    if [[ $ENABLE_PARALLEL -eq 1 ]] && [[ $total_albums -gt 1 ]]; then
+        # Initialize parallel processing
+        if [[ $PARALLEL_JOBS -eq 0 ]]; then
+            init_parallel_processing "auto"
         else
-            ((skipped++))
+            init_parallel_processing "auto" "$PARALLEL_JOBS"
         fi
-    done
+        
+        # Process albums in parallel
+        process_albums_parallel_dispatcher "${album_dirs[@]}"
+        
+        # Get statistics from parallel processing
+        processed=$JOBS_COMPLETED
+        skipped=$JOBS_FAILED
+    else
+        # Sequential processing
+        for album_dir in "${album_dirs[@]}"; do
+            if process_album_directory "$album_dir"; then
+                ((processed++))
+            else
+                ((skipped++))
+            fi
+        done
+    fi
     
     # Update statistics
     if [[ $DRY_RUN -eq 0 ]]; then
@@ -487,6 +525,17 @@ main() {
     
     exit_with_code 0 "Script completed successfully: Processing completed successfully"
 }
+
+# Export functions for parallel processing
+if [[ -f "$SCRIPT_DIR/lib/parallel_wrapper.sh" ]]; then
+    source "$SCRIPT_DIR/lib/parallel_wrapper.sh"
+    export_parallel_functions
+fi
+
+# Handle source-only mode for parallel workers
+if [[ "$1" == "--source-only" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
 
 # Run main function
 main "$@"
