@@ -33,6 +33,16 @@ if [[ -f "$SCRIPT_DIR/lib/parallel_processor.sh" ]]; then
     source "$SCRIPT_DIR/lib/parallel_processor.sh"
 fi
 
+# Check if performance module exists
+if [[ -f "$SCRIPT_DIR/lib/performance.sh" ]]; then
+    source "$SCRIPT_DIR/lib/performance.sh"
+fi
+
+# Check if cleanup module exists
+if [[ -f "$SCRIPT_DIR/lib/cleanup.sh" ]]; then
+    source "$SCRIPT_DIR/lib/cleanup.sh"
+fi
+
 # Global variables with defaults
 VERSION="2.0.0-modular"
 DATE_NOW=$(date +%Y%m%d_%H%M%S)
@@ -62,6 +72,10 @@ VINYL_SIDE_MARKERS=0
 # Parallel processing
 ENABLE_PARALLEL=0
 PARALLEL_JOBS=0  # 0 = auto-detect
+
+# Cleanup options
+CLEANUP_EMPTY_DIRS=0
+CLEANUP_ARTIFACTS=0
 
 # Check dependencies
 check_dependencies() {
@@ -298,6 +312,11 @@ OPTIONS:
     
     --parallel [JOBS]         Enable parallel processing (optional job count)
     
+    --cleanup-empty           Remove empty source directories after processing
+    --cleanup-preview         Preview empty directories without removing
+    --cleanup-artifacts       Remove system artifacts (Thumbs.db, .DS_Store)
+    --preserve-structure      Keep top-level structure when cleaning
+    
     -h, --help                Display this help message
     -V, --version             Display version information
 
@@ -382,6 +401,23 @@ parse_arguments() {
                 else
                     shift
                 fi
+                ;;
+            --cleanup-empty)
+                CLEANUP_EMPTY_DIRS=1
+                shift
+                ;;
+            --cleanup-preview)
+                CLEANUP_EMPTY_DIRS=1
+                CLEANUP_DRY_RUN=1
+                shift
+                ;;
+            --cleanup-artifacts)
+                CLEANUP_ARTIFACTS=1
+                shift
+                ;;
+            --preserve-structure)
+                CLEANUP_PRESERVE_STRUCTURE=1
+                shift
                 ;;
             -h|--help)
                 usage
@@ -489,9 +525,34 @@ main() {
     
     log $LOG_INFO "Found $total_albums potential album directories. Processing..."
     
-    # Choose processing method
-    if [[ $ENABLE_PARALLEL -eq 1 ]] && [[ $total_albums -gt 1 ]]; then
-        # Initialize parallel processing
+    # Choose processing method based on collection size
+    if [[ $total_albums -gt 1000 ]] && [[ -n "$(type -t process_large_collection_parallel)" ]]; then
+        # Use optimized processing for large collections
+        log $LOG_INFO "Large collection detected. Using optimized processing..."
+        
+        # Build index cache for faster lookups
+        if [[ $INDEX_CACHE_ENABLED -eq 1 ]]; then
+            build_album_index_cache "$SOURCE_DIR"
+        fi
+        
+        # Initialize parallel processing with optimizations
+        if [[ $PARALLEL_JOBS -eq 0 ]]; then
+            init_parallel_processing "auto"
+        else
+            init_parallel_processing "auto" "$PARALLEL_JOBS"
+        fi
+        
+        # Process with large collection optimizations
+        process_large_collection_parallel "${album_dirs[@]}"
+        
+        # Get statistics
+        processed=$JOBS_COMPLETED
+        skipped=$JOBS_FAILED
+        
+        # Cleanup
+        cleanup_orphaned_data
+    elif [[ $ENABLE_PARALLEL -eq 1 ]] && [[ $total_albums -gt 1 ]]; then
+        # Standard parallel processing
         if [[ $PARALLEL_JOBS -eq 0 ]]; then
             init_parallel_processing "auto"
         else
@@ -521,6 +582,24 @@ main() {
     fi
     
     log $LOG_INFO "Processing complete. Processed: $processed, Skipped: $skipped"
+    
+    # Cleanup phase
+    if [[ $CLEANUP_EMPTY_DIRS -eq 1 ]] || [[ $CLEANUP_ARTIFACTS -eq 1 ]]; then
+        log $LOG_INFO "Starting cleanup phase..."
+        
+        if [[ $CLEANUP_EMPTY_DIRS -eq 1 ]]; then
+            local cleanup_opts=""
+            [[ $DRY_RUN -eq 1 ]] && cleanup_opts="preview"
+            [[ $CLEANUP_PRESERVE_STRUCTURE -eq 1 ]] && cleanup_opts="$cleanup_opts preserve-structure"
+            
+            cleanup_empty_source_directories "$SOURCE_DIR" "$cleanup_opts"
+        fi
+        
+        if [[ $CLEANUP_ARTIFACTS -eq 1 ]]; then
+            cleanup_artifacts "$SOURCE_DIR"
+        fi
+    fi
+    
     log $LOG_INFO "--- ordr.fm Script Finished ---"
     
     exit_with_code 0 "Script completed successfully: Processing completed successfully"
