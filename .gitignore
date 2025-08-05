@@ -1,100 +1,230 @@
-# Sensitive configuration
+# ordr.fm .gitignore
+# ===================
+
+# Configuration Files (keep examples)
+# -----------------------------------
+ordr.fm.conf
 ordr.fm.conf.local
 *.conf.local
 *_local.conf
+!ordr.fm.conf.example
 
-# API tokens and secrets
+# Sensitive Data
+# --------------
 .env
 .env.local
+.env.*.local
 *.token
 *.secret
+*.key
+*.pem
+credentials*
+secrets*
 
-# Databases
+# Database Files (keep examples)
+# ------------------------------
 *.db
+*.db-journal
+*.db-wal
 *.sqlite
 *.sqlite3
+*.sqlite-journal
+*.sqlite-wal
+!*.db.example
+!*.sqlite.example
 
-# Logs
-*.log
-ordr.fm.log*
-test_runs/
-backup_logs/
-
-# Cache directories
+# State and Cache Files
+# --------------------
+ordr.fm.state
+ordr.fm.checkpoint
+ordr.fm.stream
+*.checkpoint
+*.stream
+*.index_cache
+discogs_rate_limiter
 discogs_cache/
 .cache/
+__pycache__/
+*.pyc
 
-# Temporary files
-*.tmp
-*.temp
-*.swp
-*.swo
-*~
+# Log Files
+# ---------
+*.log
+*.log.*
+ordr.fm.log*
+debug.log
+error.log
+test_runs/
+backup_logs/
+logs/
 
-# Backup markers
-.backup_marker
-
-# Test directories and files
+# Test Directories and Files
+# --------------------------
+test_*/
+*_test/
 test_output/
 test_move_output/
 test_simple/
 test_subset/
 test_music/
-test_*/
-*_test/
-/tmp/test_music/
+test_data/
+/tmp/test_*/
+/tmp/ordr_fm_*/
 quick_backup_test.sh
 start_backup.sh
 test_*.sh
 !test_runner.sh
 !test_parallel.sh
+!benchmark_parallel.sh
 
-# Rate limiters
-discogs_rate_limiter
+# Music Files
+# -----------
+*.mp3
+*.flac
+*.wav
+*.m4a
+*.aac
+*.ogg
+*.opus
+*.wma
+*.aiff
+*.alac
+*.ape
+*.wv
+*.dsd
+*.dsf
 
-# OS files
-.DS_Store
-Thumbs.db
+# Album Metadata Files
+# --------------------
+*.cue
+*.nfo
+*.m3u
+*.m3u8
+*.pls
+*.sfv
+*.md5
+*.sha1
+*.sha256
 
-# Editor directories
+# Image Files (album art)
+# -----------------------
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.tiff
+*.webp
+cover.*
+folder.*
+album.*
+artwork.*
+!docs/images/*.png
+!docs/images/*.jpg
+!docs/images/*.gif
+
+# Backup and Temporary Files
+# --------------------------
+*.tmp
+*.temp
+*.swp
+*.swo
+*.swn
+*~
+*.bak
+*.backup
+*.old
+*.orig
+backup.pid
+backup_*/
+.backup_marker
+restored_*/
+
+# Archive Files
+# -------------
+*.zip
+*.rar
+*.7z
+*.tar
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.tgz
+
+# Reports and Output
+# ------------------
+duplicate_albums_*.txt
+duplicates_*.txt
+setup_summary_*.txt
+system_check_report_*.txt
+issue_report_*.md
+organization_report_*.txt
+error_report_*.txt
+performance_*.log
+
+# IDE and Editor Files
+# --------------------
 .vscode/
 .idea/
-*.sublime-*
+*.sublime-project
+*.sublime-workspace
+.project
+.classpath
+.settings/
+*.iml
+.vs/
+*.suo
+*.user
 
-# Node modules (for visualization)
+# OS Generated Files
+# ------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+.directory
+*.desktop
+
+# Node.js / Web UI
+# ----------------
 node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 package-lock.json
 yarn.lock
+.npm/
+.yarn/
+dist/
+build/
+*.min.js
+*.min.css
 
-# Music files (shouldn't be committed)
-*.mp3
-*.flac
-*.wav
-*.m4a
-*.ogg
-*.aiff
-*.alac
-*.opus
-*.wma
-*.cue
-*.nfo
-*.m3u
-*.pls
+# Python Virtual Environments
+# ---------------------------
+venv/
+env/
+ENV/
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Backup and temporary files
-backup.pid
-backup_*/
-*.bak
-*.backup
+# Documentation Build
+# -------------------
+docs/_build/
+docs/.doctrees/
+*.pdf
+!docs/*.pdf
 
-# Duplicate reports
-duplicate_albums_*.txt
-duplicates_*.txt
-
-# Session summaries (local only)
-setup_summary_*.txt
-system_check_report_*.txt
-issue_report_*.md
+# Miscellaneous
+# -------------
+.history/
+.gitignore.local
+TODO.local
+NOTES.local
+scratch/
+temp/
