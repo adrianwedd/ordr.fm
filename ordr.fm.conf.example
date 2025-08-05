@@ -1,0 +1,63 @@
+# ordr.fm Configuration File Example
+# Copy this to ordr.fm.conf and customize for your setup
+
+# Directory Configuration
+SOURCE_DIR="/path/to/your/music/collection"
+DEST_DIR="/path/to/organized/music"
+UNSORTED_BASE_DIR="/path/to/unsorted"
+
+# Logging Configuration
+LOG_FILE="ordr.fm.log"
+VERBOSITY=2  # 0=ERROR, 1=WARNING, 2=INFO, 3=DEBUG
+
+# Processing Options
+DRY_RUN=1                # Default to dry-run mode for safety
+INCREMENTAL=0            # Skip already processed directories
+DUPLICATE_DETECTION=0    # Enable duplicate detection
+
+# Electronic Music Organization
+ENABLE_ELECTRONIC_ORGANIZATION=0
+ORGANIZATION_MODE="hybrid"      # artist, label, series, hybrid, auto
+MIN_LABEL_RELEASES=3           # Minimum releases for label organization
+SEPARATE_REMIXES=0             # Separate remix collections
+VINYL_SIDE_MARKERS=0           # Add vinyl side markers
+
+# Discogs Integration
+DISCOGS_ENABLED=0
+DISCOGS_TOKEN=""               # Get from https://www.discogs.com/settings/developers
+DISCOGS_CACHE_DIR="$HOME/.cache/ordr.fm/discogs"
+DISCOGS_CACHE_EXPIRY=604800    # 7 days in seconds
+DISCOGS_CONFIDENCE_THRESHOLD=0.7
+DISCOGS_RATE_LIMIT_DELAY=1000  # milliseconds
+
+# Artist Alias Groups (pipe-separated groups, comma-separated aliases)
+ARTIST_ALIAS_GROUPS="Uwe Schmidt,Atom TM,Atom Heart,Senor Coconut|Aphex Twin,AFX,Polygon Window"
+
+# Performance Settings
+ENABLE_PARALLEL=0              # Enable parallel processing
+PARALLEL_JOBS=0               # 0 = auto-detect based on CPU cores
+PARALLEL_METHOD="auto"        # auto, builtin, gnu-parallel, xargs
+BATCH_SIZE=100               # Albums per batch for large collections
+
+# Database Paths
+STATE_DB="ordr.fm.state.db"
+METADATA_DB="ordr.fm.metadata.db"
+DUPLICATES_DB="ordr.fm.duplicates.db"
+
+# Advanced Options
+HASH_ALGORITHM="md5"          # md5, sha1, sha256
+CHECKSUM_VERIFICATION=0       # Verify file integrity after moves
+PRESERVE_TIMESTAMPS=1         # Preserve original file timestamps
+FOLLOW_SYMLINKS=0            # Process symlinked directories
+MAX_PATH_LENGTH=255          # Maximum path length for compatibility
+
+# UI/Visualization
+ENABLE_WEB_UI=0              # Enable web dashboard
+WEB_UI_PORT=8080            # Port for web interface
+WEB_UI_HOST="localhost"     # Host for web interface
+
+# Safety Features
+REQUIRE_CONFIRMATION=0       # Require confirmation before moves
+MAX_MOVES_PER_RUN=0         # Limit moves per run (0 = unlimited)
+BACKUP_BEFORE_MOVE=0        # Create backups before moving
+ROLLBACK_ON_ERROR=1         # Automatic rollback on errors

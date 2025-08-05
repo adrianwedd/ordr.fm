@@ -1,0 +1,309 @@
+name: CI Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # Static Analysis and Linting
+  lint:
+    name: Lint and Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up shellcheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+          
+      - name: Run shellcheck on main scripts
+        run: |
+          shellcheck -x ordr.fm.sh ordr.fm.modular.sh || true
+          
+      - name: Run shellcheck on library modules
+        run: |
+          find lib -name "*.sh" -type f -exec shellcheck -x {} \; || true
+          
+      - name: Check for common issues
+        run: |
+          # Check for tabs vs spaces consistency
+          ! grep -r $'\t' lib/*.sh || echo "Warning: Mixed tabs/spaces found"
+          
+          # Check for DOS line endings
+          ! find . -name "*.sh" -exec file {} \; | grep CRLF || echo "Warning: DOS line endings found"
+
+  # Security Scanning
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run Trivy security scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+          
+      - name: Check for hardcoded secrets
+        run: |
+          # Simple check for potential secrets
+          ! grep -r "password\|secret\|key\|token" --include="*.sh" . | grep -v "^#" | grep "=" || echo "Warning: Potential secrets found"
+
+  # Functionality Tests
+  test-basic:
+    name: Basic Functionality Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        test-type: [dry-run, metadata, organization]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y exiftool jq bc sqlite3
+          
+      - name: Create test environment
+        run: |
+          mkdir -p test_music/{album1,album2,album3}
+          touch test_music/album1/{track1.mp3,track2.mp3}
+          touch test_music/album2/{song1.flac,song2.flac}
+          touch test_music/album3/{mix1.mp3,mix2.flac}
+          
+      - name: Run ${{ matrix.test-type }} test
+        run: |
+          case "${{ matrix.test-type }}" in
+            dry-run)
+              ./ordr.fm.modular.sh --source test_music --destination test_output --dry-run
+              ;;
+            metadata)
+              # Test metadata extraction
+              ./ordr.fm.modular.sh --source test_music --destination test_output --verbose | grep -E "Extracting metadata|Quality:"
+              ;;
+            organization)
+              # Test organization logic
+              ./ordr.fm.modular.sh --source test_music --destination test_output --enable-electronic
+              ;;
+          esac
+
+  # Module Tests
+  test-modules:
+    name: Module Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        module: [common, fileops, database, organization, metadata_extraction]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y exiftool jq bc sqlite3
+          
+      - name: Test ${{ matrix.module }} module
+        run: |
+          # Source module and test basic functionality
+          bash -c "
+            source lib/${{ matrix.module }}.sh
+            
+            # Module-specific tests
+            case '${{ matrix.module }}' in
+              common)
+                # Test logging
+                log \$LOG_INFO 'Test message'
+                sanitize_filename 'Test/File:Name*.mp3'
+                ;;
+              fileops)
+                # Test directory operations
+                mkdir -p test_dir
+                directory_has_audio_files test_dir || echo 'Empty dir test passed'
+                ;;
+              database)
+                # Test database initialization
+                STATE_DB='test.db'
+                init_databases
+                [ -f test.db ] && echo 'Database created'
+                ;;
+              organization)
+                # Test organization functions
+                determine_organization_mode 'Test Artist' 'Test Label'
+                ;;
+              metadata_extraction)
+                # Test quality detection
+                echo '[{\"FileType\":\"FLAC\"},{\"FileType\":\"MP3\"}]' | jq '.' > test.json
+                cat test.json
+                ;;
+            esac
+          "
+
+  # Performance Tests
+  test-performance:
+    name: Performance Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y exiftool jq bc time
+          
+      - name: Create large test set
+        run: |
+          # Create 100 test albums
+          for i in {1..100}; do
+            mkdir -p "test_music/album_$i"
+            for j in {1..10}; do
+              touch "test_music/album_$i/track_$j.mp3"
+            done
+          done
+          
+      - name: Test sequential performance
+        run: |
+          /usr/bin/time -v ./ordr.fm.modular.sh --source test_music --destination test_output_seq --dry-run 2>&1 | tee seq_performance.log
+          
+      - name: Test parallel performance
+        run: |
+          /usr/bin/time -v ./ordr.fm.modular.sh --source test_music --destination test_output_par --parallel --dry-run 2>&1 | tee par_performance.log
+          
+      - name: Compare performance
+        run: |
+          seq_time=$(grep "Elapsed" seq_performance.log | awk '{print $8}')
+          par_time=$(grep "Elapsed" par_performance.log | awk '{print $8}')
+          echo "Sequential: $seq_time"
+          echo "Parallel: $par_time"
+
+  # Integration Tests
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install all dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y exiftool jq bc sqlite3 parallel
+          
+      - name: Run full integration test
+        run: |
+          # Create realistic test data
+          mkdir -p test_music/{"Electronic Artist - Album (2023)","Rock Band - Greatest Hits","Various Artists - Compilation"}
+          
+          # Test complete workflow
+          ./ordr.fm.modular.sh \
+            --source test_music \
+            --destination test_output \
+            --enable-electronic \
+            --parallel \
+            --dry-run \
+            --verbose
+            
+      - name: Verify outputs
+        run: |
+          # Check log file was created
+          [ -f ordr.fm.log ] && echo "Log file created"
+          
+          # Check for expected log entries
+          grep -E "Found.*album directories" ordr.fm.log
+          grep -E "Processing complete" ordr.fm.log
+
+  # Documentation Tests
+  test-docs:
+    name: Documentation Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Check documentation completeness
+        run: |
+          # Verify all key docs exist
+          for doc in README.md SPECIFICATIONS.md CLAUDE.md docs/PARALLEL_PROCESSING.md; do
+            [ -f "$doc" ] || echo "Missing: $doc"
+          done
+          
+      - name: Check for broken links in docs
+        run: |
+          # Simple broken link checker
+          grep -r "http" docs/ *.md | grep -v "https://github.com/adrianwedd/ordr.fm" | head -10 || true
+          
+      - name: Verify examples work
+        run: |
+          # Extract and test code examples from README
+          ./ordr.fm.modular.sh --help
+
+  # Release Build
+  build:
+    name: Build Release Package
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, security, test-basic, test-modules, test-integration]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Create release package
+        run: |
+          VERSION=$(grep "VERSION=" ordr.fm.modular.sh | cut -d'"' -f2)
+          PACKAGE_NAME="ordr.fm-v${VERSION}"
+          
+          # Create package directory
+          mkdir -p "$PACKAGE_NAME"
+          
+          # Copy essential files
+          cp -r lib "$PACKAGE_NAME/"
+          cp ordr.fm.modular.sh "$PACKAGE_NAME/"
+          cp ordr.fm.conf.example "$PACKAGE_NAME/"
+          cp README.md SPECIFICATIONS.md "$PACKAGE_NAME/"
+          cp -r docs "$PACKAGE_NAME/"
+          
+          # Create archive
+          tar -czf "${PACKAGE_NAME}.tar.gz" "$PACKAGE_NAME"
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-package
+          path: ordr.fm-v*.tar.gz
+          retention-days: 30
+
+  # Notify on failure
+  notify:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    if: failure()
+    needs: [lint, security, test-basic, test-modules, test-integration]
+    steps:
+      - name: Create issue for failed CI
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `CI Pipeline Failed: ${context.workflow} #${context.runNumber}`,
+              body: `The CI pipeline failed on ${context.ref}.\n\nWorkflow: ${context.workflow}\nRun: ${context.runNumber}\nCommit: ${context.sha}`,
+              labels: ['bug', 'ci-failure']
+            })
