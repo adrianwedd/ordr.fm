@@ -162,6 +162,12 @@ organization_report_*.txt
 error_report_*.txt
 performance_*.log
 
+# Claude Code Exports
+# -------------------
+2025*.txt
+claude-conversation-*.txt
+conversation-export-*.txt
+
 # IDE and Editor Files
 # --------------------
 .vscode/
