@@ -34,9 +34,20 @@ discogs_cache/
 # Backup markers
 .backup_marker
 
-# Test output
+# Test directories and files
 test_output/
+test_move_output/
+test_simple/
+test_subset/
+test_music/
+test_*/
+*_test/
 /tmp/test_music/
+quick_backup_test.sh
+start_backup.sh
+test_*.sh
+!test_runner.sh
+!test_parallel.sh
 
 # Rate limiters
 discogs_rate_limiter
@@ -55,3 +66,35 @@ node_modules/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+package-lock.json
+yarn.lock
+
+# Music files (shouldn't be committed)
+*.mp3
+*.flac
+*.wav
+*.m4a
+*.ogg
+*.aiff
+*.alac
+*.opus
+*.wma
+*.cue
+*.nfo
+*.m3u
+*.pls
+
+# Backup and temporary files
+backup.pid
+backup_*/
+*.bak
+*.backup
+
+# Duplicate reports
+duplicate_albums_*.txt
+duplicates_*.txt
+
+# Session summaries (local only)
+setup_summary_*.txt
+system_check_report_*.txt
+issue_report_*.md
