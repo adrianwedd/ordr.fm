@@ -15,6 +15,20 @@ if [[ -f "$SCRIPT_DIR/alias_optimization.sh" ]]; then
 if [[ -f "$SCRIPT_DIR/alias_validation.sh" ]]; then
     source "$SCRIPT_DIR/alias_validation.sh"
 fi
+
+# Source metadata processing module
+if [[ -f "$SCRIPT_DIR/lib/metadata.sh" ]]; then
+    source "$SCRIPT_DIR/lib/metadata.sh"
+else
+    echo "WARNING: Metadata module not found at $SCRIPT_DIR/lib/metadata.sh" >&2
+fi
+
+# Source Discogs API integration module
+if [[ -f "$SCRIPT_DIR/lib/discogs.sh" ]]; then
+    source "$SCRIPT_DIR/lib/discogs.sh"
+else
+    echo "WARNING: Discogs module not found at $SCRIPT_DIR/lib/discogs.sh" >&2
+fi
     # Parse alias groups once at startup for performance
     parse_alias_groups_once
     # Validate alias configuration
@@ -176,6 +190,13 @@ check_dependencies() {
     log $LOG_INFO "All required dependencies are installed."
 }
 
+# Function to escape SQL strings
+sql_escape() {
+    local input="$1"
+    # Replace single quotes with two single quotes for SQL escaping
+    echo "$input" | sed "s/'/''/g"
+}
+
 # Function to sanitize strings for filesystem use
 sanitize_filename() {
     local input="$1"
@@ -186,430 +207,37 @@ sanitize_filename() {
     echo "$sanitized"
 }
 
-# --- Discogs API Integration Functions ---
-
-# Initialize Discogs integration settings
-init_discogs() {
-    if [[ $DISCOGS_ENABLED -eq 0 ]]; then
+# Function to securely move files/directories with permission handling
+secure_move_file() {
+    local source="$1"
+    local dest="$2"
+    
+    # Try regular mv first
+    if mv "$source" "$dest" 2>/dev/null; then
         return 0
     fi
     
-    # Set up cache directory
-    if [[ -z "$DISCOGS_CACHE_DIR" ]]; then
-        DISCOGS_CACHE_DIR="$(dirname "$LOG_FILE")/discogs_cache"
-    fi
-    
-    # Create cache directory if it doesn't exist
-    if [[ ! -d "$DISCOGS_CACHE_DIR" ]]; then
-        mkdir -p "$DISCOGS_CACHE_DIR" || {
-            log $LOG_WARNING "WARN: Could not create Discogs cache directory: $DISCOGS_CACHE_DIR. Disabling caching."
-            DISCOGS_CACHE_DIR=""
-        }
-    fi
-    
-    # Set up rate limiter file
-    if [[ -z "$DISCOGS_RATE_LIMITER_FILE" ]]; then
-        DISCOGS_RATE_LIMITER_FILE="$(dirname "$LOG_FILE")/discogs_rate_limiter"
-    fi
-    
-    # Initialize rate limiter file if it doesn't exist
-    if [[ ! -f "$DISCOGS_RATE_LIMITER_FILE" ]]; then
-        echo "0" > "$DISCOGS_RATE_LIMITER_FILE"
-    fi
-    
-    log $LOG_DEBUG "Discogs integration initialized. Cache: $DISCOGS_CACHE_DIR, Rate limiter: $DISCOGS_RATE_LIMITER_FILE"
-}
-
-# Rate limiter for Discogs API requests
-discogs_rate_limit() {
-    if [[ $DISCOGS_ENABLED -eq 0 ]]; then
-        return 0
-    fi
-    
-    local current_time=$(date +%s)
-    local last_request_time
-    
-    # Read last request time from file
-    if [[ -f "$DISCOGS_RATE_LIMITER_FILE" ]]; then
-        last_request_time=$(cat "$DISCOGS_RATE_LIMITER_FILE" 2>/dev/null || echo "0")
-    else
-        last_request_time=0
-    fi
-    
-    # Calculate time since last request
-    local time_diff=$((current_time - last_request_time))
-    local min_interval=$((60 / DISCOGS_RATE_LIMIT))  # seconds between requests
-    
-    if [[ $time_diff -lt $min_interval ]]; then
-        local sleep_time=$((min_interval - time_diff))
-        log $LOG_DEBUG "Rate limiting: sleeping for $sleep_time seconds"
-        sleep $sleep_time
-    fi
-    
-    # Update last request time
-    echo "$current_time" > "$DISCOGS_RATE_LIMITER_FILE"
-}
-
-# Generate cache key for Discogs API request
-discogs_cache_key() {
-    local artist="$1"
-    local album="$2"
-    local year="$3"
-    
-    # Create a normalized cache key
-    local normalized_artist=$(echo "$artist" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
-    local normalized_album=$(echo "$album" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
-    local key="${normalized_artist}_${normalized_album}_${year:-0000}"
-    
-    echo "$key" | md5sum | cut -d' ' -f1
-}
-
-# Check if cached response exists and is valid
-discogs_cache_get() {
-    local cache_key="$1"
-    
-    if [[ -z "$DISCOGS_CACHE_DIR" || ! -d "$DISCOGS_CACHE_DIR" ]]; then
-        return 1
-    fi
-    
-    local cache_file="$DISCOGS_CACHE_DIR/$cache_key.json"
-    
-    if [[ ! -f "$cache_file" ]]; then
-        return 1
-    fi
-    
-    # Check if cache is expired
-    local cache_age_hours=$(( ($(date +%s) - $(stat -c %Y "$cache_file" 2>/dev/null || echo 0)) / 3600 ))
-    
-    if [[ $cache_age_hours -gt $DISCOGS_CACHE_EXPIRY ]]; then
-        log $LOG_DEBUG "Discogs cache expired for key: $cache_key (age: ${cache_age_hours}h)"
-        secure_remove_file "$cache_file"
-        return 1
-    fi
-    
-    log $LOG_DEBUG "Using cached Discogs response for key: $cache_key"
-    cat "$cache_file"
-    return 0
-}
-
-# Store response in cache
-discogs_cache_set() {
-    local cache_key="$1"
-    local response="$2"
-    
-    if [[ -z "$DISCOGS_CACHE_DIR" || ! -d "$DISCOGS_CACHE_DIR" ]]; then
-        return 1
-    fi
-    
-    local cache_file="$DISCOGS_CACHE_DIR/$cache_key.json"
-    
-    echo "$response" > "$cache_file"
-    log $LOG_DEBUG "Cached Discogs response for key: $cache_key"
-}
-
-# Make authenticated request to Discogs API
-discogs_api_request() {
-    local endpoint="$1"
-    local cache_key="$2"
-    
-    if [[ $DISCOGS_ENABLED -eq 0 ]]; then
-        return 1
-    fi
-    
-    # Try cache first
-    if [[ -n "$cache_key" ]]; then
-        local cached_response
-        if cached_response=$(discogs_cache_get "$cache_key"); then
-            echo "$cached_response"
+    # If that fails, try with sudo if available
+    if command -v sudo >/dev/null 2>&1; then
+        if sudo mv "$source" "$dest" 2>/dev/null; then
+            # Fix ownership to match parent directory
+            local parent_dir=$(dirname "$dest")
+            local parent_owner=$(stat -c '%U:%G' "$parent_dir" 2>/dev/null)
+            if [[ -n "$parent_owner" ]]; then
+                sudo chown -R "$parent_owner" "$dest" 2>/dev/null
+            fi
             return 0
         fi
     fi
     
-    # Apply rate limiting
-    discogs_rate_limit
-    
-    local api_url="https://api.discogs.com${endpoint}"
-    local auth_header=""
-    local user_agent="ordr.fm/1.0 +https://github.com/adrianwedd/ordr.fm"
-    
-    # Set up authentication
-    if [[ -n "$DISCOGS_USER_TOKEN" ]]; then
-        auth_header="Authorization: Discogs token=${DISCOGS_USER_TOKEN}"
-    elif [[ -n "$DISCOGS_CONSUMER_KEY" && -n "$DISCOGS_CONSUMER_SECRET" ]]; then
-        auth_header="Authorization: Discogs key=${DISCOGS_CONSUMER_KEY}, secret=${DISCOGS_CONSUMER_SECRET}"
-    else
-        log $LOG_WARNING "WARN: No Discogs authentication configured. Using unauthenticated requests (lower rate limit)."
-    fi
-    
-    log $LOG_DEBUG "Making Discogs API request to: $api_url"
-    
-    # Make the API request
-    local response
-    if [[ -n "$auth_header" ]]; then
-        response=$(curl -s -H "User-Agent: $user_agent" -H "$auth_header" "$api_url" 2>/dev/null)
-    else
-        response=$(curl -s -H "User-Agent: $user_agent" "$api_url" 2>/dev/null)
-    fi
-    
-    local curl_exit_code=$?
-    
-    if [[ $curl_exit_code -ne 0 ]]; then
-        log $LOG_WARNING "WARN: Discogs API request failed with curl exit code: $curl_exit_code"
-        return 1
-    fi
-    
-    if [[ -z "$response" ]]; then
-        log $LOG_WARNING "WARN: Empty response from Discogs API"
-        return 1
-    fi
-    
-    # Check for API errors
-    local error_message=$(echo "$response" | jq -r '.message // empty' 2>/dev/null)
-    if [[ -n "$error_message" ]]; then
-        log $LOG_WARNING "WARN: Discogs API error: $error_message"
-        return 1
-    fi
-    
-    # Cache successful response
-    if [[ -n "$cache_key" ]]; then
-        discogs_cache_set "$cache_key" "$response"
-    fi
-    
-    echo "$response"
-    return 0
+    # If all else fails, log error
+    log $LOG_ERROR "Failed to move: $source -> $dest"
+    return 1
 }
 
-# Search for releases on Discogs
-discogs_search_releases() {
-    local artist="$1"
-    local album="$2"
-    local year="$3"
-    
-    if [[ $DISCOGS_ENABLED -eq 0 ]]; then
-        return 1
-    fi
-    
-    # Build search query
-    local query="artist:\"$artist\" release_title:\"$album\""
-    if [[ -n "$year" ]]; then
-        query="$query year:$year"
-    fi
-    
-    # URL encode the query
-    local encoded_query=$(echo "$query" | jq -sRr @uri)
-    local endpoint="/database/search?q=$encoded_query&type=release&per_page=10"
-    
-    local cache_key=$(discogs_cache_key "$artist" "$album" "$year")
-    
-    log $LOG_DEBUG "Searching Discogs for: $query"
-    
-    discogs_api_request "$endpoint" "$cache_key"
-}
-
-# Get detailed release information from Discogs
-discogs_get_release() {
-    local release_id="$1"
-    
-    if [[ $DISCOGS_ENABLED -eq 0 || -z "$release_id" ]]; then
-        return 1
-    fi
-    
-    local endpoint="/releases/$release_id"
-    local cache_key="release_${release_id}"
-    
-    log $LOG_DEBUG "Getting Discogs release details for ID: $release_id"
-    
-    discogs_api_request "$endpoint" "$cache_key"
-}
-
-# Extract enhanced metadata from Discogs release data
-extract_discogs_metadata() {
-    local release_json="$1"
-    
-    if [[ -z "$release_json" ]]; then
-        return 1
-    fi
-    
-    # Extract basic information
-    local discogs_artist=$(echo "$release_json" | jq -r '.artists[0].name // empty' 2>/dev/null)
-    local discogs_title=$(echo "$release_json" | jq -r '.title // empty' 2>/dev/null)
-    local discogs_year=$(echo "$release_json" | jq -r '.year // empty' 2>/dev/null)
-    local discogs_label=$(echo "$release_json" | jq -r '.labels[0].name // empty' 2>/dev/null)
-    local discogs_catalog=$(echo "$release_json" | jq -r '.labels[0].catno // empty' 2>/dev/null)
-    local discogs_genre=$(echo "$release_json" | jq -r '.genres[0] // empty' 2>/dev/null)
-    local discogs_style=$(echo "$release_json" | jq -r '.styles[0] // empty' 2>/dev/null)
-    
-    # Extract remix artists if enabled
-    local remix_artists=""
-    if [[ $DISCOGS_REMIX_ARTISTS -eq 1 ]]; then
-        remix_artists=$(echo "$release_json" | jq -r '.tracklist[]? | .title' 2>/dev/null | grep -i "remix\|rmx" | head -5 | tr '\n' ';' || echo "")
-    fi
-    
-    # Extract label series information if enabled
-    local label_series=""
-    if [[ $DISCOGS_LABEL_SERIES -eq 1 ]]; then
-        label_series=$(echo "$release_json" | jq -r '.series[]?.name // empty' 2>/dev/null | head -1)
-    fi
-    
-    # Create enhanced metadata JSON
-    local enhanced_metadata=$(jq -n \
-        --arg artist "$discogs_artist" \
-        --arg title "$discogs_title" \
-        --arg year "$discogs_year" \
-        --arg label "$discogs_label" \
-        --arg catalog "$discogs_catalog" \
-        --arg genre "$discogs_genre" \
-        --arg style "$discogs_style" \
-        --arg remix_artists "$remix_artists" \
-        --arg label_series "$label_series" \
-        '{
-            artist: $artist,
-            title: $title,
-            year: $year,
-            label: $label,
-            catalog_number: $catalog,
-            genre: $genre,
-            style: $style,
-            remix_artists: $remix_artists,
-            label_series: $label_series
-        }')
-    
-    echo "$enhanced_metadata"
-}
-
-# Calculate confidence score for Discogs metadata match
-calculate_discogs_confidence() {
-    local local_artist="$1"
-    local local_album="$2"
-    local local_year="$3"
-    local discogs_metadata="$4"
-    
-    if [[ -z "$discogs_metadata" ]]; then
-        echo "0.0"
-        return
-    fi
-    
-    local discogs_artist=$(echo "$discogs_metadata" | jq -r '.artist // empty')
-    local discogs_title=$(echo "$discogs_metadata" | jq -r '.title // empty')
-    local discogs_year=$(echo "$discogs_metadata" | jq -r '.year // empty')
-    
-    local confidence=0.0
-    local max_score=3.0
-    
-    # Artist matching (weight: 1.0)
-    if [[ -n "$local_artist" && -n "$discogs_artist" ]]; then
-        # Normalize both artists for comparison
-        local norm_local_artist=$(echo "$local_artist" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
-        local norm_discogs_artist=$(echo "$discogs_artist" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
-        
-        local artist_similarity=0.0
-        if [[ "$norm_local_artist" == "$norm_discogs_artist" ]]; then
-            artist_similarity=1.0
-        elif [[ "$norm_local_artist" == *"$norm_discogs_artist"* ]] || [[ "$norm_discogs_artist" == *"$norm_local_artist"* ]]; then
-            artist_similarity=0.7
-        else
-            artist_similarity=0.0
-        fi
-        
-        confidence=$(echo "$confidence + $artist_similarity" | bc -l 2>/dev/null || echo "$confidence")
-    fi
-    
-    # Album matching (weight: 1.0)
-    if [[ -n "$local_album" && -n "$discogs_title" ]]; then
-        # Normalize both titles for comparison
-        local norm_local=$(echo "$local_album" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
-        local norm_discogs=$(echo "$discogs_title" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
-        
-        local album_similarity=0.0
-        if [[ "$norm_local" == "$norm_discogs" ]]; then
-            album_similarity=1.0
-        elif [[ "$norm_local" == *"$norm_discogs"* ]] || [[ "$norm_discogs" == *"$norm_local"* ]]; then
-            album_similarity=0.7
-        else
-            album_similarity=0.0
-        fi
-        
-        confidence=$(echo "$confidence + $album_similarity" | bc -l 2>/dev/null || echo "$confidence")
-    fi
-    
-    # Year matching (weight: 1.0)
-    if [[ -n "$local_year" && -n "$discogs_year" ]]; then
-        if [[ "$local_year" == "$discogs_year" ]]; then
-            confidence=$(echo "$confidence + 1.0" | bc -l 2>/dev/null || echo "$confidence")
-        elif [[ $((local_year - discogs_year)) -ge -2 && $((local_year - discogs_year)) -le 2 ]]; then
-            confidence=$(echo "$confidence + 0.5" | bc -l 2>/dev/null || echo "$confidence")
-        fi
-    fi
-    
-    # Normalize to 0.0-1.0 range
-    local final_confidence=$(echo "scale=2; $confidence / $max_score" | bc -l 2>/dev/null || echo "0.00")
-    
-    echo "$final_confidence"
-}
-
-# Main function to enrich metadata with Discogs data
-enrich_metadata_with_discogs() {
-    local album_artist="$1"
-    local album_title="$2"
-    local album_year="$3"
-    
-    if [[ $DISCOGS_ENABLED -eq 0 ]]; then
-        echo "{}"
-        return 0
-    fi
-    
-    log $LOG_DEBUG "Enriching metadata with Discogs for: $album_artist - $album_title ($album_year)"
-    
-    # Search for releases
-    local search_results
-    search_results=$(discogs_search_releases "$album_artist" "$album_title" "$album_year")
-    
-    if [[ -z "$search_results" ]]; then
-        log $LOG_DEBUG "No Discogs search results found"
-        echo "{}"
-        return 0
-    fi
-    
-    # Get the first (most relevant) result
-    local first_result_id=$(echo "$search_results" | jq -r '.results[0].id // empty' 2>/dev/null)
-    
-    if [[ -z "$first_result_id" ]]; then
-        log $LOG_DEBUG "No valid Discogs release ID found in search results"
-        echo "{}"
-        return 0
-    fi
-    
-    # Get detailed release information
-    local release_details
-    release_details=$(discogs_get_release "$first_result_id")
-    
-    if [[ -z "$release_details" ]]; then
-        log $LOG_DEBUG "Could not retrieve Discogs release details for ID: $first_result_id"
-        echo "{}"
-        return 0
-    fi
-    
-    # Extract enhanced metadata
-    local enhanced_metadata
-    enhanced_metadata=$(extract_discogs_metadata "$release_details")
-    
-    if [[ -z "$enhanced_metadata" ]]; then
-        log $LOG_DEBUG "Could not extract enhanced metadata from Discogs release"
-        echo "{}"
-        return 0
-    fi
-    
-    # Calculate confidence score
-    local confidence
-    confidence=$(calculate_discogs_confidence "$album_artist" "$album_title" "$album_year" "$enhanced_metadata")
-    
-    # Add confidence score to metadata
-    enhanced_metadata=$(echo "$enhanced_metadata" | jq --arg conf "$confidence" '. + {confidence: ($conf | tonumber)}')
-    
-    log $LOG_DEBUG "Discogs metadata enrichment completed with confidence: $confidence"
-    
-    echo "$enhanced_metadata"
-}
+# Note: Discogs API integration functions are now provided by the discogs module (lib/discogs.sh)
+# Available functions: init_discogs, discogs_search_releases, discogs_get_release, 
+# discogs_api_request, discogs_rate_limit, discogs_cache_*
 
 # --- Advanced Electronic Music Organization Functions ---
 
@@ -1644,61 +1272,47 @@ analyze_album_for_duplicates() {
     
     log $LOG_DEBUG "Analyzing album for duplicates: $album_dir"
     
-    # Use existing album processing logic to get metadata
-    local audio_files=()
-    while IFS= read -r -d $'\0' file; do
-        audio_files+=("$file")
-    done < <(find "$album_dir" -maxdepth 1 -type f \( -iname "*.mp3" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" -o -iname "*.aiff" -o -iname "*.alac" \) -print0)
-    
-    if [[ ${#audio_files[@]} -eq 0 ]]; then
-        log $LOG_DEBUG "No audio files found in '$album_dir' for duplicate analysis"
-        return 1
-    fi
-    
-    # Extract metadata
+    # Extract metadata using the metadata module
     local exiftool_output
-    exiftool_output=$(exiftool -json "${audio_files[@]}" 2>/dev/null)
+    exiftool_output=$(extract_audio_metadata "$album_dir")
     
     if [[ -z "$exiftool_output" ]]; then
         log $LOG_DEBUG "Could not extract metadata from '$album_dir' for duplicate analysis"
         return 1
     fi
     
-    # Parse metadata
-    local all_album_artists=$(echo "$exiftool_output" | jq -r '.[] | .AlbumArtist // empty')
-    local all_artists=$(echo "$exiftool_output" | jq -r '.[] | .Artist // empty')
-    local all_albums=$(echo "$exiftool_output" | jq -r '.[] | .Album // empty')
-    local all_years=$(echo "$exiftool_output" | jq -r '.[].Year // empty')
-    local all_file_types=$(echo "$exiftool_output" | jq -r '.[].FileTypeExtension // empty')
-    local all_bitrates=$(echo "$exiftool_output" | jq -r '.[].AudioBitrate // empty' | grep -v '^$' | sed 's/ kbps$//')
+    # Determine album metadata using the metadata module
+    local album_metadata
+    album_metadata=$(determine_album_metadata "$exiftool_output" "$(basename "$album_dir")")
     
-    # Determine album metadata
-    local album_artist=""
-    if [[ $(echo "$all_album_artists" | sort -u | wc -l) -eq 1 && -n "$(echo "$all_album_artists" | head -n 1)" ]]; then
-        album_artist=$(echo "$all_album_artists" | head -n 1)
-    elif [[ $(echo "$all_artists" | sort -u | wc -l) -eq 1 && -n "$(echo "$all_artists" | head -n 1)" ]]; then
-        album_artist=$(echo "$all_artists" | head -n 1)
-    else
-        album_artist="Various Artists"
-    fi
-    
-    local album_title=$(echo "$all_albums" | sort | uniq -c | sort -nr | head -n 1 | awk '{$1=""; print $0}' | sed 's/^ *//')
-    local album_year=$(echo "$all_years" | sort -n | head -n 1)
-    local track_count=${#audio_files[@]}
-    
-    if [[ -z "$album_title" ]]; then
-        log $LOG_DEBUG "Could not determine album title for '$album_dir'"
+    if [[ -z "$album_metadata" ]] || ! validate_album_metadata "$album_metadata"; then
+        log $LOG_DEBUG "Could not determine valid album metadata for '$album_dir'"
         return 1
     fi
     
-    # Calculate quality metrics
-    local has_lossless=0 has_lossy=0
+    # Extract album information from metadata JSON
+    local album_artist=$(echo "$album_metadata" | jq -r '.artist')
+    local album_title=$(echo "$album_metadata" | jq -r '.title')
+    local album_year=$(echo "$album_metadata" | jq -r '.year')
+    local track_count=$(echo "$album_metadata" | jq -r '.track_count')
+    
+    # Get additional metadata for quality analysis
+    local all_file_types=$(echo "$exiftool_output" | jq -r '.[].FileTypeExtension // empty')
+    local all_bitrates=$(echo "$exiftool_output" | jq -r '.[].AudioBitrate // empty' | grep -v '^$' | sed 's/ kbps$//')
+    
+    # Calculate quality metrics using metadata module
+    local quality_type
+    quality_type=$(determine_album_quality "$exiftool_output")
+    
+    # Calculate additional metrics for duplicate detection
     local bitrate_sum=0 bitrate_count=0
     local format_list=()
     local total_size=0
+    local has_lossless=0 has_lossy=0
     
     for file_type in $all_file_types; do
-        case "$file_type" in
+        local file_type_upper=$(echo "$file_type" | tr '[:lower:]' '[:upper:]')
+        case "$file_type_upper" in
             "FLAC"|"WAV"|"AIFF"|"ALAC") has_lossless=1; format_list+=("$file_type") ;;
             "MP3"|"AAC"|"M4A"|"OGG") has_lossy=1; format_list+=("$file_type") ;;
         esac
@@ -1711,21 +1325,11 @@ analyze_album_for_duplicates() {
         fi
     done
     
-    for file in "${audio_files[@]}"; do
+    # Calculate total file size
+    while IFS= read -r -d $'\0' file; do
         local file_size=$(stat -c "%s" "$file" 2>/dev/null || echo "0")
         total_size=$((total_size + file_size))
-    done
-    
-    local quality_type=""
-    if [[ $has_lossless -eq 1 && $has_lossy -eq 1 ]]; then
-        quality_type="Mixed"
-    elif [[ $has_lossless -eq 1 ]]; then
-        quality_type="Lossless"
-    elif [[ $has_lossy -eq 1 ]]; then
-        quality_type="Lossy"
-    else
-        quality_type="Unknown"
-    fi
+    done < <(detect_audio_files "$album_dir" | tr '\n' '\0')
     
     local avg_bitrate=0
     if [[ $bitrate_count -gt 0 ]]; then
@@ -2565,7 +2169,22 @@ perform_atomic_directory_move() {
     local temp_dest="${dest_dir}.tmp.${operation_id}"
     
     log $LOG_INFO "Using rsync to move directory atomically..."
-    if rsync $rsync_options "$source_dir/" "$temp_dest/"; then
+    # Try rsync, and if it fails due to permissions, try with sudo
+    if rsync $rsync_options "$source_dir/" "$temp_dest/" 2>/dev/null; then
+        log $LOG_DEBUG "rsync succeeded without sudo"
+    elif command -v sudo >/dev/null 2>&1 && sudo rsync $rsync_options "$source_dir/" "$temp_dest/" 2>/dev/null; then
+        log $LOG_DEBUG "rsync succeeded with sudo"
+        # Fix ownership to match parent directory
+        local parent_owner=$(stat -c '%U:%G' "$(dirname "$dest_dir")" 2>/dev/null)
+        if [[ -n "$parent_owner" ]]; then
+            sudo chown -R "$parent_owner" "$temp_dest" 2>/dev/null
+        fi
+    else
+        log $LOG_ERROR "rsync failed during directory move"
+        return 1
+    fi
+    
+    if true; then
         # Atomic rename to final destination
         if secure_move_file "$temp_dest" "$dest_dir"; then
             # Remove empty source directory
@@ -2956,28 +2575,12 @@ process_album_directory() {
     local album_dir="$1"
     log $LOG_INFO "Processing album directory: $album_dir"
 
-    # Find all audio files within the album directory.
-    # Referencing SPECIFICATIONS.md: "Input and Output" -> "Recursive Scanning"
-    # and "Metadata Extraction and Interpretation" -> "Tools"
-    local audio_files=()
-    while IFS= read -r -d $'\0' file; do
-        audio_files+=("$file")
-    done < <(find "$album_dir" -maxdepth 1 -type f \( -iname "*.mp3" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" -o -iname "*.aiff" -o -iname "*.alac" \) -print0)
-
-    if [[ ${#audio_files[@]} -eq 0 ]]; then
-        log $LOG_INFO "SKIP: No audio files found in '$album_dir'. Skipping."
-        return 0
-    fi
-
-    # Extract all relevant metadata from all audio files in one go using exiftool -json.
-    # This is more efficient than calling exiftool per file.
-    # Referencing SPECIFICATIONS.md: "Metadata Extraction and Interpretation" -> "Tools"
+    # Extract metadata using the metadata module
     local exiftool_output
-    exiftool_output=$(exiftool -json "${audio_files[@]}" 2>/dev/null)
+    exiftool_output=$(extract_audio_metadata "$album_dir")
 
     if [[ -z "$exiftool_output" ]]; then
         log $LOG_WARNING "WARN: Could not extract metadata from any files in '$album_dir'. Moving to unsorted."
-        # If no metadata can be extracted, treat as unsorted.
         move_to_unsorted "$album_dir" "No readable metadata found."
         return 0
     fi
@@ -2985,97 +2588,46 @@ process_album_directory() {
     # --- DEBUGGING: Print raw exiftool output ---
     log $LOG_DEBUG "Raw exiftool output for '$album_dir':\n$exiftool_output"
 
-    # Parse metadata using jq and collect relevant tags for all tracks.
-    # Referencing SPECIFICATIONS.md: "Metadata Extraction and Interpretation" -> "Required Tags"
-    local all_album_artists=$(echo "$exiftool_output" | jq -r '.[] | .AlbumArtist // empty')
-    local all_artists=$(echo "$exiftool_output" | jq -r '.[] | .Artist // empty')
-    local all_albums=$(echo "$exiftool_output" | jq -r '.[] | .Album // empty')
-    local all_titles=$(echo "$exiftool_output" | jq -r '.[] | .Title // empty')
-    local all_track_numbers=$(echo "$exiftool_output" | jq -r '.[].Track // empty')
-    local all_years=$(echo "$exiftool_output" | jq -r '.[].Year // empty')
-    local all_disc_numbers=$(echo "$exiftool_output" | jq -r '.[].DiscNumber // empty')
-    local all_file_types=$(echo "$exiftool_output" | jq -r '.[].FileTypeExtension // empty')
-
-    # --- DEBUGGING: Print collected metadata arrays ---
-    log $LOG_DEBUG "Collected Album Artists: $(echo "$all_album_artists" | tr '\n' ';')"
-    log $LOG_DEBUG "Collected Artists: $(echo "$all_artists" | tr '\n' ';')"
-    log $LOG_DEBUG "Collected Albums: $(echo "$all_albums" | tr '\n' ';')"
-    log $LOG_DEBUG "Collected Titles: $(echo "$all_titles" | tr '\n' ';')"
-    log $LOG_DEBUG "Collected Track Numbers: $(echo "$all_track_numbers" | tr '\n' ';')"
-    log $LOG_DEBUG "Collected Years: $(echo "$all_years" | tr '\n' ';')"
-    log $LOG_DEBUG "Collected Disc Numbers: $(echo "$all_disc_numbers" | tr '\n' ';')"
-    log $LOG_DEBUG "Collected File Types: $(echo "$all_file_types" | tr '\n' ';')"
-
-    # --- Determine Album Identity ---
-    # Referencing SPECIFICATIONS.md: "Metadata Extraction and Interpretation" -> "Metadata Consistency and Conflict Resolution"
-
-    local album_artist=""
-    local album_title=""
-    local album_year=""
-
-    # Determine Album Artist
-    # Prioritize AlbumArtist, then Artist. Handle "Various Artists".
-    if [[ $(echo "$all_album_artists" | sort -u | wc -l) -eq 1 && -n "$(echo "$all_album_artists" | head -n 1)" ]]; then
-        album_artist=$(echo "$all_album_artists" | head -n 1)
-        log $LOG_DEBUG "Determined Album Artist (from AlbumArtist tag): $album_artist"
-    elif [[ $(echo "$all_artists" | sort -u | wc -l) -eq 1 && -n "$(echo "$all_artists" | head -n 1)" ]]; then
-        album_artist=$(echo "$all_artists" | head -n 1)
-        log $LOG_DEBUG "Determined Album Artist (from Artist tag): $album_artist"
-    else
-        # If multiple album artists or artists, classify as "Various Artists"
-        album_artist="Various Artists"
-        log $LOG_INFO "Determined Album Artist: '$album_artist' (multiple or inconsistent artists found)."
+    # Determine album metadata using the metadata module
+    local album_metadata
+    album_metadata=$(determine_album_metadata "$exiftool_output" "$(basename "$album_dir")")
+    
+    if [[ -z "$album_metadata" ]]; then
+        log $LOG_WARNING "WARN: Could not determine album metadata for '$album_dir'. Moving to unsorted."
+        move_to_unsorted "$album_dir" "Could not determine album metadata."
+        return 0
     fi
 
-    # Determine Album Title (most frequent)
-    album_title=$(echo "$all_albums" | sort | uniq -c | sort -nr | head -n 1 | awk '{$1=""; print $0}' | sed 's/^ *//')
-    if [[ -z "$album_title" ]]; then
-        album_title=$(basename "$album_dir") # Fallback to directory name
-        log $LOG_WARNING "WARN: Could not determine consistent Album Title from tags. Falling back to directory name: '$album_title'"
-    else
-        log $LOG_DEBUG "Determined Album Title: $album_title"
-    fi
+    # Extract album information from metadata JSON
+    local album_artist=$(echo "$album_metadata" | jq -r '.artist')
+    local album_title=$(echo "$album_metadata" | jq -r '.title')
+    local album_year=$(echo "$album_metadata" | jq -r '.year')
+    
+    log $LOG_DEBUG "Determined Album Artist: $album_artist"
+    log $LOG_DEBUG "Determined Album Title: $album_title"
+    [[ -n "$album_year" && "$album_year" != "null" ]] && log $LOG_DEBUG "Determined Album Year: $album_year"
 
-    # Determine Album Year (earliest)
-    album_year=$(echo "$all_years" | sort -n | head -n 1)
-    if [[ -n "$album_year" ]]; then
-        log $LOG_DEBUG "Determined Album Year: $album_year"
-    else
-        log $LOG_INFO "No consistent Album Year found."
-    fi
-
-    # Check for essential tags for processing
-    if [[ -z "$album_artist" || -z "$album_title" ]]; then
+    # Validate essential metadata
+    if ! validate_album_metadata "$album_metadata"; then
         log $LOG_WARNING "WARN: Missing essential album tags (Album Artist or Album Title) for '$album_dir'. Moving to unsorted."
         move_to_unsorted "$album_dir" "Missing essential album tags."
         return 0
     fi
 
-    # --- Determine Album Quality ---
-    # Referencing SPECIFICATIONS.md: "Album Classification Logic"
-    local has_lossless=0
-    local has_lossy=0
-
-    for file_type in $all_file_types; do
-        # Convert to uppercase for comparison
-        file_type_upper=$(echo "$file_type" | tr '[:lower:]' '[:upper:]')
-        case "$file_type_upper" in
-            "FLAC"|"WAV"|"AIFF"|"ALAC") has_lossless=1 ;;
-            "MP3"|"AAC"|"M4A"|"OGG") has_lossy=1 ;;
-        esac
-    done
-
-    local album_quality=""
-    if [[ $has_lossless -eq 1 && $has_lossy -eq 1 ]]; then
-        album_quality="Mixed"
-    elif [[ $has_lossless -eq 1 ]]; then
-        album_quality="Lossless"
-    elif [[ $has_lossy -eq 1 ]]; then
-        album_quality="Lossy"
-    else
-        album_quality="UnknownQuality" # Should not happen if audio_files is not empty
-    fi
+    # Determine album quality using the metadata module
+    local album_quality
+    album_quality=$(determine_album_quality "$exiftool_output")
     log $LOG_DEBUG "Determined Album Quality: $album_quality"
+
+    # Extract additional metadata for debugging
+    local all_titles=$(echo "$exiftool_output" | jq -r '.[] | .Title // empty')
+    local all_track_numbers=$(echo "$exiftool_output" | jq -r '.[].Track // empty')
+    local all_disc_numbers=$(echo "$exiftool_output" | jq -r '.[].DiscNumber // empty')
+
+    # --- DEBUGGING: Print collected metadata arrays ---
+    log $LOG_DEBUG "Collected Titles: $(echo "$all_titles" | tr '\n' ';')"
+    log $LOG_DEBUG "Collected Track Numbers: $(echo "$all_track_numbers" | tr '\n' ';')"
+    log $LOG_DEBUG "Collected Disc Numbers: $(echo "$all_disc_numbers" | tr '\n' ';')"
 
     # --- Enrich Metadata with Discogs ---
     local discogs_metadata="{}"
@@ -3101,6 +2653,7 @@ process_album_directory() {
     
     if [[ $DISCOGS_ENABLED -eq 1 ]]; then
         log $LOG_DEBUG "Attempting to enrich metadata with Discogs for: $resolved_artist - $album_title (was: $album_artist)"
+        # Note: enrich_metadata_with_discogs from metadata module requires discogs_search_releases and discogs_get_release functions
         discogs_metadata=$(enrich_metadata_with_discogs "$resolved_artist" "$album_title" "$album_year")
         
         if [[ "$discogs_metadata" != "{}" ]]; then
