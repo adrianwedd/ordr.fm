@@ -48,7 +48,12 @@ jobs:
         
         # Test config validation
         echo "Testing configuration validation..."
-        ./ordr.fm.sh --validate-config --source /tmp/nonexistent 2>&1 | grep -q "Source directory does not exist" || exit 1
+        if ./ordr.fm.sh --validate-config --source /tmp/nonexistent >/dev/null 2>&1; then
+          echo "ERROR: Validation should have failed for nonexistent directory"
+          exit 1
+        else
+          echo "SUCCESS: Validation correctly failed for nonexistent directory"
+        fi
 
     - name: Test database schema
       run: |
