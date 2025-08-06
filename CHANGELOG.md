@@ -5,6 +5,45 @@ All notable changes to ordr.fm will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.1.1] - 2025-08-06
+
+### 🔒 Security Improvements
+
+This patch release addresses critical security vulnerabilities and implements comprehensive API protection measures.
+
+#### Rate Limiting & DoS Protection
+- **Comprehensive Rate Limiting** - Added `express-rate-limit` to all API endpoints
+  - General API: 100 requests per 15 minutes per IP
+  - Export endpoints: 10 requests per hour (resource-intensive operations)
+  - Health checks: 1000 requests per 15 minutes (monitoring-friendly)
+  - Configurable via environment variables (`RATE_LIMIT_WINDOW`, `RATE_LIMIT_MAX`)
+- **Proper Error Handling** - JSON error responses with retry-after headers
+- **DoS Attack Prevention** - Protects server resources from abuse and ensures service availability
+
+#### Security Vulnerability Fixes
+- **SSRF Vulnerability** (Critical) - Fixed server-side request forgery in MusicBrainz module
+- **Format String Injection** (High) - Resolved externally-controlled format string vulnerabilities
+- **GitHub Actions Security** (Medium) - Added explicit permissions to all workflows following least privilege principle
+
+#### Security Monitoring & Automation
+- **CodeQL Security Analysis** - Comprehensive automated security scanning
+  - JavaScript/TypeScript analysis with security and quality query suites
+  - Weekly scheduled scans and PR-triggered analysis
+  - Automatic SARIF upload and GitHub Security integration
+- **Automated Security Fixes** - GitHub Actions workflows for automatic vulnerability patching
+- **Dependency Security** - All npm packages verified secure with 0 vulnerabilities
+
+### 🧪 Testing & Verification
+- **Rate Limiting Tests** - Verified DoS protection and proper response codes
+- **Security Scan Results** - All high/critical CodeQL alerts resolved
+- **Performance Impact** - Minimal overhead confirmed (<1% performance impact)
+
+### 🔗 Related Issues
+- Fixed #58 - v2.1.1 Security Patch Release
+- Fixed #68 - Test rate limiting functionality
+- Fixed #69 - Run comprehensive CodeQL security scan
+- Fixed #70 - Performance impact assessment of rate limiting
+
 ## [2.1.0] - 2025-08-05
 
 ### 🚀 Major Features Added - Node.js Integration & Relationship Visualization
