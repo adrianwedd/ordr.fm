@@ -1,0 +1,126 @@
+name: "CodeQL Security Analysis"
+
+on:
+  push:
+    branches: [ "main", "develop" ]
+  pull_request:
+    branches: [ "main" ]
+  schedule:
+    - cron: '30 2 * * 1'  # Weekly on Mondays at 2:30 AM UTC
+  workflow_dispatch:
+
+# Explicit permissions for security
+permissions:
+  actions: read
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - language: javascript-typescript
+          build-mode: none
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
+        # Query suites for comprehensive security analysis
+        queries: +security-and-quality
+
+    - name: Setup Node.js
+      if: matrix.language == 'javascript-typescript'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        
+    - name: Install dependencies (server)
+      if: matrix.language == 'javascript-typescript'
+      run: |
+        if [ -f "package.json" ]; then
+          npm ci
+        fi
+        
+    - name: Install dependencies (visualization)
+      if: matrix.language == 'javascript-typescript'
+      run: |
+        if [ -f "visualization/package.json" ]; then
+          cd visualization
+          npm ci
+          cd ..
+        fi
+
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
+        
+    - name: Upload SARIF results
+      if: always()
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ../results/javascript.sarif
+      continue-on-error: true
+
+  security-report:
+    name: Security Report
+    runs-on: ubuntu-latest
+    needs: analyze
+    if: always()
+    
+    permissions:
+      contents: read
+      issues: write
+      
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Get CodeQL results
+      uses: actions/github-script@v7
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        script: |
+          const alerts = await github.rest.codeScanning.listAlertsForRepo({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            state: 'open'
+          });
+          
+          const highSeverity = alerts.data.filter(alert => 
+            alert.rule.security_severity_level === 'high' || 
+            alert.rule.security_severity_level === 'critical'
+          );
+          
+          console.log(`Total open alerts: ${alerts.data.length}`);
+          console.log(`High/Critical severity: ${highSeverity.length}`);
+          
+          if (highSeverity.length > 0) {
+            core.setFailed(`Found ${highSeverity.length} high/critical severity security alerts`);
+          }
+          
+          // Create summary
+          const summary = `## 🔒 CodeQL Security Analysis Results
+          
+          - **Total alerts**: ${alerts.data.length}
+          - **High/Critical**: ${highSeverity.length}
+          - **Status**: ${highSeverity.length === 0 ? '✅ Secure' : '⚠️ Action Required'}
+          
+          ${highSeverity.length > 0 ? '### High/Critical Alerts\n' + highSeverity.map(alert => 
+            `- **${alert.rule.description}** (${alert.rule.security_severity_level})\n  - File: ${alert.most_recent_instance.location.path}\n  - Line: ${alert.most_recent_instance.location.start_line}`
+          ).join('\n') : ''}
+          `;
+          
+          await core.summary.addRaw(summary).write();
