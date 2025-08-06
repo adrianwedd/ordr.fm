@@ -48,7 +48,7 @@ jobs:
         
         # Test config validation
         echo "Testing configuration validation..."
-        ./ordr.fm.sh --dry-run --source /tmp/nonexistent 2>&1 | grep -q "Source directory does not exist" || exit 1
+        ./ordr.fm.sh --validate-config --source /tmp/nonexistent 2>&1 | grep -q "Source directory does not exist" || exit 1
 
     - name: Test database schema
       run: |
