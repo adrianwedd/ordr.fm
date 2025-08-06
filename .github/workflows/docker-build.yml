@@ -30,8 +30,7 @@ jobs:
         node-version: '18'
         cache: 'npm'
         cache-dependency-path: |
-          server/package-lock.json
-          visualization/package-lock.json
+          **/package-lock.json
 
     - name: Install dependencies
       run: |
