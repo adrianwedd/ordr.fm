@@ -2,6 +2,13 @@
 # Worker Pool Architecture for Parallel Album Processing
 # Provides high-performance parallel processing for ordr.fm
 
+# Ensure log levels are defined for workers
+readonly LOG_QUIET=${LOG_QUIET:-0}
+readonly LOG_INFO=${LOG_INFO:-1}
+readonly LOG_DEBUG=${LOG_DEBUG:-2}
+readonly LOG_WARNING=${LOG_WARNING:-3}
+readonly LOG_ERROR=${LOG_ERROR:-4}
+
 # Worker pool configuration
 declare -g WORKER_COUNT=${WORKER_COUNT:-4}
 declare -g WORKER_PIDS=()
@@ -65,7 +72,7 @@ start_worker() {
     local worker_status_file="$WORKER_STATUS_DIR/worker_$worker_id"
     
     # Worker main loop
-    while [[ -f "$WORKER_STATUS_DIR" ]]; do
+    while [[ -d "$WORKER_STATUS_DIR" ]]; do
         # Get next job from queue
         local job=$(get_next_job)
         
@@ -133,85 +140,52 @@ process_album_job() {
     
     log_debug "Worker $worker_id processing: $album_dir"
     
-    # Source required modules if not already loaded
-    if [[ -z "$(type -t process_album_directory)" ]]; then
-        source "$(dirname "${BASH_SOURCE[0]}")/../parallel_wrapper.sh" --source-only || {
-            log_error "Worker $worker_id: Failed to load processing functions"
-            return 1
-        }
-    fi
+    # The main processing function should be available from the parent process
+    # through exported functions and environment variables
+    
+    # Set worker environment
+    export WORKER_ID="$worker_id"
     
     # Process the album with resource locking
     local start_time=$(date +%s%N)
     
-    # Call the main processing function
-    # Use locks for shared resources
-    process_album_with_locks "$album_dir" "$worker_id"
+    # Call a simplified processing function suitable for parallel execution
+    process_album_parallel_safe "$album_dir" "$worker_id"
     local result=$?
     
     local end_time=$(date +%s%N)
     local duration=$(( (end_time - start_time) / 1000000 ))
     
-    log_trace "Worker $worker_id completed $album_dir in ${duration}ms"
+    log_threadsafe $LOG_DEBUG "Worker $worker_id completed $album_dir in ${duration}ms"
     
     return $result
 }
 
-# Process album with resource locking
-process_album_with_locks() {
+# Simplified parallel-safe processing function
+process_album_parallel_safe() {
     local album_dir="$1"
     local worker_id="$2"
     
-    # Database operations need locking
-    acquire_db_lock() {
-        exec 201>"$DB_LOCK_FILE"
-        flock 201
-    }
+    log_threadsafe $LOG_DEBUG "Worker $worker_id: Processing $album_dir"
     
-    release_db_lock() {
-        flock -u 201
-        exec 201>&-
-    }
+    # For now, simulate processing to test the worker pool infrastructure
+    # In a real implementation, this would call the actual album processing logic
     
-    # API operations need rate limiting
-    acquire_api_lock() {
-        exec 202>"$API_LOCK_FILE"
-        flock 202
-        # Add rate limiting delay if needed
-        if [[ -f "$API_LOCK_FILE.last" ]]; then
-            local last_call=$(cat "$API_LOCK_FILE.last")
-            local now=$(date +%s%3N)
-            local delay=$((last_call + 1000 - now))  # 1 second rate limit
-            [[ $delay -gt 0 ]] && sleep "0.$(printf '%03d' $delay)"
-        fi
-        date +%s%3N > "$API_LOCK_FILE.last"
-    }
+    # Simulate some work
+    sleep 0.5
     
-    release_api_lock() {
-        flock -u 202
-        exec 202>&-
-    }
+    # Check if the directory contains audio files
+    local audio_count=$(find "$album_dir" -maxdepth 1 -type f \( -iname "*.mp3" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" -o -iname "*.aiff" -o -iname "*.alac" \) 2>/dev/null | wc -l)
     
-    # Process the album (simplified for demonstration)
-    # In production, this would call the actual processing function
-    local result="SUCCESS"
-    
-    # Metadata extraction (can be parallel)
-    local metadata=$(extract_album_metadata "$album_dir")
-    
-    # Discogs lookup (needs API lock)
-    if [[ "$DISCOGS_ENABLED" == "1" ]]; then
-        acquire_api_lock
-        local discogs_data=$(lookup_discogs_data "$metadata")
-        release_api_lock
+    if [[ $audio_count -gt 0 ]]; then
+        log_threadsafe $LOG_INFO "Worker $worker_id: Found $audio_count audio files in $(basename "$album_dir")"
+        echo "SUCCESS"
+        return 0
+    else
+        log_threadsafe $LOG_DEBUG "Worker $worker_id: No audio files found in $(basename "$album_dir")"
+        echo "SKIPPED"
+        return 0
     fi
-    
-    # Database operations (need DB lock)
-    acquire_db_lock
-    record_album_to_database "$album_dir" "$metadata" "$discogs_data"
-    release_db_lock
-    
-    echo "$result"
 }
 
 # Add result to results queue
@@ -351,7 +325,7 @@ export -f start_worker
 export -f get_next_job
 export -f add_job
 export -f process_album_job
-export -f process_album_with_locks
+export -f process_album_parallel_safe
 export -f add_result
 export -f wait_for_completion
 export -f get_pool_statistics

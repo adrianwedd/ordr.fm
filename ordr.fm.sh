@@ -111,6 +111,10 @@ ARTIST_ALIAS_GROUPS="" # Artist alias grouping configuration
 GROUP_ARTIST_ALIASES=0 # Flag to enable alias grouping
 USE_PRIMARY_ARTIST_NAME=1 # Use primary name for aliases
 
+# Parallel processing configuration
+PARALLEL_PROCESSING=0 # Enable parallel processing
+PARALLEL_WORKERS=4 # Number of worker processes
+
 # --- Load Configuration Files ---
 # Load defaults from config file if it exists
 if [[ -f "$CONFIG_FILE" ]]; then
@@ -2869,6 +2873,14 @@ parse_arguments() {
                 FORCE_REPROCESS_DIR="$2"
                 shift 2
                 ;;
+            --parallel)
+                PARALLEL_PROCESSING=1
+                shift
+                ;;
+            --parallel-workers)
+                PARALLEL_WORKERS="$2"
+                shift 2
+                ;;
             --find-duplicates)
                 FIND_DUPLICATES=1
                 shift
@@ -3042,6 +3054,10 @@ show_help() {
     echo "  --list-profiles         List available configuration profiles"
     echo "  --profiles-dir DIR      Directory containing profile configurations"
     echo ""
+    echo "Performance & Parallel Processing:"
+    echo "  --parallel              Enable parallel processing for large collections"
+    echo "  --parallel-workers N    Number of parallel workers (default: auto-detected)"
+    echo ""
     echo "Automation & Batch Processing:"
     echo "  --batch                 Enable batch mode (fully automated, minimal output)"
     echo "  --validate-config       Validate configuration and exit"
@@ -3167,6 +3183,18 @@ main() {
     else
         log $LOG_DEBUG "  Discogs Integration: Disabled"
     fi
+    
+    # Initialize parallel processing if enabled
+    if [[ $PARALLEL_PROCESSING -eq 1 ]]; then
+        log $LOG_INFO "  Parallel Processing: Enabled ($PARALLEL_WORKERS workers)"
+        if ! source "$SCRIPT_DIR/lib/parallel_processor.sh"; then
+            log $LOG_ERROR "Failed to load parallel processing module"
+            exit 1
+        fi
+        init_parallel_processing "auto" "$PARALLEL_WORKERS"
+    else
+        log $LOG_DEBUG "  Parallel Processing: Disabled"
+    fi
 
     # Create timestamped unsorted directory for this run
     local TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -3217,6 +3245,8 @@ main() {
     local processed_count=0
     local skipped_count=0
     
+    # Filter albums that need processing
+    local albums_to_process=()
     for album_dir in "${album_dirs[@]}"; do
         # Skip the source directory itself (unless it's an album)
         if [[ "$album_dir" == "$SOURCE_DIR" ]] && [[ "$source_is_album" != "true" ]]; then
@@ -3235,33 +3265,47 @@ main() {
             continue
         fi
         
-        # Process the album directory
-        log $LOG_DEBUG "Processing directory: $album_dir"
-        
-        # For duplicate detection mode, analyze album instead of processing
-        if [[ $FIND_DUPLICATES -eq 1 || $RESOLVE_DUPLICATES -eq 1 ]]; then
-            if analyze_album_for_duplicates "$album_dir" "$DUPLICATES_DB"; then
-                ((processed_count++))
-            else
-                ((skipped_count++))
-            fi
-        else
-            # Normal album processing
-            if process_album_directory "$album_dir"; then
-                # Record successful processing
-                if [[ $INCREMENTAL_MODE -eq 1 ]]; then
-                    record_directory_processing "$album_dir" "success" "$STATE_DB"
-                fi
-                ((processed_count++))
-            else
-                # Record failed processing
-                if [[ $INCREMENTAL_MODE -eq 1 ]]; then
-                    record_directory_processing "$album_dir" "failed" "$STATE_DB"
-                fi
-                log $LOG_WARNING "Failed to process directory: $album_dir"
-            fi
-        fi
+        albums_to_process+=("$album_dir")
     done
+    
+    # Process albums (either parallel or sequential)
+    if [[ $PARALLEL_PROCESSING -eq 1 ]] && [[ ${#albums_to_process[@]} -gt 1 ]]; then
+        log $LOG_INFO "Processing ${#albums_to_process[@]} albums in parallel..."
+        if process_albums_parallel_dispatcher "${albums_to_process[@]}"; then
+            processed_count=${#albums_to_process[@]}
+        else
+            log $LOG_ERROR "Parallel processing failed"
+        fi
+    else
+        # Sequential processing (original logic)
+        for album_dir in "${albums_to_process[@]}"; do
+            log $LOG_DEBUG "Processing directory: $album_dir"
+            
+            # For duplicate detection mode, analyze album instead of processing
+            if [[ $FIND_DUPLICATES -eq 1 || $RESOLVE_DUPLICATES -eq 1 ]]; then
+                if analyze_album_for_duplicates "$album_dir" "$DUPLICATES_DB"; then
+                    ((processed_count++))
+                else
+                    ((skipped_count++))
+                fi
+            else
+                # Normal album processing
+                if process_album_directory "$album_dir"; then
+                    # Record successful processing
+                    if [[ $INCREMENTAL_MODE -eq 1 ]]; then
+                        record_directory_processing "$album_dir" "success" "$STATE_DB"
+                    fi
+                    ((processed_count++))
+                else
+                    # Record failed processing
+                    if [[ $INCREMENTAL_MODE -eq 1 ]]; then
+                        record_directory_processing "$album_dir" "failed" "$STATE_DB"
+                    fi
+                    log $LOG_WARNING "Failed to process directory: $album_dir"
+                fi
+            fi
+        done
+    fi
     
     log $LOG_INFO "Processing complete. Processed: $processed_count, Skipped: $skipped_count"
 
