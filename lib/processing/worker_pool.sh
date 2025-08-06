@@ -161,31 +161,142 @@ process_album_job() {
     return $result
 }
 
-# Simplified parallel-safe processing function
+# Full parallel-safe album processing function
 process_album_parallel_safe() {
     local album_dir="$1"
     local worker_id="$2"
     
-    log_threadsafe $LOG_DEBUG "Worker $worker_id: Processing $album_dir"
+    log_threadsafe $LOG_INFO "Worker $worker_id: Processing album directory: $album_dir"
     
-    # For now, simulate processing to test the worker pool infrastructure
-    # In a real implementation, this would call the actual album processing logic
+    # Source the metadata module if not already available
+    if [[ -z "$(type -t extract_audio_metadata 2>/dev/null)" ]]; then
+        if [[ -f "${SCRIPT_DIR:-$(dirname "${BASH_SOURCE[0]}")}/../lib/metadata.sh" ]]; then
+            source "${SCRIPT_DIR:-$(dirname "${BASH_SOURCE[0]}")}/../lib/metadata.sh"
+        else
+            log_threadsafe $LOG_ERROR "Worker $worker_id: Could not load metadata module"
+            echo "FAILED|METADATA_MODULE_MISSING"
+            return 1
+        fi
+    fi
     
-    # Simulate some work
-    sleep 0.5
+    # Extract metadata using the metadata module
+    local exiftool_output
+    exiftool_output=$(extract_audio_metadata "$album_dir")
     
-    # Check if the directory contains audio files
-    local audio_count=$(find "$album_dir" -maxdepth 1 -type f \( -iname "*.mp3" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" -o -iname "*.aiff" -o -iname "*.alac" \) 2>/dev/null | wc -l)
-    
-    if [[ $audio_count -gt 0 ]]; then
-        log_threadsafe $LOG_INFO "Worker $worker_id: Found $audio_count audio files in $(basename "$album_dir")"
-        echo "SUCCESS"
-        return 0
-    else
-        log_threadsafe $LOG_DEBUG "Worker $worker_id: No audio files found in $(basename "$album_dir")"
-        echo "SKIPPED"
+    if [[ -z "$exiftool_output" ]]; then
+        log_threadsafe $LOG_WARNING "Worker $worker_id: Could not extract metadata from any files in '$album_dir'"
+        echo "FAILED|NO_METADATA"
         return 0
     fi
+    
+    # Determine album metadata using the metadata module
+    local album_metadata
+    album_metadata=$(determine_album_metadata "$exiftool_output" "$(basename "$album_dir")")
+    
+    if [[ -z "$album_metadata" ]]; then
+        log_threadsafe $LOG_WARNING "Worker $worker_id: Could not determine album metadata for '$album_dir'"
+        echo "FAILED|INVALID_METADATA"
+        return 0
+    fi
+    
+    # Extract album information from metadata JSON
+    local album_artist=$(echo "$album_metadata" | jq -r '.artist')
+    local album_title=$(echo "$album_metadata" | jq -r '.title')
+    local album_year=$(echo "$album_metadata" | jq -r '.year')
+    
+    log_threadsafe $LOG_DEBUG "Worker $worker_id: Album Artist: $album_artist, Title: $album_title, Year: $album_year"
+    
+    # Validate essential metadata
+    if ! validate_album_metadata "$album_metadata"; then
+        log_threadsafe $LOG_WARNING "Worker $worker_id: Missing essential album tags for '$album_dir'"
+        echo "FAILED|MISSING_TAGS"
+        return 0
+    fi
+    
+    # Determine album quality using the metadata module
+    local album_quality
+    album_quality=$(determine_album_quality "$exiftool_output")
+    log_threadsafe $LOG_DEBUG "Worker $worker_id: Album Quality: $album_quality"
+    
+    # Resolve artist aliases if enabled (simplified for parallel processing)
+    local resolved_artist="$album_artist"
+    if [[ $GROUP_ARTIST_ALIASES -eq 1 ]] && [[ -n "$ARTIST_ALIAS_GROUPS" ]]; then
+        if command -v resolve_artist_alias >/dev/null 2>&1; then
+            resolved_artist=$(resolve_artist_alias "$album_artist")
+            if [[ "$resolved_artist" != "$album_artist" ]]; then
+                log_threadsafe $LOG_INFO "Worker $worker_id: Resolved artist alias: '$album_artist' -> '$resolved_artist'"
+            fi
+        fi
+    fi
+    
+    # Discogs enrichment with worker-specific rate limiting
+    local discogs_metadata="{}"
+    if [[ $DISCOGS_ENABLED -eq 1 ]]; then
+        log_threadsafe $LOG_DEBUG "Worker $worker_id: Attempting Discogs enrichment for: $resolved_artist - $album_title"
+        
+        # Acquire API lock for rate limiting
+        if acquire_api_lock; then
+            if command -v enrich_metadata_with_discogs >/dev/null 2>&1; then
+                discogs_metadata=$(enrich_metadata_with_discogs "$resolved_artist" "$album_title" "$album_year")
+            fi
+            release_api_lock
+        else
+            log_threadsafe $LOG_WARNING "Worker $worker_id: Could not acquire API lock, skipping Discogs enrichment"
+        fi
+    fi
+    
+    # Determine organization path using existing logic
+    local proposed_album_path
+    if command -v build_organization_path >/dev/null 2>&1; then
+        proposed_album_path=$(build_organization_path \
+            "$album_quality" "$resolved_artist" "$album_title" "$album_year" \
+            "" "" "")
+    else
+        # Fallback basic organization
+        local sanitized_artist=$(sanitize_filename "$resolved_artist")
+        local sanitized_title=$(sanitize_filename "$album_title")
+        local year_suffix=""
+        [[ -n "$album_year" && "$album_year" != "null" ]] && year_suffix=" ($album_year)"
+        proposed_album_path="${DEST_DIR:-/tmp/organized}/$album_quality/$sanitized_artist/$sanitized_title$year_suffix"
+    fi
+    
+    log_threadsafe $LOG_INFO "Worker $worker_id: Proposed path for '$(basename "$album_dir")': $proposed_album_path"
+    
+    # For parallel processing, we only do the analysis and planning
+    # Actual file moves are handled by the main process to avoid conflicts
+    echo "SUCCESS|$album_dir|$proposed_album_path|$(echo "$exiftool_output" | jq length)"
+    return 0
+}
+
+# Database operations need locking
+acquire_db_lock() {
+    exec 201>"$DB_LOCK_FILE"
+    flock 201
+}
+
+release_db_lock() {
+    flock -u 201
+    exec 201>&-
+}
+
+# API operations need rate limiting
+acquire_api_lock() {
+    exec 202>"$API_LOCK_FILE"
+    flock 202
+    # Add rate limiting delay if needed
+    if [[ -f "$API_LOCK_FILE.last" ]]; then
+        local last_call=$(cat "$API_LOCK_FILE.last")
+        local now=$(date +%s%3N)
+        local delay=$((last_call + 1000 - now))  # 1 second rate limit
+        [[ $delay -gt 0 ]] && sleep "0.$(printf '%03d' $delay)"
+    fi
+    date +%s%3N > "$API_LOCK_FILE.last"
+    return 0
+}
+
+release_api_lock() {
+    flock -u 202
+    exec 202>&-
 }
 
 # Add result to results queue
