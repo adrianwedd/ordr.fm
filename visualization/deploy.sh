@@ -63,9 +63,18 @@ case "$ACTION" in
         
         # Wait for startup
         if wait_for_service; then
+            # Get local IP address for network access
+            LOCAL_IP=$(hostname -I | awk '{print $1}' | head -n1)
+            if [ -z "$LOCAL_IP" ]; then
+                LOCAL_IP=$(ip route get 1 2>/dev/null | awk '{print $NF;exit}' 2>/dev/null || echo "localhost")
+            fi
+            
             echo "✅ PWA started successfully!"
-            echo "🌐 Access at: http://localhost:${PWA_PORT}"
-            echo "📱 PWA install prompt available on HTTPS"
+            echo "🌐 Access URLs:"
+            echo "   • Local:    http://localhost:${PWA_PORT}"
+            echo "   • Network:  http://${LOCAL_IP}:${PWA_PORT}"
+            echo "📱 PWA install prompt available"
+            echo "🔗 Share the network URL to access from other devices"
         else
             echo "❌ PWA startup failed"
             exit 1

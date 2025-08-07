@@ -1179,8 +1179,25 @@ app.post('/api/subscribe', (req, res) => {
 });
 
 // Start server with WebSocket support
-server.listen(PORT, () => {
-    console.log(`🎵 ordr.fm visualization server running on http://localhost:${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+    // Get local IP address for network access
+    const os = require('os');
+    const interfaces = os.networkInterfaces();
+    let localIP = 'localhost';
+    
+    for (const interfaceName in interfaces) {
+        for (const iface of interfaces[interfaceName]) {
+            if (iface.family === 'IPv4' && !iface.internal) {
+                localIP = iface.address;
+                break;
+            }
+        }
+        if (localIP !== 'localhost') break;
+    }
+    
+    console.log(`🎵 ordr.fm visualization server running on:`);
+    console.log(`   • Local:    http://localhost:${PORT}`);
+    console.log(`   • Network:  http://${localIP}:${PORT}`);
     console.log(`🔌 WebSocket server ready for real-time updates`);
     console.log(`💾 Database path: ${DB_PATH}`);
     
