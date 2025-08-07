@@ -3232,7 +3232,7 @@ main() {
         # Otherwise, find all subdirectories
         while IFS= read -r -d '' album_dir; do
             album_dirs+=("$album_dir")
-        done < <(find "$SOURCE_DIR" -type d -print0)
+        done < <(find "$SOURCE_DIR" \( -type d -o -type l \) -print0)
     fi
 
     if [[ ${#album_dirs[@]} -eq 0 ]]; then

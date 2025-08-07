@@ -57,9 +57,7 @@ jobs:
       if: matrix.language == 'javascript-typescript'
       run: |
         if [ -f "visualization/package.json" ]; then
-          cd visualization
-          npm ci
-          cd ..
+          cd visualization && npm ci && cd ..
         fi
 
     - name: Perform CodeQL Analysis
@@ -67,12 +65,7 @@ jobs:
       with:
         category: "/language:${{matrix.language}}"
         
-    - name: Upload SARIF results
-      if: always()
-      uses: github/codeql-action/upload-sarif@v3
-      with:
-        sarif_file: ../results/javascript.sarif
-      continue-on-error: true
+    # SARIF upload is handled automatically by CodeQL action
 
   security-report:
     name: Security Report

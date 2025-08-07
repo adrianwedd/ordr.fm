@@ -275,7 +275,7 @@ find_album_directories() {
             if directory_has_audio_files "$dir"; then
                 albums+=("$dir")
             fi
-        done < <(find "$search_dir" -mindepth 1 -maxdepth 3 -type d -print0 2>/dev/null)
+        done < <(find "$search_dir" -mindepth 1 -maxdepth 3 \( -type d -o -type l \) -print0 2>/dev/null)
     fi
     
     # Output array properly
