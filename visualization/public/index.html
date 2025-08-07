@@ -1199,17 +1199,63 @@
                         </div>
                         
                         <div class="action-card">
-                            <h3>Discogs Enhancement</h3>
-                            <p>Enrich metadata with Discogs data</p>
+                            <h3>🔍 Metadata Enrichment</h3>
+                            <p>Enhance album metadata using Discogs and MusicBrainz</p>
                             <div class="action-controls">
                                 <label class="checkbox-label">
                                     <input type="checkbox" id="enable-discogs" checked> Enable Discogs lookup
                                 </label>
                                 <label class="checkbox-label">
+                                    <input type="checkbox" id="enable-musicbrainz" checked> Enable MusicBrainz lookup
+                                </label>
+                                <label class="checkbox-label">
                                     <input type="checkbox" id="electronic-mode"> Electronic music mode
                                 </label>
                                 <div class="action-buttons">
-                                    <button class="action-btn primary" onclick="enhanceMetadata()">Enhance Existing</button>
+                                    <button class="action-btn secondary" onclick="openMetadataSearch()">🔍 Search Albums</button>
+                                    <button class="action-btn primary" onclick="enhanceMetadata()">✨ Enhance Existing</button>
+                                </div>
+                                <div id="enhancement-progress" style="display: none;">
+                                    <div class="progress-bar">
+                                        <div class="progress" id="enhancement-progress-bar"></div>
+                                    </div>
+                                    <div class="status-text" id="enhancement-status">Starting enhancement...</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Metadata Search Modal -->
+                        <div class="metadata-search-modal" id="metadata-search-modal" style="display: none;">
+                            <div class="metadata-search-content">
+                                <div class="metadata-search-header">
+                                    <h3>🔍 Album Metadata Search</h3>
+                                    <button class="close-search" onclick="closeMetadataSearch()">✕</button>
+                                </div>
+                                <div class="search-form">
+                                    <div class="form-row">
+                                        <input type="text" id="search-artist" placeholder="Artist" class="search-input">
+                                        <input type="text" id="search-album" placeholder="Album" class="search-input">
+                                    </div>
+                                    <div class="form-row">
+                                        <input type="text" id="search-label" placeholder="Label (optional)" class="search-input">
+                                        <input type="text" id="search-year" placeholder="Year (optional)" class="search-input">
+                                    </div>
+                                    <div class="form-actions">
+                                        <button class="action-btn secondary" onclick="searchDiscogs()">🎵 Search Discogs</button>
+                                        <button class="action-btn secondary" onclick="searchMusicBrainz()">🎶 Search MusicBrainz</button>
+                                    </div>
+                                </div>
+                                <div class="search-results" id="search-results" style="display: none;">
+                                    <h4>Search Results</h4>
+                                    <div id="results-list"></div>
+                                </div>
+                                <div class="enrichment-preview" id="enrichment-preview" style="display: none;">
+                                    <h4>Metadata Preview</h4>
+                                    <div id="preview-content"></div>
+                                    <div class="preview-actions">
+                                        <button class="action-btn primary" onclick="applyEnrichment()">✅ Apply to Album</button>
+                                        <button class="action-btn secondary" onclick="closePreview()">❌ Cancel</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
@@ -1321,7 +1367,22 @@
                                     <span class="service-name">Backup Service</span>
                                     <span class="status-indicator" id="backup-service-status">⏱️</span>
                                 </div>
+                                <div class="service-item">
+                                    <span class="service-name">PWA Application</span>
+                                    <span class="status-indicator" id="pwa-status">⏱️</span>
+                                </div>
                             </div>
+                        </div>
+                        
+                        <div class="action-card">
+                            <h3>🔄 App Control</h3>
+                            <p>Manage PWA application state</p>
+                            <div class="action-buttons">
+                                <button class="action-btn secondary" onclick="reloadApp()">🔃 Reload App</button>
+                                <button class="action-btn secondary" onclick="clearCache()">🗑️ Clear Cache</button>
+                                <button class="action-btn secondary" onclick="checkForUpdates()">⬇️ Check Updates</button>
+                            </div>
+                            <div id="app-control-status" class="status-text" style="display: none;"></div>
                         </div>
                         
                         <div class="status-card">

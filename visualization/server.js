@@ -8,6 +8,15 @@ const WebSocket = require('ws');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Production optimizations
+if (NODE_ENV === 'production') {
+    app.set('trust proxy', 1); // Trust reverse proxy
+    console.log('🚀 Running in production mode');
+} else {
+    console.log('🔧 Running in development mode');
+}
 
 // Create HTTP server for both Express and WebSocket
 const server = http.createServer(app);
@@ -400,6 +409,377 @@ app.get('/api/timeline', (req, res) => {
 });
 
 // Get collection health metrics
+// Version endpoint for app updates
+app.get('/api/version', (req, res) => {
+    const packageJson = require('./package.json');
+    res.json({
+        version: packageJson.version,
+        name: packageJson.name,
+        description: packageJson.description,
+        node_env: NODE_ENV,
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString()
+    });
+});
+
+// Discogs enrichment endpoints
+app.get('/api/enrichment/discogs/search', async (req, res) => {
+    const { artist, album, label, year } = req.query;
+    
+    if (!artist || !album) {
+        return res.status(400).json({ error: 'Artist and album are required' });
+    }
+    
+    try {
+        // Construct search query
+        let query = `${artist} - ${album}`;
+        if (year) query += ` year:${year}`;
+        if (label) query += ` label:"${label}"`;
+        
+        const response = await fetch(`https://api.discogs.com/database/search?q=${encodeURIComponent(query)}&type=release&format=album`, {
+            headers: {
+                'User-Agent': 'ordr.fm/1.0 +https://github.com/adrianwedd/ordr.fm',
+                'Authorization': process.env.DISCOGS_TOKEN ? `Discogs token=${process.env.DISCOGS_TOKEN}` : undefined
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Discogs API error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        // Filter and score results
+        const scoredResults = data.results
+            .filter(result => result.type === 'release')
+            .slice(0, 10)
+            .map(result => ({
+                id: result.id,
+                title: result.title,
+                artist: result.artist || '',
+                label: result.label?.[0] || '',
+                catno: result.catno,
+                year: result.year,
+                genre: result.genre || [],
+                style: result.style || [],
+                format: result.format || [],
+                thumb: result.thumb,
+                confidence: calculateDiscogsConfidence(result, { artist, album, label, year })
+            }))
+            .sort((a, b) => b.confidence - a.confidence);
+        
+        res.json({
+            query: query,
+            total_results: data.pagination?.items || 0,
+            results: scoredResults
+        });
+        
+    } catch (error) {
+        console.error('Discogs search error:', error);
+        res.status(500).json({ error: 'Failed to search Discogs', details: error.message });
+    }
+});
+
+app.get('/api/enrichment/discogs/release/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const response = await fetch(`https://api.discogs.com/releases/${id}`, {
+            headers: {
+                'User-Agent': 'ordr.fm/1.0 +https://github.com/adrianwedd/ordr.fm',
+                'Authorization': process.env.DISCOGS_TOKEN ? `Discogs token=${process.env.DISCOGS_TOKEN}` : undefined
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`Discogs API error: ${response.status}`);
+        }
+        
+        const release = await response.json();
+        
+        // Extract and format data
+        const enrichedData = {
+            discogs_id: release.id,
+            title: release.title,
+            artists: release.artists?.map(a => a.name) || [],
+            labels: release.labels?.map(l => ({ name: l.name, catno: l.catno })) || [],
+            year: release.year,
+            released: release.released,
+            genres: release.genres || [],
+            styles: release.styles || [],
+            formats: release.formats || [],
+            tracklist: release.tracklist || [],
+            notes: release.notes,
+            country: release.country,
+            images: release.images || [],
+            videos: release.videos || [],
+            companies: release.companies || [],
+            credits: release.extraartists || []
+        };
+        
+        res.json(enrichedData);
+        
+    } catch (error) {
+        console.error('Discogs release error:', error);
+        res.status(500).json({ error: 'Failed to fetch Discogs release', details: error.message });
+    }
+});
+
+// MusicBrainz enrichment endpoints
+app.get('/api/enrichment/musicbrainz/search', async (req, res) => {
+    const { artist, album } = req.query;
+    
+    if (!artist || !album) {
+        return res.status(400).json({ error: 'Artist and album are required' });
+    }
+    
+    try {
+        const query = `artist:"${artist}" AND release:"${album}"`;
+        const response = await fetch(`https://musicbrainz.org/ws/2/release?query=${encodeURIComponent(query)}&fmt=json&limit=10`, {
+            headers: {
+                'User-Agent': 'ordr.fm/1.0 ( https://github.com/adrianwedd/ordr.fm )'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`MusicBrainz API error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        const enrichedResults = data.releases?.map(release => ({
+            id: release.id,
+            title: release.title,
+            artist: release['artist-credit']?.[0]?.name || '',
+            date: release.date,
+            country: release.country,
+            barcode: release.barcode,
+            status: release.status,
+            packaging: release.packaging,
+            disambiguation: release.disambiguation,
+            confidence: calculateMusicBrainzConfidence(release, { artist, album })
+        })).sort((a, b) => b.confidence - a.confidence) || [];
+        
+        res.json({
+            query: query,
+            total_results: data.count || 0,
+            results: enrichedResults
+        });
+        
+    } catch (error) {
+        console.error('MusicBrainz search error:', error);
+        res.status(500).json({ error: 'Failed to search MusicBrainz', details: error.message });
+    }
+});
+
+app.get('/api/enrichment/musicbrainz/release/:id', async (req, res) => {
+    const { id } = req.params;
+    
+    try {
+        const response = await fetch(`https://musicbrainz.org/ws/2/release/${id}?inc=artist-credits+labels+recordings+release-groups&fmt=json`, {
+            headers: {
+                'User-Agent': 'ordr.fm/1.0 ( https://github.com/adrianwedd/ordr.fm )'
+            }
+        });
+        
+        if (!response.ok) {
+            throw new Error(`MusicBrainz API error: ${response.status}`);
+        }
+        
+        const release = await response.json();
+        
+        const enrichedData = {
+            mbid: release.id,
+            title: release.title,
+            artists: release['artist-credit']?.map(ac => ac.name) || [],
+            date: release.date,
+            country: release.country,
+            barcode: release.barcode,
+            status: release.status,
+            packaging: release.packaging,
+            labels: release['label-info']?.map(li => ({
+                name: li.label?.name,
+                catalog_number: li['catalog-number']
+            })) || [],
+            media: release.media?.map(medium => ({
+                position: medium.position,
+                title: medium.title,
+                format: medium.format,
+                tracks: medium.tracks?.map(track => ({
+                    position: track.position,
+                    title: track.title,
+                    length: track.length,
+                    artist: track['artist-credit']?.[0]?.name
+                })) || []
+            })) || [],
+            release_group: release['release-group']
+        };
+        
+        res.json(enrichedData);
+        
+    } catch (error) {
+        console.error('MusicBrainz release error:', error);
+        res.status(500).json({ error: 'Failed to fetch MusicBrainz release', details: error.message });
+    }
+});
+
+// Apply enrichment to album
+app.post('/api/enrichment/apply', async (req, res) => {
+    const { album_id, source, enrichment_data } = req.body;
+    
+    if (!album_id || !source || !enrichment_data) {
+        return res.status(400).json({ error: 'album_id, source, and enrichment_data are required' });
+    }
+    
+    const db = getDb();
+    
+    try {
+        // Update album with enrichment data
+        const updateFields = [];
+        const updateValues = [];
+        
+        if (source === 'discogs') {
+            if (enrichment_data.discogs_id) {
+                updateFields.push('discogs_id = ?');
+                updateValues.push(enrichment_data.discogs_id);
+            }
+            if (enrichment_data.labels?.[0]) {
+                updateFields.push('label = ?');
+                updateValues.push(enrichment_data.labels[0].name);
+            }
+            if (enrichment_data.labels?.[0]?.catno) {
+                updateFields.push('catalog_number = ?');
+                updateValues.push(enrichment_data.labels[0].catno);
+            }
+            if (enrichment_data.genres?.length) {
+                updateFields.push('genre = ?');
+                updateValues.push(enrichment_data.genres.join(', '));
+            }
+            if (enrichment_data.styles?.length) {
+                updateFields.push('style = ?');
+                updateValues.push(enrichment_data.styles.join(', '));
+            }
+            if (enrichment_data.year) {
+                updateFields.push('year = ?');
+                updateValues.push(enrichment_data.year);
+            }
+            if (enrichment_data.country) {
+                updateFields.push('country = ?');
+                updateValues.push(enrichment_data.country);
+            }
+            
+            updateFields.push('discogs_confidence = ?');
+            updateValues.push(0.85); // High confidence for manual application
+            
+        } else if (source === 'musicbrainz') {
+            if (enrichment_data.mbid) {
+                updateFields.push('musicbrainz_id = ?');
+                updateValues.push(enrichment_data.mbid);
+            }
+            if (enrichment_data.labels?.[0]) {
+                updateFields.push('label = ?');
+                updateValues.push(enrichment_data.labels[0].name);
+            }
+            if (enrichment_data.labels?.[0]?.catalog_number) {
+                updateFields.push('catalog_number = ?');
+                updateValues.push(enrichment_data.labels[0].catalog_number);
+            }
+            if (enrichment_data.date) {
+                const year = enrichment_data.date.split('-')[0];
+                updateFields.push('year = ?');
+                updateValues.push(parseInt(year));
+            }
+            if (enrichment_data.country) {
+                updateFields.push('country = ?');
+                updateValues.push(enrichment_data.country);
+            }
+            if (enrichment_data.barcode) {
+                updateFields.push('barcode = ?');
+                updateValues.push(enrichment_data.barcode);
+            }
+        }
+        
+        if (updateFields.length === 0) {
+            return res.status(400).json({ error: 'No valid enrichment data provided' });
+        }
+        
+        updateFields.push('enrichment_date = ?');
+        updateValues.push(new Date().toISOString());
+        updateValues.push(album_id);
+        
+        const query = `UPDATE albums SET ${updateFields.join(', ')} WHERE rowid = ?`;
+        
+        db.run(query, updateValues, function(err) {
+            db.close();
+            
+            if (err) {
+                console.error('Error applying enrichment:', err);
+                return res.status(500).json({ error: 'Failed to apply enrichment' });
+            }
+            
+            if (this.changes === 0) {
+                return res.status(404).json({ error: 'Album not found' });
+            }
+            
+            res.json({ 
+                success: true, 
+                changes: this.changes,
+                source: source,
+                album_id: album_id
+            });
+        });
+        
+    } catch (error) {
+        db.close();
+        console.error('Enrichment application error:', error);
+        res.status(500).json({ error: 'Failed to apply enrichment', details: error.message });
+    }
+});
+
+// Helper functions
+function calculateDiscogsConfidence(result, searchTerms) {
+    let confidence = 0;
+    
+    // Exact title match
+    if (result.title?.toLowerCase().includes(searchTerms.album?.toLowerCase())) {
+        confidence += 0.4;
+    }
+    
+    // Artist match
+    if (result.artist?.toLowerCase().includes(searchTerms.artist?.toLowerCase())) {
+        confidence += 0.3;
+    }
+    
+    // Year match
+    if (searchTerms.year && result.year === parseInt(searchTerms.year)) {
+        confidence += 0.2;
+    }
+    
+    // Label match
+    if (searchTerms.label && result.label?.some(l => l?.toLowerCase().includes(searchTerms.label?.toLowerCase()))) {
+        confidence += 0.1;
+    }
+    
+    return Math.min(confidence, 1.0);
+}
+
+function calculateMusicBrainzConfidence(release, searchTerms) {
+    let confidence = 0;
+    
+    // Title match
+    if (release.title?.toLowerCase().includes(searchTerms.album?.toLowerCase())) {
+        confidence += 0.5;
+    }
+    
+    // Artist match
+    const artistName = release['artist-credit']?.[0]?.name?.toLowerCase();
+    if (artistName?.includes(searchTerms.artist?.toLowerCase())) {
+        confidence += 0.5;
+    }
+    
+    return Math.min(confidence, 1.0);
+}
+
 app.get('/api/health', (req, res) => {
     const db = getDb();
     

@@ -1,0 +1,75 @@
+# Page snapshot
+
+```yaml
+- button "🌙 Dark Mode"
+- banner:
+  - heading "🎵 ordr.fm Visualization Dashboard Connected (Real-time)" [level=1]
+- button "Overview"
+- button "Actions"
+- button "Collection Health"
+- button "Duplicates"
+- button "Insights"
+- button "Albums"
+- button "Artists"
+- button "Labels"
+- button "Timeline"
+- button "Move History"
+- heading "🎵 Music Processing" [level=2]
+- heading "Process Collection" [level=3]
+- paragraph: Scan and organize new music files
+- combobox:
+  - option "Incomplete Albums" [selected]
+  - option "Unsorted Tracks"
+  - option "Custom Directory..."
+  - option "Browse Folders..."
+  - option "📁 Music"
+- button "Dry Run"
+- button "Process & Move"
+- heading "🔍 Metadata Enrichment" [level=3]
+- paragraph: Enhance album metadata using Discogs and MusicBrainz
+- checkbox "Enable Discogs lookup" [checked]
+- text: Enable Discogs lookup
+- checkbox "Enable MusicBrainz lookup" [checked]
+- text: Enable MusicBrainz lookup
+- checkbox "Electronic music mode"
+- text: Electronic music mode
+- button "🔍 Search Albums"
+- button "✨ Enhance Existing"
+- heading "💾 Backup Management" [level=2]
+- heading "Database Backup" [level=3]
+- paragraph: Backup metadata and organization data
+- text: "⏱️ Last backup: Checking..."
+- button "Backup Now"
+- button "Restore"
+- heading "Cloud Backup" [level=3]
+- paragraph: Sync organized music to Google Drive
+- text: "⏱️ Status: Checking..."
+- combobox:
+  - option "Google Drive" [selected]
+  - option "Custom rclone remote"
+- button "Start Backup"
+- button "Pause"
+- heading "⚙️ System Status" [level=2]
+- heading "Dependencies" [level=3]
+- text: exiftool ✅ jq ✅ rsync ✅ rclone ✅
+- heading "Disk Space" [level=3]
+- text: "Source: Checking... Destination: 796M available (1% used) Database: Available"
+- heading "Services" [level=3]
+- text: ordr.fm Script ✅ Discogs API ❌ Backup Service ✅ PWA Application ⏱️
+- heading "🔄 App Control" [level=3]
+- paragraph: Manage PWA application state
+- button "🔃 Reload App"
+- button "🗑️ Clear Cache"
+- button "⬇️ Check Updates"
+- heading "Recent Activity" [level=3]
+- text: "Unknown [2025-08-07 14:44:19] [INFO ] - 'cmetric_debris.mp3' -> '/home/plex/Music/sorted_music/Mixed/Compi Unknown [2025-08-07 14:44:19] [INFO ] - 'Rino Cerrone - Converted(R).mp3' -> '/home/plex/Music/sorted_musi Unknown [2025-08-07 14:44:19] [INFO ] - 'old school detroit Model_500__(Juan_Atkins)_-_04_-_Night_.mp3' Unknown [2025-08-07 14:44:20] [INFO ] - 'Cure - Fascination Street (Live).mp3' -> '/home/plex/Music/sorted Unknown [2025-08-07 14:44:20] [INFO ] - 'surgeon - over kosovo.mp3' -> '/home/plex/Music/sorted_music/Mixe Unknown [2025-08-07 14:44:20] [INFO ] - 'Sound Effects - Star Trek - Enterprise Bridge Sequence.mp3' -> '/ Unknown [2025-08-07 14:44:21] [INFO ] - 'max404-slut.mp3' -> '/home/plex/Music/sorted_music/Mixed/Compilat Unknown [2025-08-07 14:44:21] [INFO ] - 'INCOMPLETE~b1-dynamo-dynamo_version-(1996)-DiN-ViNYL-DiNLiMiTED-h Unknown [2025-08-07 14:44:21] [WARNING] Failed to process directory: /home/plex/Music/Unsorted and Incomplet Unknown [2025-08-07 14:44:21] [INFO ] Processing complete. Processed: 0, Skipped: 0"
+- heading "Quick Actions" [level=3]
+- button "×"
+- heading "🔄 Refresh Data" [level=3]
+- paragraph: Update current view with latest information
+- heading "🔔 Test Notifications" [level=3]
+- paragraph: Test push notification functionality
+- heading "↻ Reload App" [level=3]
+- paragraph: Restart the application completely
+- text: 💡 Swipe left/right between tabs or pull down to refresh ← Previous Next →
+```

@@ -2319,3 +2319,402 @@ function initActionsTab() {
         }));
     }
 }
+
+// App Control Functions
+function reloadApp() {
+    const statusElement = document.getElementById('app-control-status');
+    statusElement.style.display = 'block';
+    statusElement.innerHTML = '🔄 Reloading application...';
+    
+    // Clear service worker cache and reload
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistrations().then(registrations => {
+            registrations.forEach(registration => {
+                registration.unregister();
+            });
+            
+            // Clear all caches
+            if ('caches' in window) {
+                caches.keys().then(cacheNames => {
+                    return Promise.all(cacheNames.map(cacheName => caches.delete(cacheName)));
+                }).then(() => {
+                    // Force hard reload
+                    window.location.reload(true);
+                });
+            } else {
+                window.location.reload(true);
+            }
+        });
+    } else {
+        // Fallback for browsers without service worker
+        window.location.reload(true);
+    }
+}
+
+function clearCache() {
+    const statusElement = document.getElementById('app-control-status');
+    statusElement.style.display = 'block';
+    statusElement.innerHTML = '🗑️ Clearing cache...';
+    
+    if ('caches' in window) {
+        caches.keys().then(cacheNames => {
+            return Promise.all(cacheNames.map(cacheName => caches.delete(cacheName)));
+        }).then(() => {
+            // Clear IndexedDB
+            if (window.indexedDB) {
+                // Clear offline data
+                const deleteReq = indexedDB.deleteDatabase('ordr-fm-offline');
+                deleteReq.onsuccess = () => {
+                    statusElement.innerHTML = '✅ Cache cleared successfully';
+                    setTimeout(() => {
+                        statusElement.style.display = 'none';
+                    }, 3000);
+                };
+            } else {
+                statusElement.innerHTML = '✅ Cache cleared successfully';
+                setTimeout(() => {
+                    statusElement.style.display = 'none';
+                }, 3000);
+            }
+        }).catch(error => {
+            console.error('Error clearing cache:', error);
+            statusElement.innerHTML = '❌ Error clearing cache';
+        });
+    } else {
+        statusElement.innerHTML = '⚠️ Cache API not supported';
+        setTimeout(() => {
+            statusElement.style.display = 'none';
+        }, 3000);
+    }
+}
+
+function checkForUpdates() {
+    const statusElement = document.getElementById('app-control-status');
+    statusElement.style.display = 'block';
+    statusElement.innerHTML = '⬇️ Checking for updates...';
+    
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistration().then(registration => {
+            if (registration) {
+                // Check for updates
+                registration.update().then(() => {
+                    if (registration.waiting) {
+                        statusElement.innerHTML = '🆕 Update available! <button onclick="applyUpdate()" class="action-btn primary">Apply Now</button>';
+                    } else {
+                        statusElement.innerHTML = '✅ App is up to date';
+                        setTimeout(() => {
+                            statusElement.style.display = 'none';
+                        }, 3000);
+                    }
+                });
+            } else {
+                statusElement.innerHTML = '⚠️ Service worker not registered';
+            }
+        });
+    } else {
+        // Fallback: check version via API
+        fetch('/api/version').then(response => response.json())
+            .then(data => {
+                statusElement.innerHTML = `ℹ️ Current version: ${data.version}`;
+                setTimeout(() => {
+                    statusElement.style.display = 'none';
+                }, 3000);
+            })
+            .catch(() => {
+                statusElement.innerHTML = '❌ Unable to check for updates';
+            });
+    }
+}
+
+function applyUpdate() {
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.getRegistration().then(registration => {
+            if (registration && registration.waiting) {
+                registration.waiting.postMessage('skipWaiting');
+                window.location.reload();
+            }
+        });
+    }
+}
+
+// Metadata Enrichment Functions
+let currentEnrichmentData = null;
+let selectedAlbumId = null;
+
+function openMetadataSearch() {
+    const modal = document.getElementById('metadata-search-modal');
+    modal.style.display = 'flex';
+    
+    // Reset form
+    document.getElementById('search-artist').value = '';
+    document.getElementById('search-album').value = '';
+    document.getElementById('search-label').value = '';
+    document.getElementById('search-year').value = '';
+    
+    // Hide results and preview
+    document.getElementById('search-results').style.display = 'none';
+    document.getElementById('enrichment-preview').style.display = 'none';
+}
+
+function closeMetadataSearch() {
+    const modal = document.getElementById('metadata-search-modal');
+    modal.style.display = 'none';
+    currentEnrichmentData = null;
+    selectedAlbumId = null;
+}
+
+async function searchDiscogs() {
+    const artist = document.getElementById('search-artist').value.trim();
+    const album = document.getElementById('search-album').value.trim();
+    const label = document.getElementById('search-label').value.trim();
+    const year = document.getElementById('search-year').value.trim();
+    
+    if (!artist || !album) {
+        alert('Please enter artist and album name');
+        return;
+    }
+    
+    const resultsContainer = document.getElementById('results-list');
+    resultsContainer.innerHTML = '<div class="loading">🔍 Searching Discogs...</div>';
+    document.getElementById('search-results').style.display = 'block';
+    
+    try {
+        const params = new URLSearchParams({ artist, album });
+        if (label) params.append('label', label);
+        if (year) params.append('year', year);
+        
+        const response = await fetch(`/api/enrichment/discogs/search?${params}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Search failed');
+        }
+        
+        displaySearchResults(data.results, 'discogs');
+        
+    } catch (error) {
+        console.error('Discogs search error:', error);
+        resultsContainer.innerHTML = `<div class="error">❌ Search failed: ${error.message}</div>`;
+    }
+}
+
+async function searchMusicBrainz() {
+    const artist = document.getElementById('search-artist').value.trim();
+    const album = document.getElementById('search-album').value.trim();
+    
+    if (!artist || !album) {
+        alert('Please enter artist and album name');
+        return;
+    }
+    
+    const resultsContainer = document.getElementById('results-list');
+    resultsContainer.innerHTML = '<div class="loading">🔍 Searching MusicBrainz...</div>';
+    document.getElementById('search-results').style.display = 'block';
+    
+    try {
+        const params = new URLSearchParams({ artist, album });
+        const response = await fetch(`/api/enrichment/musicbrainz/search?${params}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Search failed');
+        }
+        
+        displaySearchResults(data.results, 'musicbrainz');
+        
+    } catch (error) {
+        console.error('MusicBrainz search error:', error);
+        resultsContainer.innerHTML = `<div class="error">❌ Search failed: ${error.message}</div>`;
+    }
+}
+
+function displaySearchResults(results, source) {
+    const resultsContainer = document.getElementById('results-list');
+    
+    if (results.length === 0) {
+        resultsContainer.innerHTML = '<div class="no-results">No results found</div>';
+        return;
+    }
+    
+    resultsContainer.innerHTML = results.map((result, index) => {
+        const confidence = Math.round(result.confidence * 100);
+        const sourceIcon = source === 'discogs' ? '🎵' : '🎶';
+        
+        return `
+            <div class="search-result-item" onclick="selectSearchResult('${source}', '${result.id}')">
+                <div class="result-header">
+                    <span class="result-source">${sourceIcon} ${source.toUpperCase()}</span>
+                    <span class="result-confidence">${confidence}% match</span>
+                </div>
+                <div class="result-title">${result.title}</div>
+                <div class="result-details">
+                    <span>Artist: ${result.artist}</span>
+                    ${result.year ? `<span>Year: ${result.year}</span>` : ''}
+                    ${result.label ? `<span>Label: ${result.label}</span>` : ''}
+                    ${result.catno ? `<span>Cat#: ${result.catno}</span>` : ''}
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+async function selectSearchResult(source, id) {
+    const previewContainer = document.getElementById('preview-content');
+    previewContainer.innerHTML = '<div class="loading">Loading metadata...</div>';
+    document.getElementById('enrichment-preview').style.display = 'block';
+    
+    try {
+        const response = await fetch(`/api/enrichment/${source}/release/${id}`);
+        const data = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(data.error || 'Failed to load metadata');
+        }
+        
+        currentEnrichmentData = { source, data };
+        displayEnrichmentPreview(data, source);
+        
+    } catch (error) {
+        console.error('Metadata load error:', error);
+        previewContainer.innerHTML = `<div class="error">❌ Failed to load: ${error.message}</div>`;
+    }
+}
+
+function displayEnrichmentPreview(data, source) {
+    const previewContainer = document.getElementById('preview-content');
+    
+    let html = `<div class="enrichment-data">`;
+    
+    if (source === 'discogs') {
+        html += `
+            <div class="metadata-section">
+                <h5>Basic Information</h5>
+                <p><strong>Title:</strong> ${data.title || 'N/A'}</p>
+                <p><strong>Artists:</strong> ${data.artists?.join(', ') || 'N/A'}</p>
+                <p><strong>Year:</strong> ${data.year || 'N/A'}</p>
+                <p><strong>Country:</strong> ${data.country || 'N/A'}</p>
+            </div>
+            
+            <div class="metadata-section">
+                <h5>Label Information</h5>
+                ${data.labels?.map(label => `
+                    <p><strong>${label.name}:</strong> ${label.catno || 'N/A'}</p>
+                `).join('') || '<p>No label information</p>'}
+            </div>
+            
+            <div class="metadata-section">
+                <h5>Genres & Styles</h5>
+                <p><strong>Genres:</strong> ${data.genres?.join(', ') || 'N/A'}</p>
+                <p><strong>Styles:</strong> ${data.styles?.join(', ') || 'N/A'}</p>
+            </div>
+            
+            <div class="metadata-section">
+                <h5>Formats</h5>
+                <p>${data.formats?.map(f => `${f.name} ${f.descriptions?.join(', ') || ''}`).join(', ') || 'N/A'}</p>
+            </div>
+        `;
+        
+        if (data.images?.length) {
+            html += `
+                <div class="metadata-section">
+                    <h5>Cover Art</h5>
+                    <img src="${data.images[0].uri}" alt="Cover" style="max-width: 200px; max-height: 200px;">
+                </div>
+            `;
+        }
+        
+    } else if (source === 'musicbrainz') {
+        html += `
+            <div class="metadata-section">
+                <h5>Basic Information</h5>
+                <p><strong>Title:</strong> ${data.title || 'N/A'}</p>
+                <p><strong>Artists:</strong> ${data.artists?.join(', ') || 'N/A'}</p>
+                <p><strong>Date:</strong> ${data.date || 'N/A'}</p>
+                <p><strong>Country:</strong> ${data.country || 'N/A'}</p>
+                <p><strong>Status:</strong> ${data.status || 'N/A'}</p>
+            </div>
+            
+            <div class="metadata-section">
+                <h5>Label Information</h5>
+                ${data.labels?.map(label => `
+                    <p><strong>${label.name}:</strong> ${label.catalog_number || 'N/A'}</p>
+                `).join('') || '<p>No label information</p>'}
+            </div>
+            
+            <div class="metadata-section">
+                <h5>Additional Info</h5>
+                <p><strong>Barcode:</strong> ${data.barcode || 'N/A'}</p>
+                <p><strong>Packaging:</strong> ${data.packaging || 'N/A'}</p>
+            </div>
+        `;
+        
+        if (data.media?.length) {
+            html += `
+                <div class="metadata-section">
+                    <h5>Track Listing</h5>
+                    ${data.media.map(medium => `
+                        <div class="medium">
+                            <h6>${medium.format} ${medium.position}${medium.title ? ` - ${medium.title}` : ''}</h6>
+                            ${medium.tracks?.slice(0, 5).map(track => `
+                                <p>${track.position}. ${track.title} ${track.length ? `(${track.length})` : ''}</p>
+                            `).join('') || ''}
+                            ${medium.tracks?.length > 5 ? `<p>... and ${medium.tracks.length - 5} more tracks</p>` : ''}
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        }
+    }
+    
+    html += `</div>`;
+    previewContainer.innerHTML = html;
+}
+
+function closePreview() {
+    document.getElementById('enrichment-preview').style.display = 'none';
+    currentEnrichmentData = null;
+}
+
+async function applyEnrichment() {
+    if (!currentEnrichmentData) {
+        alert('No enrichment data selected');
+        return;
+    }
+    
+    // For demo purposes, we'll show a success message
+    // In a real implementation, you'd need to select an album first
+    if (!selectedAlbumId) {
+        alert('This is a demo. In a real scenario, you would select an album from your collection first.');
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/enrichment/apply', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                album_id: selectedAlbumId,
+                source: currentEnrichmentData.source,
+                enrichment_data: currentEnrichmentData.data
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to apply enrichment');
+        }
+        
+        alert('✅ Enrichment applied successfully!');
+        closeMetadataSearch();
+        
+        // Refresh the data
+        loadStats();
+        
+    } catch (error) {
+        console.error('Apply enrichment error:', error);
+        alert(`❌ Failed to apply enrichment: ${error.message}`);
+    }
+}
