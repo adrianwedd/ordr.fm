@@ -29,6 +29,13 @@ if [[ -f "$SCRIPT_DIR/lib/discogs.sh" ]]; then
 else
     echo "WARNING: Discogs module not found at $SCRIPT_DIR/lib/discogs.sh" >&2
 fi
+
+# Source duplicate detection engine
+if [[ -f "$SCRIPT_DIR/lib/duplicate_detection.sh" ]]; then
+    source "$SCRIPT_DIR/lib/duplicate_detection.sh"
+else
+    echo "WARNING: Duplicate detection module not found at $SCRIPT_DIR/lib/duplicate_detection.sh" >&2
+fi
     # Parse alias groups once at startup for performance
     parse_alias_groups_once
     # Validate alias configuration
@@ -65,6 +72,11 @@ FORCE_REPROCESS_DIR="" # Directory to force reprocess
 FIND_DUPLICATES=0 # Flag to enable duplicate detection analysis mode
 RESOLVE_DUPLICATES=0 # Flag to enable automatic duplicate resolution
 DUPLICATES_DB="" # Path to duplicates database
+SCAN_DUPLICATES=0 # Flag to scan collection and generate fingerprints
+DETECT_DUPLICATES=0 # Flag to detect duplicate groups from fingerprints
+DUPLICATE_REPORT=0 # Flag to generate duplicate analysis report
+CLEANUP_DUPLICATES=0 # Flag to cleanup duplicate albums
+DUPLICATE_THRESHOLD=0.85 # Minimum score to consider albums duplicates
 PROFILE_NAME="" # Active configuration profile name
 PROFILES_DIR="" # Directory containing profile configurations
 LIST_PROFILES=0 # Flag to list available profiles
@@ -2893,6 +2905,26 @@ parse_arguments() {
                 DUPLICATES_DB="$2"
                 shift 2
                 ;;
+            --scan-duplicates)
+                SCAN_DUPLICATES=1
+                shift
+                ;;
+            --detect-duplicates)
+                DETECT_DUPLICATES=1
+                shift
+                ;;
+            --duplicate-report)
+                DUPLICATE_REPORT=1
+                shift
+                ;;
+            --cleanup-duplicates)
+                CLEANUP_DUPLICATES=1
+                shift
+                ;;
+            --duplicate-threshold)
+                DUPLICATE_THRESHOLD="$2"
+                shift 2
+                ;;
             --profile)
                 PROFILE_NAME="$2"
                 shift 2
@@ -3044,10 +3076,17 @@ show_help() {
     echo "  --state-db FILE         Path to state database (default: ordr.fm.state.db)"
     echo "  --force-reprocess DIR   Force reprocessing of specific directory"
     echo ""
-    echo "Duplicate Detection:"
-    echo "  --find-duplicates       Find and report duplicate albums (analysis only)"
-    echo "  --resolve-duplicates    Automatically resolve duplicates (remove lower quality)"
+    echo "Advanced Duplicate Detection:"
+    echo "  --scan-duplicates       Scan collection and generate audio fingerprints"
+    echo "  --detect-duplicates     Detect duplicate groups from fingerprints" 
+    echo "  --duplicate-report      Generate comprehensive duplicate analysis report"
+    echo "  --cleanup-duplicates    Clean up duplicate albums (requires --move for actual deletion)"
+    echo "  --duplicate-threshold N Minimum similarity score to consider duplicates (default: 0.85)"
     echo "  --duplicates-db FILE    Path to duplicates database (default: ordr.fm.duplicates.db)"
+    echo ""
+    echo "Legacy Duplicate Detection:"
+    echo "  --find-duplicates       Find and report duplicate albums (legacy analysis)"
+    echo "  --resolve-duplicates    Automatically resolve duplicates (legacy method)"
     echo ""
     echo "Configuration Profiles:"
     echo "  --profile NAME          Use configuration profile NAME"
@@ -3168,12 +3207,48 @@ main() {
     fi
 
     # Initialize duplicates database for duplicate detection
-    if [[ $FIND_DUPLICATES -eq 1 || $RESOLVE_DUPLICATES -eq 1 ]]; then
+    if [[ $FIND_DUPLICATES -eq 1 || $RESOLVE_DUPLICATES -eq 1 || $SCAN_DUPLICATES -eq 1 || $DETECT_DUPLICATES -eq 1 || $DUPLICATE_REPORT -eq 1 || $CLEANUP_DUPLICATES -eq 1 ]]; then
         if [[ -z "$DUPLICATES_DB" ]]; then
             DUPLICATES_DB="$(dirname "$LOG_FILE")/ordr.fm.duplicates.db"
         fi
         log $LOG_INFO "  Duplicates Database: $DUPLICATES_DB"
-        init_duplicates_db "$DUPLICATES_DB"
+        
+        # Initialize the advanced duplicate detection database
+        init_duplicate_detection "$DUPLICATES_DB"
+    fi
+    
+    # Handle duplicate detection workflow
+    if [[ $SCAN_DUPLICATES -eq 1 ]]; then
+        log $LOG_INFO "Starting duplicate collection scan..."
+        scan_for_duplicates "$SOURCE_DIR" "$DUPLICATES_DB"
+        log $LOG_INFO "Duplicate scan completed. Use --detect-duplicates to find duplicate groups."
+        exit 0
+    fi
+    
+    if [[ $DETECT_DUPLICATES -eq 1 ]]; then
+        log $LOG_INFO "Detecting duplicate groups from fingerprints..."
+        detect_duplicate_groups "$DUPLICATES_DB"
+        log $LOG_INFO "Duplicate detection completed. Use --duplicate-report to see results."
+        exit 0
+    fi
+    
+    if [[ $DUPLICATE_REPORT -eq 1 ]]; then
+        log $LOG_INFO "Generating duplicate analysis report..."
+        local report_file
+        report_file=$(generate_duplicate_report "$DUPLICATES_DB")
+        log $LOG_INFO "Duplicate report generated: $report_file"
+        echo "Duplicate report saved to: $report_file"
+        exit 0
+    fi
+    
+    if [[ $CLEANUP_DUPLICATES -eq 1 ]]; then
+        local dry_run_mode="true"
+        if [[ $MOVE_FILES -eq 1 ]]; then
+            dry_run_mode="false"
+        fi
+        log $LOG_INFO "Starting duplicate cleanup (dry_run: $dry_run_mode)..."
+        cleanup_duplicates "$DUPLICATES_DB" "$dry_run_mode"
+        exit 0
     fi
 
     # Initialize Discogs API integration
