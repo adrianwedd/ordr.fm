@@ -4,6 +4,24 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ordr.fm Visualization Dashboard</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#667eea">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="ordr.fm">
+    <link rel="apple-touch-icon" href="icons/icon-192x192.png">
+    
+    <!-- Meta tags for PWA -->
+    <meta name="description" content="Professional music collection analytics and organization dashboard">
+    <meta name="application-name" content="ordr.fm">
+    <meta name="mobile-web-app-capable" content="yes">
+    
+    <!-- Windows tiles -->
+    <meta name="msapplication-TileColor" content="#667eea">
+    <meta name="msapplication-TileImage" content="icons/icon-144x144.png">
+    
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
     <style>
@@ -13,11 +31,50 @@
             box-sizing: border-box;
         }
         
+        :root {
+            /* Dark theme variables (default) */
+            --bg-primary: #1a1a1a;
+            --bg-secondary: #2d2d2d;
+            --bg-card: rgba(45, 45, 45, 0.95);
+            --bg-accent: #333333;
+            --text-primary: #e0e0e0;
+            --text-secondary: #b0b0b0;
+            --text-accent: #ffffff;
+            --border-color: #404040;
+            --shadow: rgba(0, 0, 0, 0.3);
+            --header-bg: rgba(45, 45, 45, 0.95);
+            --input-bg: #333333;
+            --button-bg: #404040;
+            --success-color: #4ade80;
+            --warning-color: #f59e0b;
+            --error-color: #ef4444;
+        }
+        
+        body.light-theme {
+            /* Light theme variables */
+            --bg-primary: #667eea;
+            --bg-secondary: #764ba2;
+            --bg-card: rgba(255, 255, 255, 0.95);
+            --bg-accent: #f8f9fa;
+            --text-primary: #333;
+            --text-secondary: #666;
+            --text-accent: #000;
+            --border-color: #e0e0e0;
+            --shadow: rgba(0, 0, 0, 0.1);
+            --header-bg: rgba(255, 255, 255, 0.95);
+            --input-bg: #ffffff;
+            --button-bg: #e2e8f0;
+            --success-color: #10b981;
+            --warning-color: #d97706;
+            --error-color: #dc2626;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: #333;
+            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+            color: var(--text-primary);
             min-height: 100vh;
+            transition: all 0.3s ease;
         }
         
         .container {
@@ -26,12 +83,372 @@
             padding: 20px;
         }
         
+        /* Mobile-first responsive design */
+        @media (max-width: 768px) {
+            .container {
+                padding: 10px;
+            }
+            
+            header {
+                padding: 15px;
+            }
+            
+            h1 {
+                font-size: 1.5em;
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 5px;
+            }
+            
+            .tabs {
+                flex-wrap: wrap;
+                gap: 5px;
+                overflow-x: auto;
+                padding-bottom: 10px;
+            }
+            
+            .tab {
+                padding: 8px 12px;
+                font-size: 14px;
+                white-space: nowrap;
+            }
+            
+            .dashboard {
+                grid-template-columns: 1fr;
+                gap: 15px;
+            }
+            
+            .stat-grid {
+                grid-template-columns: 1fr 1fr;
+                gap: 10px;
+            }
+            
+            .card {
+                padding: 15px;
+            }
+            
+            .chart-container {
+                height: 250px;
+            }
+            
+            .table-container {
+                max-height: 300px;
+                overflow-x: auto;
+            }
+            
+            table {
+                min-width: 500px;
+            }
+            
+            th, td {
+                padding: 8px 6px;
+                font-size: 14px;
+            }
+        }
+        
+        @media (max-width: 480px) {
+            .container {
+                padding: 5px;
+            }
+            
+            h1 {
+                font-size: 1.3em;
+            }
+            
+            .status {
+                font-size: 12px;
+                padding: 3px 8px;
+            }
+            
+            .stat-grid {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+            
+            .stat {
+                padding: 10px;
+            }
+            
+            .stat-value {
+                font-size: 24px;
+            }
+            
+            .stat-label {
+                font-size: 11px;
+            }
+            
+            .chart-container {
+                height: 200px;
+            }
+            
+            .tabs {
+                gap: 2px;
+            }
+            
+            .tab {
+                padding: 6px 10px;
+                font-size: 12px;
+            }
+            
+            .card h2 {
+                font-size: 16px;
+            }
+        }
+        
+        /* Touch-friendly improvements */
+        .tab, .install-btn, button {
+            min-height: 44px;
+            min-width: 44px;
+        }
+        
+        @media (hover: none) and (pointer: coarse) {
+            /* Touch device specific styles */
+            .tab:active, button:active {
+                background: rgba(102, 126, 234, 0.1);
+            }
+            
+            .card:active {
+                transform: scale(0.99);
+                transition: transform 0.1s;
+            }
+            
+            /* Larger touch targets */
+            th, td {
+                padding: 12px 8px;
+            }
+        }
+        
+        /* Landscape orientation adjustments */
+        @media (max-width: 768px) and (orientation: landscape) {
+            .dashboard {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            
+            .stat-grid {
+                grid-template-columns: repeat(4, 1fr);
+            }
+            
+            .chart-container {
+                height: 300px;
+            }
+        }
+        
+        /* Mobile-optimized components */
+        .mobile-fab {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            width: 56px;
+            height: 56px;
+            background: #667eea;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+            font-size: 24px;
+            cursor: pointer;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            transition: all 0.3s ease;
+        }
+        
+        .mobile-fab:hover {
+            transform: scale(1.1);
+            box-shadow: 0 6px 12px rgba(0,0,0,0.4);
+        }
+        
+        @media (max-width: 768px) {
+            .mobile-fab {
+                display: flex;
+            }
+        }
+        
+        .mobile-bottom-sheet {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-radius: 20px 20px 0 0;
+            box-shadow: 0 -4px 20px rgba(0,0,0,0.1);
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+            z-index: 1001;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .mobile-bottom-sheet.open {
+            transform: translateY(0);
+        }
+        
+        .bottom-sheet-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .bottom-sheet-content {
+            padding: 20px;
+        }
+        
+        .mobile-card {
+            background: white;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            border-left: 4px solid #667eea;
+        }
+        
+        .mobile-card h3 {
+            margin: 0 0 8px 0;
+            font-size: 16px;
+            color: #333;
+        }
+        
+        .mobile-card p {
+            margin: 0;
+            font-size: 14px;
+            color: #666;
+            line-height: 1.4;
+        }
+        
+        .mobile-metric {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .mobile-metric:last-child {
+            border-bottom: none;
+        }
+        
+        .mobile-metric-label {
+            font-size: 14px;
+            color: #666;
+        }
+        
+        .mobile-metric-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #333;
+        }
+        
+        .mobile-progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #f0f0f0;
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 8px 0;
+        }
+        
+        .mobile-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+        
+        .mobile-chip {
+            display: inline-block;
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 500;
+            margin: 2px 4px 2px 0;
+        }
+        
+        .mobile-alert {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-left: 4px solid #fdcb6e;
+            border-radius: 8px;
+            padding: 12px 16px;
+            margin: 12px 0;
+        }
+        
+        .mobile-alert-icon {
+            display: inline-block;
+            margin-right: 8px;
+            font-size: 16px;
+        }
+        
+        .mobile-alert-text {
+            font-size: 14px;
+            color: #856404;
+        }
+        
+        /* Mobile swipe indicators */
+        .swipe-indicator {
+            position: fixed;
+            top: 50%;
+            transform: translateY(-50%);
+            background: rgba(102, 126, 234, 0.8);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            pointer-events: none;
+        }
+        
+        .swipe-indicator.left {
+            left: 20px;
+        }
+        
+        .swipe-indicator.right {
+            right: 20px;
+        }
+        
+        .swipe-indicator.show {
+            opacity: 1;
+        }
+        
+        /* Loading skeleton for mobile */
+        .mobile-skeleton {
+            background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+            background-size: 200% 100%;
+            animation: loading 1.5s infinite;
+        }
+        
+        @keyframes loading {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+        
+        .mobile-skeleton-text {
+            height: 16px;
+            border-radius: 8px;
+            margin-bottom: 8px;
+        }
+        
+        .mobile-skeleton-text.short {
+            width: 60%;
+        }
+        
+        .mobile-skeleton-text.long {
+            width: 90%;
+        }
+        
         header {
-            background: rgba(255, 255, 255, 0.95);
+            background: var(--header-bg);
             border-radius: 10px;
             padding: 20px;
             margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 6px var(--shadow);
+            backdrop-filter: blur(10px);
         }
         
         h1 {
@@ -39,6 +456,27 @@
             display: flex;
             align-items: center;
             gap: 10px;
+        }
+        
+        .theme-toggle {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 25px;
+            padding: 8px 16px;
+            cursor: pointer;
+            z-index: 1000;
+            transition: all 0.3s ease;
+            color: var(--text-primary);
+            font-size: 14px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .theme-toggle:hover {
+            transform: scale(1.05);
+            box-shadow: 0 4px 12px var(--shadow);
         }
         
         .status {
@@ -62,14 +500,16 @@
         }
         
         .card {
-            background: rgba(255, 255, 255, 0.95);
+            background: var(--bg-card);
             border-radius: 10px;
             padding: 20px;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            box-shadow: 0 4px 6px var(--shadow);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
         }
         
         .card h2 {
-            color: #764ba2;
+            color: #667eea;
             margin-bottom: 15px;
             font-size: 18px;
         }
@@ -83,8 +523,9 @@
         .stat {
             text-align: center;
             padding: 15px;
-            background: #f8f9fa;
+            background: var(--bg-accent);
             border-radius: 8px;
+            border: 1px solid var(--border-color);
         }
         
         .stat-value {
@@ -201,9 +642,444 @@
             opacity: 0;
             transition: opacity 0.3s;
         }
+        
+        /* Action Components Styles */
+        .action-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+        }
+        
+        .action-card {
+            background: var(--bg-accent);
+            border-radius: 8px;
+            padding: 16px;
+            border-left: 4px solid #667eea;
+            border: 1px solid var(--border-color);
+        }
+        
+        .action-card h3 {
+            margin: 0 0 8px 0;
+            color: var(--text-primary);
+            font-size: 16px;
+        }
+        
+        .action-card p {
+            margin: 0 0 12px 0;
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+        
+        .action-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        
+        .action-input {
+            padding: 8px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            background: var(--input-bg);
+            color: var(--text-primary);
+            transition: all 0.2s ease;
+        }
+        
+        .action-input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+        }
+        
+        .action-buttons {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+        
+        .action-btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 500;
+        }
+        
+        .action-btn.primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .action-btn.primary:hover {
+            background: #5a67d8;
+        }
+        
+        .action-btn.secondary {
+            background: #e2e8f0;
+            color: #4a5568;
+        }
+        
+        .action-btn.secondary:hover {
+            background: #cbd5e0;
+        }
+        
+        .action-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        .progress-section {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e2e8f0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+        
+        .progress-text {
+            font-size: 14px;
+            color: #4a5568;
+            margin-bottom: 8px;
+        }
+        
+        .progress-log {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 4px;
+            padding: 8px;
+            max-height: 120px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            color: #2d3748;
+            white-space: pre-wrap;
+        }
+        
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+            color: #4a5568;
+            cursor: pointer;
+        }
+        
+        .checkbox-label input[type="checkbox"] {
+            margin: 0;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 16px;
+        }
+        
+        .status-card {
+            background: var(--bg-accent);
+            border-radius: 8px;
+            padding: 16px;
+            border-left: 4px solid var(--success-color);
+            border: 1px solid var(--border-color);
+        }
+        
+        .status-card h3 {
+            margin: 0 0 12px 0;
+            color: var(--text-primary);
+            font-size: 16px;
+        }
+        
+        .dependency-item, .service-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .dependency-item:last-child, .service-item:last-child {
+            border-bottom: none;
+        }
+        
+        .dependency-name, .service-name {
+            font-size: 14px;
+            color: #4a5568;
+        }
+        
+        .status-indicator {
+            font-size: 16px;
+        }
+        
+        .disk-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 6px 0;
+            font-size: 14px;
+        }
+        
+        .disk-label {
+            color: #4a5568;
+            font-weight: 500;
+        }
+        
+        .backup-status {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            border: 1px solid #e2e8f0;
+        }
+        
+        .activity-log {
+            max-height: 150px;
+            overflow-y: auto;
+        }
+        
+        .activity-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #e2e8f0;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        
+        .activity-item:last-child {
+            border-bottom: none;
+        }
+        
+        .activity-time {
+            font-size: 12px;
+            color: #718096;
+        }
+        
+        .activity-desc {
+            font-size: 14px;
+            color: #4a5568;
+        }
+        
+        /* File Browser Modal Styles */
+        .file-browser-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 2000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .file-browser-content {
+            background: var(--bg-card);
+            border-radius: 12px;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 10px 30px var(--shadow);
+        }
+        
+        .file-browser-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .file-browser-header h3 {
+            margin: 0;
+            color: var(--text-primary);
+            font-size: 18px;
+        }
+        
+        .close-browser {
+            background: none;
+            border: none;
+            font-size: 20px;
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        
+        .close-browser:hover {
+            background: var(--bg-accent);
+            color: var(--text-primary);
+        }
+        
+        .file-browser-toolbar {
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: var(--bg-accent);
+        }
+        
+        .nav-button {
+            padding: 6px 12px;
+            background: var(--button-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-primary);
+            transition: all 0.2s ease;
+        }
+        
+        .nav-button:hover:not(:disabled) {
+            background: var(--bg-card);
+        }
+        
+        .nav-button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .current-path {
+            font-family: 'Courier New', monospace;
+            background: var(--input-bg);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            color: var(--text-primary);
+            flex: 1;
+            border: 1px solid var(--border-color);
+        }
+        
+        .file-browser-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+            min-height: 300px;
+            max-height: 400px;
+        }
+        
+        .file-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 2px;
+        }
+        
+        .file-item:hover {
+            background: var(--bg-accent);
+        }
+        
+        .file-item.selected {
+            background: rgba(102, 126, 234, 0.2);
+            border: 1px solid #667eea;
+        }
+        
+        .file-icon {
+            margin-right: 12px;
+            font-size: 18px;
+            width: 20px;
+            text-align: center;
+        }
+        
+        .file-info {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .file-name {
+            font-size: 14px;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        
+        .file-details {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        
+        .file-browser-actions {
+            padding: 16px 20px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            background: var(--bg-accent);
+        }
+        
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 40px;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+        
+        @media (max-width: 768px) {
+            .action-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .status-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .action-buttons {
+                justify-content: stretch;
+            }
+            
+            .action-btn {
+                flex: 1;
+                text-align: center;
+            }
+            
+            .file-browser-content {
+                width: 95%;
+                max-height: 90vh;
+            }
+            
+            .file-browser-toolbar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+            }
+        }
     </style>
 </head>
 <body>
+    <!-- Theme Toggle Button -->
+    <button class="theme-toggle" onclick="toggleTheme()" id="theme-toggle">
+        🌙 Dark Mode
+    </button>
+    
     <div class="container">
         <header>
             <h1>
@@ -216,6 +1092,7 @@
         
         <div class="tabs">
             <button class="tab active" onclick="showTab('overview')">Overview</button>
+            <button class="tab" onclick="showTab('actions')">Actions</button>
             <button class="tab" onclick="showTab('health')">Collection Health</button>
             <button class="tab" onclick="showTab('duplicates')">Duplicates</button>
             <button class="tab" onclick="showTab('insights')">Insights</button>
@@ -262,6 +1139,202 @@
                     <h2>📁 Organization Modes</h2>
                     <div class="chart-container">
                         <canvas id="mode-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Actions Tab -->
+        <div id="actions" class="tab-content">
+            <div class="dashboard">
+                <!-- Processing Controls -->
+                <div class="card">
+                    <h2>🎵 Music Processing</h2>
+                    <div class="action-grid">
+                        <div class="action-card">
+                            <h3>Process Collection</h3>
+                            <p>Scan and organize new music files</p>
+                            <div class="action-controls">
+                                <select id="source-directory" class="action-input">
+                                    <option value="/home/plex/Music/Unsorted and Incomplete/Incomplete Albums">Incomplete Albums</option>
+                                    <option value="/home/plex/Music/Unsorted and Incomplete/Unsorted Tracks">Unsorted Tracks</option>
+                                    <option value="custom">Custom Directory...</option>
+                                    <option value="browse">Browse Folders...</option>
+                                </select>
+                                <input type="text" id="custom-source" placeholder="Enter custom path..." class="action-input" style="display: none;">
+                                
+                                <!-- File Browser Modal -->
+                                <div class="file-browser-modal" id="file-browser-modal" style="display: none;">
+                                    <div class="file-browser-content">
+                                        <div class="file-browser-header">
+                                            <h3>📁 Select Music Folder</h3>
+                                            <button class="close-browser" onclick="closeFileBrowser()">✕</button>
+                                        </div>
+                                        <div class="file-browser-toolbar">
+                                            <button class="nav-button nav-up" id="go-up" onclick="navigateUp()">⬆️ Up</button>
+                                            <span class="current-path" id="current-path">/home/plex/Music</span>
+                                        </div>
+                                        <div class="file-browser-list" id="directory-list">
+                                            <div class="loading">Loading directories...</div>
+                                        </div>
+                                        <div class="file-browser-actions">
+                                            <button class="action-btn secondary" onclick="closeFileBrowser()">Cancel</button>
+                                            <button class="action-btn primary select-path" id="select-folder" onclick="selectCurrentFolder()">Select This Folder</button>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="action-buttons">
+                                    <button class="action-btn secondary" onclick="startProcessing(false)">Dry Run</button>
+                                    <button class="action-btn primary" onclick="startProcessing(true)">Process & Move</button>
+                                </div>
+                            </div>
+                            <div class="progress-section" id="processing-progress" style="display: none;">
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="processing-progress-bar"></div>
+                                </div>
+                                <div class="progress-text" id="processing-status">Ready to process...</div>
+                                <div class="progress-log" id="processing-log"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="action-card">
+                            <h3>Discogs Enhancement</h3>
+                            <p>Enrich metadata with Discogs data</p>
+                            <div class="action-controls">
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="enable-discogs" checked> Enable Discogs lookup
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="checkbox" id="electronic-mode"> Electronic music mode
+                                </label>
+                                <div class="action-buttons">
+                                    <button class="action-btn primary" onclick="enhanceMetadata()">Enhance Existing</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Backup Controls -->
+                <div class="card">
+                    <h2>💾 Backup Management</h2>
+                    <div class="action-grid">
+                        <div class="action-card">
+                            <h3>Database Backup</h3>
+                            <p>Backup metadata and organization data</p>
+                            <div class="backup-status" id="db-backup-status">
+                                <span class="status-indicator" id="db-backup-indicator">⏱️</span>
+                                <span id="db-backup-text">Last backup: Checking...</span>
+                            </div>
+                            <div class="action-controls">
+                                <div class="action-buttons">
+                                    <button class="action-btn primary" onclick="startDatabaseBackup()">Backup Now</button>
+                                    <button class="action-btn secondary" onclick="restoreDatabase()">Restore</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="action-card">
+                            <h3>Cloud Backup</h3>
+                            <p>Sync organized music to Google Drive</p>
+                            <div class="backup-status" id="cloud-backup-status">
+                                <span class="status-indicator" id="cloud-backup-indicator">⏱️</span>
+                                <span id="cloud-backup-text">Status: Checking...</span>
+                            </div>
+                            <div class="action-controls">
+                                <select id="backup-target" class="action-input">
+                                    <option value="gdrive">Google Drive</option>
+                                    <option value="rclone">Custom rclone remote</option>
+                                </select>
+                                <div class="action-buttons">
+                                    <button class="action-btn primary" onclick="startCloudBackup()">Start Backup</button>
+                                    <button class="action-btn secondary" onclick="pauseCloudBackup()">Pause</button>
+                                </div>
+                            </div>
+                            <div class="progress-section" id="backup-progress" style="display: none;">
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="backup-progress-bar"></div>
+                                </div>
+                                <div class="progress-text" id="backup-status-text">Ready to backup...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Status -->
+                <div class="card">
+                    <h2>⚙️ System Status</h2>
+                    <div class="status-grid">
+                        <div class="status-card">
+                            <h3>Dependencies</h3>
+                            <div id="dependencies-status">
+                                <div class="dependency-item">
+                                    <span class="dependency-name">exiftool</span>
+                                    <span class="status-indicator" id="exiftool-status">⏱️</span>
+                                </div>
+                                <div class="dependency-item">
+                                    <span class="dependency-name">jq</span>
+                                    <span class="status-indicator" id="jq-status">⏱️</span>
+                                </div>
+                                <div class="dependency-item">
+                                    <span class="dependency-name">rsync</span>
+                                    <span class="status-indicator" id="rsync-status">⏱️</span>
+                                </div>
+                                <div class="dependency-item">
+                                    <span class="dependency-name">rclone</span>
+                                    <span class="status-indicator" id="rclone-status">⏱️</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="status-card">
+                            <h3>Disk Space</h3>
+                            <div id="disk-status">
+                                <div class="disk-info">
+                                    <span class="disk-label">Source:</span>
+                                    <span id="source-disk-space">Checking...</span>
+                                </div>
+                                <div class="disk-info">
+                                    <span class="disk-label">Destination:</span>
+                                    <span id="dest-disk-space">Checking...</span>
+                                </div>
+                                <div class="disk-info">
+                                    <span class="disk-label">Database:</span>
+                                    <span id="db-disk-space">Checking...</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="status-card">
+                            <h3>Services</h3>
+                            <div id="services-status">
+                                <div class="service-item">
+                                    <span class="service-name">ordr.fm Script</span>
+                                    <span class="status-indicator" id="script-status">⏱️</span>
+                                </div>
+                                <div class="service-item">
+                                    <span class="service-name">Discogs API</span>
+                                    <span class="status-indicator" id="discogs-status">⏱️</span>
+                                </div>
+                                <div class="service-item">
+                                    <span class="service-name">Backup Service</span>
+                                    <span class="status-indicator" id="backup-service-status">⏱️</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="status-card">
+                            <h3>Recent Activity</h3>
+                            <div id="recent-activity">
+                                <div class="activity-log">
+                                    <div class="activity-item">
+                                        <span class="activity-time">Checking...</span>
+                                        <span class="activity-desc">Loading recent activity</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -534,6 +1607,41 @@
             </div>
         </div>
     </div>
+    
+    <!-- Mobile-optimized components -->
+    <button class="mobile-fab" id="mobile-fab" onclick="toggleMobileMenu()">⚙️</button>
+    
+    <div class="mobile-bottom-sheet" id="mobile-menu">
+        <div class="bottom-sheet-header">
+            <h3>Quick Actions</h3>
+            <button onclick="closeMobileMenu()" style="background: none; border: none; font-size: 20px; cursor: pointer;">×</button>
+        </div>
+        <div class="bottom-sheet-content">
+            <div class="mobile-card" onclick="refreshCurrentTab()">
+                <h3>🔄 Refresh Data</h3>
+                <p>Update current view with latest information</p>
+            </div>
+            
+            <div class="mobile-card" onclick="testPushNotification()">
+                <h3>🔔 Test Notifications</h3>
+                <p>Test push notification functionality</p>
+            </div>
+            
+            <div class="mobile-card" onclick="window.location.reload()">
+                <h3>↻ Reload App</h3>
+                <p>Restart the application completely</p>
+            </div>
+            
+            <div class="mobile-alert">
+                <span class="mobile-alert-icon">💡</span>
+                <span class="mobile-alert-text">Swipe left/right between tabs or pull down to refresh</span>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Swipe indicators -->
+    <div class="swipe-indicator left" id="swipe-left">← Previous</div>
+    <div class="swipe-indicator right" id="swipe-right">Next →</div>
     
     <div class="tooltip" id="tooltip"></div>
     

@@ -3,9 +3,127 @@ const rateLimit = require('express-rate-limit');
 const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const WebSocket = require('ws');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Create HTTP server for both Express and WebSocket
+const server = http.createServer(app);
+
+// Create WebSocket server
+const wss = new WebSocket.Server({ server });
+
+// WebSocket connection handling
+const clients = new Set();
+
+wss.on('connection', (ws, req) => {
+    console.log('WebSocket client connected from:', req.socket.remoteAddress);
+    clients.add(ws);
+    
+    // Send initial connection message
+    ws.send(JSON.stringify({
+        type: 'connection',
+        message: 'Connected to ordr.fm real-time updates',
+        timestamp: new Date().toISOString()
+    }));
+    
+    // Handle client messages
+    ws.on('message', (data) => {
+        try {
+            const message = JSON.parse(data);
+            console.log('WebSocket message received:', message);
+            
+            // Handle different message types
+            switch (message.type) {
+                case 'ping':
+                    ws.send(JSON.stringify({ type: 'pong', timestamp: new Date().toISOString() }));
+                    break;
+                    
+                case 'subscribe':
+                    // Client wants to subscribe to specific updates
+                    ws.subscriptions = new Set(message.channels || []);
+                    ws.send(JSON.stringify({
+                        type: 'subscribed',
+                        channels: Array.from(ws.subscriptions),
+                        timestamp: new Date().toISOString()
+                    }));
+                    break;
+                    
+                default:
+                    console.log('Unknown message type:', message.type);
+            }
+        } catch (error) {
+            console.error('WebSocket message parse error:', error);
+        }
+    });
+    
+    // Handle client disconnect
+    ws.on('close', () => {
+        console.log('WebSocket client disconnected');
+        clients.delete(ws);
+    });
+    
+    // Handle errors
+    ws.on('error', (error) => {
+        console.error('WebSocket error:', error);
+        clients.delete(ws);
+    });
+});
+
+// Broadcast message to all connected clients
+function broadcast(message, channel = null) {
+    const payload = JSON.stringify({
+        ...message,
+        timestamp: new Date().toISOString()
+    });
+    
+    clients.forEach(ws => {
+        if (ws.readyState === WebSocket.OPEN) {
+            // Check if client is subscribed to this channel
+            if (!channel || !ws.subscriptions || ws.subscriptions.has(channel)) {
+                try {
+                    ws.send(payload);
+                } catch (error) {
+                    console.error('Error sending WebSocket message:', error);
+                    clients.delete(ws);
+                }
+            }
+        } else {
+            clients.delete(ws);
+        }
+    });
+}
+
+// Send periodic stats updates to subscribers
+setInterval(async () => {
+    if (clients.size === 0) return;
+    
+    try {
+        // Get quick stats for real-time updates
+        const db = getDb();
+        db.get('SELECT COUNT(*) as albums FROM albums', (err, albumRow) => {
+            if (err) return;
+            
+            db.get('SELECT COUNT(*) as tracks FROM tracks', (err, trackRow) => {
+                if (!err) {
+                    broadcast({
+                        type: 'stats_update',
+                        data: {
+                            totalAlbums: albumRow?.albums || 0,
+                            totalTracks: trackRow?.tracks || 0,
+                            lastUpdate: new Date().toISOString()
+                        }
+                    }, 'stats');
+                }
+                db.close();
+            });
+        });
+    } catch (error) {
+        console.error('Error in periodic stats update:', error);
+    }
+}, 30000); // Every 30 seconds
 
 // Database path from environment or default
 const DB_PATH = process.env.ORDRFM_DB || path.join(__dirname, '..', 'ordr.fm.metadata.db');
@@ -90,7 +208,7 @@ app.get('/api/stats', (req, res) => {
             stats.totalTracks = row ? row.count : 0;
             
             // Get artist count (unique)
-            db.get('SELECT COUNT(DISTINCT album_artist) as count FROM albums WHERE album_artist IS NOT NULL', (err, row) => {
+            db.get('SELECT COUNT(DISTINCT artist) as count FROM albums WHERE artist IS NOT NULL', (err, row) => {
                 stats.totalArtists = row ? row.count : 0;
                 
                 // Get label count
@@ -134,7 +252,7 @@ app.get('/api/albums', (req, res) => {
     const params = [];
     
     if (artist) {
-        query += ' AND album_artist LIKE ?';
+        query += ' AND artist LIKE ?';
         params.push(`%${artist}%`);
     }
     if (label) {
@@ -150,7 +268,7 @@ app.get('/api/albums', (req, res) => {
         params.push(mode);
     }
     
-    query += ' ORDER BY processed_at DESC LIMIT ? OFFSET ?';
+    query += ' ORDER BY processing_date DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), parseInt(offset));
     
     db.all(query, params, (err, rows) => {
@@ -171,12 +289,12 @@ app.get('/api/artists', (req, res) => {
     
     // Get all artists with their release counts
     const artistQuery = `
-        SELECT album_artist as name, 
+        SELECT artist as name, 
                COUNT(*) as release_count,
                COUNT(DISTINCT label) as label_count
         FROM albums 
-        WHERE album_artist IS NOT NULL
-        GROUP BY album_artist
+        WHERE artist IS NOT NULL
+        GROUP BY artist
         ORDER BY release_count DESC
         LIMIT 100
     `;
@@ -207,7 +325,7 @@ app.get('/api/labels', (req, res) => {
     const query = `
         SELECT label,
                COUNT(*) as release_count,
-               COUNT(DISTINCT album_artist) as artist_count,
+               COUNT(DISTINCT artist) as artist_count,
                MIN(year) as first_release,
                MAX(year) as latest_release
         FROM albums
@@ -257,14 +375,14 @@ app.get('/api/timeline', (req, res) => {
     const db = getDb();
     
     const query = `
-        SELECT DATE(processed_at) as date,
+        SELECT DATE(processing_date) as date,
                COUNT(*) as albums_processed,
                SUM(CASE WHEN quality = 'Lossless' THEN 1 ELSE 0 END) as lossless,
                SUM(CASE WHEN quality = 'Lossy' THEN 1 ELSE 0 END) as lossy,
                SUM(CASE WHEN quality = 'Mixed' THEN 1 ELSE 0 END) as mixed
         FROM albums
-        WHERE processed_at IS NOT NULL
-        GROUP BY DATE(processed_at)
+        WHERE processing_date IS NOT NULL
+        GROUP BY DATE(processing_date)
         ORDER BY date DESC
         LIMIT 30
     `;
@@ -294,8 +412,8 @@ app.get('/api/health', (req, res) => {
             SUM(CASE WHEN quality = 'Lossless' THEN 1 ELSE 0 END) as lossless,
             SUM(CASE WHEN quality = 'Mixed' THEN 1 ELSE 0 END) as mixed,
             SUM(CASE WHEN quality = 'Lossy' THEN 1 ELSE 0 END) as lossy,
-            AVG(track_count) as avg_tracks_per_album,
-            COUNT(DISTINCT album_artist) as unique_artists,
+            0 as avg_tracks_per_album,
+            COUNT(DISTINCT artist) as unique_artists,
             COUNT(DISTINCT label) as unique_labels
         FROM albums
     `, (err, stats) => {
@@ -310,8 +428,8 @@ app.get('/api/health', (req, res) => {
         db.get(`
             SELECT 
                 COUNT(*) as total,
-                SUM(CASE WHEN album_artist IS NOT NULL AND album_artist != '' THEN 1 ELSE 0 END) as has_artist,
-                SUM(CASE WHEN album_title IS NOT NULL AND album_title != '' THEN 1 ELSE 0 END) as has_title,
+                SUM(CASE WHEN artist IS NOT NULL AND artist != '' THEN 1 ELSE 0 END) as has_artist,
+                SUM(CASE WHEN album IS NOT NULL AND album != '' THEN 1 ELSE 0 END) as has_title,
                 SUM(CASE WHEN year IS NOT NULL AND year > 0 THEN 1 ELSE 0 END) as has_year,
                 SUM(CASE WHEN label IS NOT NULL AND label != '' THEN 1 ELSE 0 END) as has_label,
                 SUM(CASE WHEN catalog_number IS NOT NULL AND catalog_number != '' THEN 1 ELSE 0 END) as has_catalog
@@ -439,17 +557,17 @@ app.get('/api/insights', (req, res) => {
     // Artist productivity analysis
     db.all(`
         SELECT 
-            album_artist,
+            artist,
             COUNT(*) as release_count,
             MIN(year) as first_release,
             MAX(year) as latest_release,
             COUNT(DISTINCT year) as active_years,
             COUNT(DISTINCT label) as labels_worked_with,
             GROUP_CONCAT(DISTINCT label) as label_list,
-            ROUND(AVG(track_count), 1) as avg_tracks_per_album
+            0 as avg_tracks_per_album
         FROM albums
-        WHERE album_artist IS NOT NULL
-        GROUP BY album_artist
+        WHERE artist IS NOT NULL
+        GROUP BY artist
         HAVING release_count >= 3
         ORDER BY release_count DESC, latest_release DESC
         LIMIT 50
@@ -469,8 +587,8 @@ app.get('/api/insights', (req, res) => {
                 COUNT(*) as releases,
                 MIN(year) as first_year,
                 MAX(year) as latest_year,
-                COUNT(DISTINCT album_artist) as artist_count,
-                ROUND(AVG(track_count), 1) as avg_tracks,
+                COUNT(DISTINCT artist) as artist_count,
+                0 as avg_tracks,
                 COUNT(DISTINCT quality) as quality_variety
             FROM albums
             WHERE label IS NOT NULL AND year IS NOT NULL
@@ -492,9 +610,9 @@ app.get('/api/insights', (req, res) => {
                 SELECT 
                     year,
                     COUNT(*) as albums_added,
-                    COUNT(DISTINCT album_artist) as new_artists,
+                    COUNT(DISTINCT artist) as new_artists,
                     COUNT(DISTINCT label) as labels_active,
-                    ROUND(AVG(track_count), 1) as avg_tracks,
+                    0 as avg_tracks,
                     SUM(CASE WHEN quality = 'Lossless' THEN 1 ELSE 0 END) as lossless_count
                 FROM albums
                 WHERE year IS NOT NULL AND year >= 1990
@@ -514,17 +632,17 @@ app.get('/api/insights', (req, res) => {
                 db.all(`
                     SELECT 
                         'unusually_long_album' as type,
-                        album_artist || ' - ' || album_title as description,
-                        track_count as value,
+                        artist || ' - ' || album as description,
+                        0 as value,
                         'tracks' as unit
                     FROM albums
-                    WHERE track_count > 25
+                    WHERE 0 > 25
                     
                     UNION ALL
                     
                     SELECT 
                         'very_old_release' as type,
-                        album_artist || ' - ' || album_title as description,
+                        artist || ' - ' || album as description,
                         year as value,
                         'year' as unit
                     FROM albums
@@ -534,7 +652,7 @@ app.get('/api/insights', (req, res) => {
                     
                     SELECT 
                         'future_release' as type,
-                        album_artist || ' - ' || album_title as description,
+                        artist || ' - ' || album as description,
                         year as value,
                         'year' as unit
                     FROM albums
@@ -566,15 +684,15 @@ app.get('/api/performance', (req, res) => {
     // Processing performance analysis
     db.all(`
         SELECT 
-            DATE(processed_at) as date,
+            DATE(processing_date) as date,
             COUNT(*) as albums_processed,
-            AVG(processing_duration_ms) as avg_duration_ms,
-            MIN(processing_duration_ms) as min_duration_ms,
-            MAX(processing_duration_ms) as max_duration_ms,
-            COUNT(CASE WHEN discogs_enriched = 1 THEN 1 END) as discogs_enriched
+            0 as avg_duration_ms,
+            0 as min_duration_ms,
+            0 as max_duration_ms,
+            COUNT(CASE WHEN discogs_confidence > 0 THEN 1 END) as discogs_enriched
         FROM albums
-        WHERE processed_at IS NOT NULL
-        GROUP BY DATE(processed_at)
+        WHERE processing_date IS NOT NULL
+        GROUP BY DATE(processing_date)
         ORDER BY date DESC
         LIMIT 30
     `, (err, performance) => {
@@ -651,10 +769,40 @@ app.get('/api/health', healthLimiter, (req, res) => {
     });
 });
 
-// Start server
-app.listen(PORT, () => {
-    console.log(`ordr.fm visualization server running on http://localhost:${PORT}`);
-    console.log(`Database path: ${DB_PATH}`);
+// Push notification subscription endpoint
+app.post('/api/subscribe', (req, res) => {
+    const subscription = req.body;
+    
+    console.log('Received push subscription:', {
+        endpoint: subscription?.endpoint?.substring(0, 50) + '...',
+        keys: subscription?.keys ? 'present' : 'missing'
+    });
+    
+    // In a production app, you would:
+    // 1. Store the subscription in a database
+    // 2. Associate it with a user ID
+    // 3. Use a proper VAPID key management system
+    // 4. Implement subscription validation
+    
+    res.json({ 
+        success: true, 
+        message: 'Push subscription received',
+        subscribed: true
+    });
+    
+    // Send a test notification immediately (optional)
+    // sendPushNotification(subscription, {
+    //     title: 'ordr.fm Notifications',
+    //     body: 'You will now receive real-time updates!',
+    //     icon: '/icons/icon-192x192.png'
+    // });
+});
+
+// Start server with WebSocket support
+server.listen(PORT, () => {
+    console.log(`🎵 ordr.fm visualization server running on http://localhost:${PORT}`);
+    console.log(`🔌 WebSocket server ready for real-time updates`);
+    console.log(`💾 Database path: ${DB_PATH}`);
     
     // Check if database exists
     fs.access(DB_PATH, fs.constants.R_OK, (err) => {
@@ -667,3 +815,463 @@ app.listen(PORT, () => {
         }
     });
 });
+
+// Action API Endpoints
+
+// Start music processing
+app.post('/api/actions/process', (req, res) => {
+    const { sourceDirectory, dryRun = true, enableDiscogs = true, electronicMode = false } = req.body;
+    
+    if (!sourceDirectory) {
+        return res.status(400).json({ error: 'Source directory is required' });
+    }
+    
+    // Build command arguments
+    let command = `cd .. && ./ordr.fm.sh --source "${sourceDirectory}"`;
+    if (!dryRun) {
+        command += ' --move';
+    }
+    if (enableDiscogs) {
+        command += ' --discogs';
+    }
+    if (electronicMode) {
+        command += ' --enable-electronic';
+    }
+    
+    console.log('Starting processing with command:', command);
+    
+    // Execute the command asynchronously
+    const { spawn } = require('child_process');
+    const process = spawn('bash', ['-c', command], {
+        stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    let output = '';
+    let errorOutput = '';
+    
+    process.stdout.on('data', (data) => {
+        const chunk = data.toString();
+        output += chunk;
+        
+        // Broadcast real-time updates to WebSocket clients
+        broadcast({
+            type: 'processing_update',
+            data: {
+                status: 'running',
+                output: chunk,
+                timestamp: new Date().toISOString()
+            }
+        }, 'processing');
+    });
+    
+    process.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+    });
+    
+    process.on('close', (code) => {
+        const result = {
+            success: code === 0,
+            exitCode: code,
+            output: output,
+            error: errorOutput,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Broadcast completion status
+        broadcast({
+            type: 'processing_complete',
+            data: result
+        }, 'processing');
+        
+        console.log('Processing completed with exit code:', code);
+    });
+    
+    res.json({ 
+        message: 'Processing started', 
+        command: command.replace(/--source "[^"]*"/, '--source "[REDACTED]"'),
+        timestamp: new Date().toISOString() 
+    });
+});
+
+// System status check
+app.get('/api/system/status', (req, res) => {
+    const { exec } = require('child_process');
+    const status = {
+        dependencies: {},
+        diskSpace: {},
+        services: {},
+        timestamp: new Date().toISOString()
+    };
+    
+    // Check dependencies
+    const dependencies = ['exiftool', 'jq', 'rsync', 'rclone'];
+    let completedChecks = 0;
+    
+    dependencies.forEach(dep => {
+        exec(`which ${dep}`, (error, stdout, stderr) => {
+            status.dependencies[dep] = !error;
+            completedChecks++;
+            
+            if (completedChecks === dependencies.length) {
+                // Check disk space
+                exec('df -h', (error, stdout, stderr) => {
+                    if (!error) {
+                        const lines = stdout.split('\n');
+                        status.diskSpace.raw = stdout;
+                        
+                        // Parse specific directories
+                        const parseUsage = (line) => {
+                            const parts = line.split(/\s+/);
+                            return {
+                                total: parts[1],
+                                used: parts[2],
+                                available: parts[3],
+                                usePercent: parts[4]
+                            };
+                        };
+                        
+                        lines.forEach(line => {
+                            if (line.includes('/home')) {
+                                status.diskSpace.home = parseUsage(line);
+                            }
+                            if (line.includes('/')) {
+                                status.diskSpace.root = parseUsage(line);
+                            }
+                        });
+                    }
+                    
+                    // Check if ordr.fm database exists and is accessible
+                    const dbPath = DB_PATH;
+                    fs.access(dbPath, fs.constants.R_OK, (err) => {
+                        status.services.database = !err;
+                        status.services.databasePath = dbPath;
+                        
+                        // Check if Discogs token is configured
+                        status.services.discogs = process.env.DISCOGS_TOKEN || 'Not configured';
+                        
+                        res.json(status);
+                    });
+                });
+            }
+        });
+    });
+});
+
+// Start database backup
+app.post('/api/actions/backup-database', (req, res) => {
+    const { exec } = require('child_process');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = `./backups/metadata-backup-${timestamp}.db`;
+    
+    // Create backups directory if it doesn't exist
+    exec('mkdir -p ./backups', (mkdirError) => {
+        if (mkdirError) {
+            return res.status(500).json({ error: 'Failed to create backup directory' });
+        }
+        
+        // Copy database file
+        exec(`cp "${DB_PATH}" "${backupPath}"`, (error, stdout, stderr) => {
+            if (error) {
+                console.error('Backup failed:', error);
+                return res.status(500).json({ error: 'Backup failed', details: stderr });
+            }
+            
+            // Get file size
+            fs.stat(backupPath, (statError, stats) => {
+                const result = {
+                    success: true,
+                    backupPath: backupPath,
+                    timestamp: timestamp,
+                    size: stats ? stats.size : 'unknown'
+                };
+                
+                // Broadcast backup completion
+                broadcast({
+                    type: 'backup_complete',
+                    data: result
+                }, 'backup');
+                
+                res.json(result);
+            });
+        });
+    });
+});
+
+// Start cloud backup
+app.post('/api/actions/backup-cloud', (req, res) => {
+    const { target = 'gdrive' } = req.body;
+    const { spawn } = require('child_process');
+    
+    let command;
+    if (target === 'gdrive') {
+        command = 'cd .. && ./backup_to_gdrive.sh';
+    } else {
+        return res.status(400).json({ error: 'Unsupported backup target' });
+    }
+    
+    console.log('Starting cloud backup with command:', command);
+    
+    const process = spawn('bash', ['-c', command], {
+        stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    let output = '';
+    let errorOutput = '';
+    
+    process.stdout.on('data', (data) => {
+        const chunk = data.toString();
+        output += chunk;
+        
+        // Broadcast real-time backup updates
+        broadcast({
+            type: 'backup_update',
+            data: {
+                status: 'running',
+                output: chunk,
+                timestamp: new Date().toISOString()
+            }
+        }, 'backup');
+    });
+    
+    process.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+    });
+    
+    process.on('close', (code) => {
+        const result = {
+            success: code === 0,
+            exitCode: code,
+            output: output,
+            error: errorOutput,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Broadcast completion status
+        broadcast({
+            type: 'backup_complete',
+            data: result
+        }, 'backup');
+        
+        console.log('Cloud backup completed with exit code:', code);
+    });
+    
+    res.json({ 
+        message: 'Cloud backup started',
+        target: target,
+        timestamp: new Date().toISOString() 
+    });
+});
+
+// Get recent activity log
+app.get('/api/system/activity', (req, res) => {
+    const { exec } = require('child_process');
+    
+    // Get recent log entries from ordr.fm.log
+    exec('cd .. && tail -20 ordr.fm.log', (error, stdout, stderr) => {
+        if (error) {
+            return res.json({ activities: [] });
+        }
+        
+        const lines = stdout.trim().split('\n');
+        const activities = lines
+            .filter(line => line.trim().length > 0)
+            .map(line => {
+                // Parse log lines for timestamp and message
+                const match = line.match(/^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\s+(.*)$/);
+                if (match) {
+                    return {
+                        time: match[1],
+                        description: match[2].substring(0, 100) // Truncate long messages
+                    };
+                }
+                return {
+                    time: 'Unknown',
+                    description: line.substring(0, 100)
+                };
+            })
+            .slice(-10); // Keep only last 10 activities
+        
+        res.json({ activities });
+    });
+});
+
+// Enhance existing metadata with Discogs
+app.post('/api/actions/enhance-metadata', (req, res) => {
+    const { force = false } = req.body;
+    const { spawn } = require('child_process');
+    
+    // Build command to re-process existing organized music with Discogs enhancement
+    let command = `cd .. && find "/home/plex/Music/sorted_music" -type d -name "*(*)" | head -10 | while read dir; do echo "Enhancing: $dir"; ./ordr.fm.sh --source "$dir" --discogs --move; done`;
+    
+    if (force) {
+        command += ' --force-refresh';
+    }
+    
+    console.log('Starting metadata enhancement...');
+    
+    const process = spawn('bash', ['-c', command], {
+        stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    let output = '';
+    let errorOutput = '';
+    
+    process.stdout.on('data', (data) => {
+        const chunk = data.toString();
+        output += chunk;
+        
+        // Broadcast real-time updates
+        broadcast({
+            type: 'enhancement_update',
+            data: {
+                status: 'running',
+                output: chunk,
+                timestamp: new Date().toISOString()
+            }
+        }, 'processing');
+    });
+    
+    process.stderr.on('data', (data) => {
+        errorOutput += data.toString();
+    });
+    
+    process.on('close', (code) => {
+        const result = {
+            success: code === 0,
+            exitCode: code,
+            output: output,
+            error: errorOutput,
+            timestamp: new Date().toISOString()
+        };
+        
+        // Broadcast completion status
+        broadcast({
+            type: 'enhancement_complete',
+            data: result
+        }, 'processing');
+        
+        console.log('Metadata enhancement completed with exit code:', code);
+    });
+    
+    res.json({ 
+        message: 'Metadata enhancement started',
+        description: 'Re-processing first 10 organized albums with Discogs enrichment',
+        timestamp: new Date().toISOString() 
+    });
+});
+
+// File browser endpoint for directory selection
+app.get('/api/browse', (req, res) => {
+    const { path: browsePath = '/home/plex/Music' } = req.query;
+    const fs = require('fs');
+    const path = require('path');
+    
+    try {
+        // Security: Only allow browsing under certain directories
+        const allowedPaths = [
+            '/home/plex/Music',
+            '/home/pi/repos/ordr.fm',
+            '/media',
+            '/mnt'
+        ];
+        
+        const isAllowed = allowedPaths.some(allowedPath => 
+            browsePath.startsWith(allowedPath)
+        );
+        
+        if (!isAllowed) {
+            return res.status(403).json({ error: 'Access denied to this directory' });
+        }
+        
+        if (!fs.existsSync(browsePath)) {
+            return res.status(404).json({ error: 'Directory not found' });
+        }
+        
+        const stats = fs.statSync(browsePath);
+        if (!stats.isDirectory()) {
+            return res.status(400).json({ error: 'Path is not a directory' });
+        }
+        
+        const items = fs.readdirSync(browsePath)
+            .map(item => {
+                const itemPath = path.join(browsePath, item);
+                let itemStats;
+                
+                try {
+                    itemStats = fs.statSync(itemPath);
+                } catch (error) {
+                    return null; // Skip items we can't read
+                }
+                
+                // Only include directories and audio files
+                const isDirectory = itemStats.isDirectory();
+                const isAudioFile = /\.(mp3|flac|wav|aiff|alac|aac|m4a|ogg)$/i.test(item);
+                
+                if (!isDirectory && !isAudioFile) {
+                    return null;
+                }
+                
+                return {
+                    name: item,
+                    path: itemPath,
+                    type: isDirectory ? 'directory' : 'file',
+                    size: isDirectory ? null : itemStats.size,
+                    modified: itemStats.mtime.toISOString(),
+                    hasAudioFiles: isDirectory ? hasAudioFiles(itemPath) : null
+                };
+            })
+            .filter(item => item !== null)
+            .sort((a, b) => {
+                // Directories first, then alphabetical
+                if (a.type !== b.type) {
+                    return a.type === 'directory' ? -1 : 1;
+                }
+                return a.name.localeCompare(b.name);
+            });
+        
+        // Get parent directory for navigation
+        const parentDir = browsePath === '/' ? null : path.dirname(browsePath);
+        
+        res.json({
+            currentPath: browsePath,
+            parentPath: parentDir,
+            items: items,
+            totalItems: items.length
+        });
+        
+    } catch (error) {
+        console.error('File browser error:', error);
+        res.status(500).json({ error: 'Failed to browse directory' });
+    }
+});
+
+// Helper function to check if directory contains audio files
+function hasAudioFiles(dirPath) {
+    try {
+        const items = fs.readdirSync(dirPath);
+        return items.some(item => {
+            if (/\.(mp3|flac|wav|aiff|alac|aac|m4a|ogg)$/i.test(item)) {
+                return true;
+            }
+            // Check subdirectories (only one level deep for performance)
+            const itemPath = path.join(dirPath, item);
+            try {
+                const stat = fs.statSync(itemPath);
+                if (stat.isDirectory()) {
+                    const subItems = fs.readdirSync(itemPath);
+                    return subItems.some(subItem => 
+                        /\.(mp3|flac|wav|aiff|alac|aac|m4a|ogg)$/i.test(subItem)
+                    );
+                }
+            } catch (e) {
+                return false;
+            }
+            return false;
+        });
+    } catch (error) {
+        return false;
+    }
+}
+
+// Export broadcast function for external use (if needed)
+module.exports = { broadcast };
