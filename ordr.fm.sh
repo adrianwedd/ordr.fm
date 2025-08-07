@@ -2826,6 +2826,12 @@ process_album_directory() {
         # Actual move logic - atomic operations with rollback capability
         log $LOG_INFO "(Live Run) Moving album directory '$album_dir' to '$proposed_album_path'"
         
+        # Check if source and destination are the same (album already in correct location)
+        if [ "$album_dir" = "$proposed_album_path" ]; then
+            log $LOG_INFO "Album already in correct location, skipping move: $album_dir"
+            return 0
+        fi
+        
         if perform_album_move "$album_dir" "$proposed_album_path" "$exiftool_output"; then
             log $LOG_INFO "Successfully moved album: $(basename "$album_dir")"
         else
