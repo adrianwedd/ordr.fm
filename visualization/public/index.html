@@ -216,6 +216,9 @@
         
         <div class="tabs">
             <button class="tab active" onclick="showTab('overview')">Overview</button>
+            <button class="tab" onclick="showTab('health')">Collection Health</button>
+            <button class="tab" onclick="showTab('duplicates')">Duplicates</button>
+            <button class="tab" onclick="showTab('insights')">Insights</button>
             <button class="tab" onclick="showTab('albums')">Albums</button>
             <button class="tab" onclick="showTab('artists')">Artists</button>
             <button class="tab" onclick="showTab('labels')">Labels</button>
@@ -259,6 +262,169 @@
                     <h2>📁 Organization Modes</h2>
                     <div class="chart-container">
                         <canvas id="mode-chart"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Collection Health Tab -->
+        <div id="health" class="tab-content">
+            <div class="dashboard">
+                <div class="card">
+                    <h2>🩺 Collection Health Score</h2>
+                    <div class="stat-grid">
+                        <div class="stat">
+                            <div class="stat-value" id="health-score">-</div>
+                            <div class="stat-label">Overall Health</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="metadata-completeness">-</div>
+                            <div class="stat-label">Metadata Complete</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="lossless-percentage">-</div>
+                            <div class="stat-label">Lossless %</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="organization-efficiency">-</div>
+                            <div class="stat-label">Org Efficiency</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>📊 Metadata Completeness</h2>
+                    <div class="chart-container">
+                        <canvas id="metadata-chart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>⚠️ Collection Anomalies</h2>
+                    <div class="table-container" style="max-height: 300px;">
+                        <table id="anomalies-table">
+                            <thead>
+                                <tr>
+                                    <th>Type</th>
+                                    <th>Description</th>
+                                    <th>Value</th>
+                                </tr>
+                            </thead>
+                            <tbody id="anomalies-tbody">
+                                <tr><td colspan="3" class="loading">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Duplicates Analysis Tab -->
+        <div id="duplicates" class="tab-content">
+            <div class="dashboard">
+                <div class="card">
+                    <h2>🔍 Duplicate Detection Status</h2>
+                    <div id="duplicate-status" class="stat-grid">
+                        <div class="stat">
+                            <div class="stat-value" id="duplicate-groups-count">-</div>
+                            <div class="stat-label">Duplicate Groups</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="duplicates-albums-count">-</div>
+                            <div class="stat-label">Albums Affected</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="potential-savings">-</div>
+                            <div class="stat-label">Potential Savings</div>
+                        </div>
+                        <div class="stat">
+                            <div class="stat-value" id="duplicate-score">-</div>
+                            <div class="stat-label">Avg Confidence</div>
+                        </div>
+                    </div>
+                    <div id="duplicate-message" style="margin-top: 15px; padding: 10px; background: #f8f9fa; border-radius: 5px; display: none;">
+                        <p>No duplicate analysis available. Run duplicate detection first:</p>
+                        <code>./find_duplicates.sh full -s /path/to/music</code>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>📈 Duplicate Quality Distribution</h2>
+                    <div class="chart-container">
+                        <canvas id="duplicate-quality-chart"></canvas>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>🎯 Top Duplicate Groups</h2>
+                    <div class="table-container">
+                        <table id="duplicate-groups-table">
+                            <thead>
+                                <tr>
+                                    <th>Albums</th>
+                                    <th>Best Version</th>
+                                    <th>Format</th>
+                                    <th>Quality</th>
+                                    <th>Size Saving</th>
+                                    <th>Confidence</th>
+                                </tr>
+                            </thead>
+                            <tbody id="duplicate-groups-tbody">
+                                <tr><td colspan="6" class="loading">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Advanced Insights Tab -->
+        <div id="insights" class="tab-content">
+            <div class="dashboard">
+                <div class="card">
+                    <h2>🎤 Most Productive Artists</h2>
+                    <div class="table-container">
+                        <table id="productive-artists-table">
+                            <thead>
+                                <tr>
+                                    <th>Artist</th>
+                                    <th>Releases</th>
+                                    <th>Career Span</th>
+                                    <th>Labels</th>
+                                    <th>Avg Tracks</th>
+                                </tr>
+                            </thead>
+                            <tbody id="productive-artists-tbody">
+                                <tr><td colspan="5" class="loading">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <h2>🏷️ Label Evolution</h2>
+                    <div class="table-container">
+                        <table id="prolific-labels-table">
+                            <thead>
+                                <tr>
+                                    <th>Label</th>
+                                    <th>Releases</th>
+                                    <th>Artists</th>
+                                    <th>Active Years</th>
+                                    <th>Quality Mix</th>
+                                </tr>
+                            </thead>
+                            <tbody id="prolific-labels-tbody">
+                                <tr><td colspan="5" class="loading">Loading...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="card" style="grid-column: 1 / -1;">
+                    <h2>📈 Collection Growth Timeline</h2>
+                    <div class="chart-container" style="height: 400px;">
+                        <canvas id="collection-growth-chart"></canvas>
                     </div>
                 </div>
             </div>
