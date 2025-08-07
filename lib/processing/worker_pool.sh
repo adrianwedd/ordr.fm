@@ -71,6 +71,11 @@ start_worker() {
     local worker_id="$1"
     local worker_status_file="$WORKER_STATUS_DIR/worker_$worker_id"
     
+    # Set resource limits for worker
+    ulimit -v 524288  # 512MB virtual memory limit
+    ulimit -t 300     # 5 minute CPU time limit per album
+    ulimit -f 1048576 # 1GB file size limit
+    
     # Worker main loop
     while [[ -d "$WORKER_STATUS_DIR" ]]; do
         # Get next job from queue
@@ -146,8 +151,14 @@ process_album_job() {
     # Set worker environment
     export WORKER_ID="$worker_id"
     
-    # Process the album with resource locking
+    # Process the album with resource locking and performance tracking
     local start_time=$(date +%s%N)
+    local metadata_start_time
+    local metadata_end_time
+    local discogs_start_time
+    local discogs_end_time
+    local organization_start_time
+    local organization_end_time
     
     # Call a simplified processing function suitable for parallel execution
     process_album_parallel_safe "$album_dir" "$worker_id"
@@ -173,19 +184,24 @@ process_album_parallel_safe() {
         if [[ -f "${SCRIPT_DIR:-$(dirname "${BASH_SOURCE[0]}")}/../lib/metadata.sh" ]]; then
             source "${SCRIPT_DIR:-$(dirname "${BASH_SOURCE[0]}")}/../lib/metadata.sh"
         else
+            local duration=$(( ($(date +%s%N) - start_time) / 1000000 ))
             log_threadsafe $LOG_ERROR "Worker $worker_id: Could not load metadata module"
-            echo "FAILED|METADATA_MODULE_MISSING"
+            echo "FATAL|$album_dir|METADATA_MODULE_MISSING|${duration}ms|Missing metadata processing module"
             return 1
         fi
     fi
     
-    # Extract metadata using the metadata module
+    # Extract metadata using the metadata module (with performance tracking)
+    local metadata_start=$(date +%s%N)
     local exiftool_output
     exiftool_output=$(extract_audio_metadata "$album_dir")
+    local metadata_end=$(date +%s%N)
+    local metadata_duration=$(( (metadata_end - metadata_start) / 1000000 ))
     
     if [[ -z "$exiftool_output" ]]; then
+        local duration=$(( ($(date +%s%N) - start_time) / 1000000 ))
         log_threadsafe $LOG_WARNING "Worker $worker_id: Could not extract metadata from any files in '$album_dir'"
-        echo "FAILED|NO_METADATA"
+        echo "SKIP|$album_dir|NO_METADATA|${duration}ms|No extractable audio metadata found"
         return 0
     fi
     
@@ -194,8 +210,9 @@ process_album_parallel_safe() {
     album_metadata=$(determine_album_metadata "$exiftool_output" "$(basename "$album_dir")")
     
     if [[ -z "$album_metadata" ]]; then
+        local duration=$(( ($(date +%s%N) - start_time) / 1000000 ))
         log_threadsafe $LOG_WARNING "Worker $worker_id: Could not determine album metadata for '$album_dir'"
-        echo "FAILED|INVALID_METADATA"
+        echo "SKIP|$album_dir|INVALID_METADATA|${duration}ms|Could not parse album metadata structure"
         return 0
     fi
     
@@ -208,8 +225,9 @@ process_album_parallel_safe() {
     
     # Validate essential metadata
     if ! validate_album_metadata "$album_metadata"; then
+        local duration=$(( ($(date +%s%N) - start_time) / 1000000 ))
         log_threadsafe $LOG_WARNING "Worker $worker_id: Missing essential album tags for '$album_dir'"
-        echo "FAILED|MISSING_TAGS"
+        echo "SKIP|$album_dir|MISSING_TAGS|${duration}ms|Missing required metadata fields (artist/title)"
         return 0
     fi
     
@@ -229,8 +247,10 @@ process_album_parallel_safe() {
         fi
     fi
     
-    # Discogs enrichment with worker-specific rate limiting
+    # Discogs enrichment with worker-specific rate limiting (with performance tracking)
+    local discogs_start=$(date +%s%N)
     local discogs_metadata="{}"
+    local discogs_duration=0
     if [[ $DISCOGS_ENABLED -eq 1 ]]; then
         log_threadsafe $LOG_DEBUG "Worker $worker_id: Attempting Discogs enrichment for: $resolved_artist - $album_title"
         
@@ -244,8 +264,11 @@ process_album_parallel_safe() {
             log_threadsafe $LOG_WARNING "Worker $worker_id: Could not acquire API lock, skipping Discogs enrichment"
         fi
     fi
+    local discogs_end=$(date +%s%N)
+    discogs_duration=$(( (discogs_end - discogs_start) / 1000000 ))
     
-    # Determine organization path using existing logic
+    # Determine organization path using existing logic (with performance tracking)
+    local organization_start=$(date +%s%N)
     local proposed_album_path
     if command -v build_organization_path >/dev/null 2>&1; then
         proposed_album_path=$(build_organization_path \
@@ -259,12 +282,20 @@ process_album_parallel_safe() {
         [[ -n "$album_year" && "$album_year" != "null" ]] && year_suffix=" ($album_year)"
         proposed_album_path="${DEST_DIR:-/tmp/organized}/$album_quality/$sanitized_artist/$sanitized_title$year_suffix"
     fi
+    local organization_end=$(date +%s%N)
+    local organization_duration=$(( (organization_end - organization_start) / 1000000 ))
     
     log_threadsafe $LOG_INFO "Worker $worker_id: Proposed path for '$(basename "$album_dir")': $proposed_album_path"
     
     # For parallel processing, we only do the analysis and planning
     # Actual file moves are handled by the main process to avoid conflicts
-    echo "SUCCESS|$album_dir|$proposed_album_path|$(echo "$exiftool_output" | jq length)"
+    local files_processed=$(echo "$exiftool_output" | jq length)
+    local total_duration=$(( ($(date +%s%N) - start_time) / 1000000 ))
+    
+    # Include performance breakdown in result
+    local perf_data="metadata:${metadata_duration}ms,discogs:${discogs_duration}ms,org:${organization_duration}ms"
+    
+    echo "SUCCESS|$album_dir|$proposed_album_path|${total_duration}ms|$files_processed|$perf_data"
     return 0
 }
 
@@ -279,18 +310,46 @@ release_db_lock() {
     exec 201>&-
 }
 
-# API operations need rate limiting
+# Enhanced API rate limiting with token bucket algorithm
 acquire_api_lock() {
+    local token_file="$API_LOCK_FILE.tokens"
+    local bucket_size=5  # Allow burst of 5 requests
+    local refill_rate=1  # 1 token per second
+    local now=$(date +%s)
+    
     exec 202>"$API_LOCK_FILE"
     flock 202
-    # Add rate limiting delay if needed
-    if [[ -f "$API_LOCK_FILE.last" ]]; then
-        local last_call=$(cat "$API_LOCK_FILE.last")
-        local now=$(date +%s%3N)
-        local delay=$((last_call + 1000 - now))  # 1 second rate limit
-        [[ $delay -gt 0 ]] && sleep "0.$(printf '%03d' $delay)"
+    
+    # Initialize token bucket if not exists
+    if [[ ! -f "$token_file" ]]; then
+        echo "$bucket_size,$now" > "$token_file"
     fi
-    date +%s%3N > "$API_LOCK_FILE.last"
+    
+    # Read current token state
+    local tokens
+    local last_refill
+    IFS=',' read -r tokens last_refill < "$token_file"
+    
+    # Calculate tokens to add based on time elapsed
+    local time_diff=$((now - last_refill))
+    local tokens_to_add=$((time_diff * refill_rate))
+    tokens=$((tokens + tokens_to_add))
+    
+    # Cap at bucket size
+    [[ $tokens -gt $bucket_size ]] && tokens=$bucket_size
+    
+    # Check if we have tokens available
+    if [[ $tokens -lt 1 ]]; then
+        local wait_time=$((1 - tokens / refill_rate))
+        log_threadsafe $LOG_DEBUG "API rate limit reached, waiting ${wait_time}s for token"
+        sleep "$wait_time"
+        tokens=1
+    fi
+    
+    # Consume token
+    tokens=$((tokens - 1))
+    echo "$tokens,$now" > "$token_file"
+    
     return 0
 }
 
@@ -311,12 +370,24 @@ add_result() {
     # Add result
     echo "$job|$result" >> "$RESULT_QUEUE_FILE"
     
-    # Update counters
-    if [[ "$result" == "SUCCESS" ]]; then
-        ((JOBS_COMPLETED++))
-    else
-        ((JOBS_FAILED++))
-    fi
+    # Update counters based on structured result format
+    local result_type=$(echo "$result" | cut -d'|' -f1)
+    case "$result_type" in
+        "SUCCESS")
+            ((JOBS_COMPLETED++))
+            ;;
+        "SKIP"|"FATAL"|"RETRY")
+            ((JOBS_FAILED++))
+            ;;
+        *)
+            # Legacy format compatibility
+            if [[ "$result" == "SUCCESS" ]]; then
+                ((JOBS_COMPLETED++))
+            else
+                ((JOBS_FAILED++))
+            fi
+            ;;
+    esac
     
     # Release lock
     flock -u 203
@@ -326,8 +397,17 @@ add_result() {
 # Wait for all jobs to complete
 wait_for_completion() {
     log_info "Waiting for workers to complete..."
+    local health_check_counter=0
     
     while true; do
+        # Check worker health every 30 seconds
+        ((health_check_counter++))
+        if [[ $((health_check_counter % 30)) -eq 0 ]]; then
+            for ((i=1; i<=WORKER_COUNT; i++)); do
+                check_worker_health "$i"
+            done
+        fi
+        
         # Check if job queue is empty
         if [[ ! -s "$JOB_QUEUE_FILE" ]]; then
             # Check if all workers are idle
@@ -354,6 +434,11 @@ wait_for_completion() {
     done
     
     log_info "All jobs completed"
+    
+    # Generate error report if there were failures
+    if [[ $JOBS_FAILED -gt 0 ]]; then
+        generate_error_report
+    fi
 }
 
 # Get worker pool statistics
@@ -399,7 +484,7 @@ cleanup_worker_pool() {
     
     # Cleanup temporary files
     rm -f "$JOB_QUEUE_FILE" "$RESULT_QUEUE_FILE" "$QUEUE_LOCK_FILE" "$DB_LOCK_FILE" "$API_LOCK_FILE"
-    rm -f "$API_LOCK_FILE.last" "$RESULT_QUEUE_FILE.lock"
+    rm -f "$API_LOCK_FILE.last" "$API_LOCK_FILE.tokens" "$RESULT_QUEUE_FILE.lock"
     
     POOL_ACTIVE=0
 }
@@ -430,6 +515,132 @@ process_albums_parallel() {
     return $([ $JOBS_FAILED -eq 0 ])
 }
 
+# Worker health monitoring
+check_worker_health() {
+    local worker_id="$1"
+    local worker_pid="${WORKER_PIDS[$((worker_id-1))]}"
+    local status_file="$WORKER_STATUS_DIR/worker_$worker_id"
+    
+    # Check if process is still alive
+    if ! kill -0 "$worker_pid" 2>/dev/null; then
+        log_warning "Worker $worker_id (PID: $worker_pid) has died, restarting..."
+        restart_worker "$worker_id"
+        return 1
+    fi
+    
+    # Check for stuck workers (same status for too long)
+    if [[ -f "$status_file" ]]; then
+        local status=$(cat "$status_file")
+        local status_timestamp=$(stat -c %Y "$status_file" 2>/dev/null || echo 0)
+        local current_time=$(date +%s)
+        local stuck_threshold=300  # 5 minutes
+        
+        if [[ $((current_time - status_timestamp)) -gt $stuck_threshold ]] && [[ "$status" != "IDLE" ]]; then
+            log_warning "Worker $worker_id appears stuck (status: $status for $((current_time - status_timestamp))s), restarting..."
+            restart_worker "$worker_id"
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+restart_worker() {
+    local worker_id="$1"
+    local old_pid="${WORKER_PIDS[$((worker_id-1))]}"
+    
+    # Kill old worker if still alive
+    if kill -0 "$old_pid" 2>/dev/null; then
+        kill -TERM "$old_pid" 2>/dev/null
+        sleep 1
+        kill -KILL "$old_pid" 2>/dev/null
+    fi
+    
+    # Start new worker
+    start_worker "$worker_id" &
+    WORKER_PIDS[$((worker_id-1))]=$!
+    
+    log_info "Restarted worker $worker_id (new PID: ${WORKER_PIDS[$((worker_id-1))]})"
+}
+
+# Enhanced error reporting and analysis
+generate_error_report() {
+    local report_file="/tmp/ordr.fm_error_report_$$.txt"
+    
+    echo "=== ordr.fm Parallel Processing Error Report ===" > "$report_file"
+    echo "Generated: $(date)" >> "$report_file"
+    echo >> "$report_file"
+    
+    # Overall statistics
+    echo "OVERALL STATISTICS:" >> "$report_file"
+    echo "  Total Jobs: $((JOBS_COMPLETED + JOBS_FAILED))" >> "$report_file"
+    echo "  Successful: $JOBS_COMPLETED" >> "$report_file"
+    echo "  Failed: $JOBS_FAILED" >> "$report_file"
+    echo "  Success Rate: $(echo "scale=1; $JOBS_COMPLETED * 100 / ($JOBS_COMPLETED + $JOBS_FAILED)" | bc)%" >> "$report_file"
+    echo >> "$report_file"
+    
+    # Error breakdown by type
+    echo "ERROR BREAKDOWN:" >> "$report_file"
+    if [[ -f "$RESULT_QUEUE_FILE" ]]; then
+        local skip_count=$(grep -c "|SKIP|" "$RESULT_QUEUE_FILE" || echo 0)
+        local fatal_count=$(grep -c "|FATAL|" "$RESULT_QUEUE_FILE" || echo 0)
+        local retry_count=$(grep -c "|RETRY|" "$RESULT_QUEUE_FILE" || echo 0)
+        
+        echo "  SKIP errors: $skip_count (recoverable, albums moved to unsorted)" >> "$report_file"
+        echo "  FATAL errors: $fatal_count (system issues, need attention)" >> "$report_file"
+        echo "  RETRY errors: $retry_count (transient, may succeed on retry)" >> "$report_file"
+        echo >> "$report_file"
+        
+        # Most common error types
+        echo "MOST COMMON ERROR TYPES:" >> "$report_file"
+        grep "|SKIP\||FATAL\||RETRY" "$RESULT_QUEUE_FILE" | cut -d'|' -f3 | sort | uniq -c | sort -nr | head -10 >> "$report_file"
+        echo >> "$report_file"
+        
+        # Sample failed albums with details
+        echo "SAMPLE FAILED ALBUMS:" >> "$report_file"
+        grep -v "|SUCCESS|" "$RESULT_QUEUE_FILE" | head -20 | while IFS='|' read -r album result_type album_path error_code duration reason; do
+            echo "  Album: $(basename "$album")" >> "$report_file"
+            echo "    Error: $error_code - $reason" >> "$report_file"
+            echo "    Duration: $duration" >> "$report_file"
+            echo >> "$report_file"
+        done
+        
+        # Performance analysis from successful albums
+        echo "PERFORMANCE ANALYSIS:" >> "$report_file"
+        if grep -q "|SUCCESS|" "$RESULT_QUEUE_FILE"; then
+            local avg_duration=$(grep "|SUCCESS|" "$RESULT_QUEUE_FILE" | cut -d'|' -f4 | sed 's/ms//' | awk '{sum+=$1} END {printf "%.0f", sum/NR}')
+            local max_duration=$(grep "|SUCCESS|" "$RESULT_QUEUE_FILE" | cut -d'|' -f4 | sed 's/ms//' | sort -n | tail -1)
+            local min_duration=$(grep "|SUCCESS|" "$RESULT_QUEUE_FILE" | cut -d'|' -f4 | sed 's/ms//' | sort -n | head -1)
+            
+            echo "  Average processing time: ${avg_duration}ms" >> "$report_file"
+            echo "  Fastest album: ${min_duration}ms" >> "$report_file"
+            echo "  Slowest album: ${max_duration}ms" >> "$report_file"
+            
+            # Analyze performance breakdown if available
+            if grep -q "metadata:" "$RESULT_QUEUE_FILE"; then
+                echo "  Performance breakdown (averages):" >> "$report_file"
+                grep "|SUCCESS|" "$RESULT_QUEUE_FILE" | grep "metadata:" | while IFS='|' read -r _ _ _ _ _ perf_data; do
+                    local metadata_time=$(echo "$perf_data" | grep -o "metadata:[0-9]*ms" | cut -d':' -f2 | sed 's/ms//')
+                    local discogs_time=$(echo "$perf_data" | grep -o "discogs:[0-9]*ms" | cut -d':' -f2 | sed 's/ms//')
+                    local org_time=$(echo "$perf_data" | grep -o "org:[0-9]*ms" | cut -d':' -f2 | sed 's/ms//')
+                    echo "$metadata_time $discogs_time $org_time"
+                done | awk '
+                {
+                    metadata+=$1; discogs+=$2; org+=$3; count++
+                } 
+                END {
+                    printf "    Metadata extraction: %.0fms\n", metadata/count
+                    printf "    Discogs enrichment: %.0fms\n", discogs/count  
+                    printf "    Path organization: %.0fms\n", org/count
+                }' >> "$report_file"
+            fi
+        fi
+    fi
+    
+    echo "Full error report saved to: $report_file"
+    log_info "Generated error report: $report_file"
+}
+
 # Export functions
 export -f init_worker_pool
 export -f start_worker
@@ -442,3 +653,6 @@ export -f wait_for_completion
 export -f get_pool_statistics
 export -f cleanup_worker_pool
 export -f process_albums_parallel
+export -f check_worker_health
+export -f restart_worker
+export -f generate_error_report
