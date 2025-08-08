@@ -30,6 +30,9 @@ async function init() {
         // Initialize mobile touch gestures
         initMobileGestures();
         
+        // Initialize configuration management
+        initConfigManagement();
+        
         // Check health
         const health = await fetchAPI('/api/health');
         if (health.status === 'healthy') {
@@ -3320,9 +3323,9 @@ function viewAlbumDetails(albumId) {
     alert(`View details for album: ${albumId}\n\nThis would open a detailed view of the album.`);
 }
 
-// Edit Album Metadata (placeholder - would integrate with #124)
+// Edit Album Metadata - opens metadata editing interface
 function editAlbumMetadata(albumId) {
-    alert(`Edit metadata for album: ${albumId}\n\nThis would open the metadata editing interface.`);
+    openMetadataEditor(albumId);
 }
 
 // Mobile Gestures & Touch Enhancement System
@@ -3776,3 +3779,904 @@ function testPushNotification() {
     }
     triggerHapticFeedback('medium');
 }
+
+// Configuration Management System
+let currentConfig = {};
+let originalConfig = {};
+
+// Initialize Configuration Management
+function initConfigManagement() {
+    // Add event listeners for range inputs
+    const rangeInputs = document.querySelectorAll('input[type="range"]');
+    rangeInputs.forEach(input => {
+        input.addEventListener('input', function() {
+            const onInputAttr = this.getAttribute('oninput');
+            if (onInputAttr) {
+                const match = onInputAttr.match(/'([^']+)'/);
+                if (match) {
+                    updateRangeDisplay(match[1], this.value);
+                }
+            }
+        });
+    });
+    
+    console.log('Configuration management initialized');
+}
+
+// Update range display values
+function updateRangeDisplay(elementId, value) {
+    const element = document.getElementById(elementId);
+    if (element) {
+        element.textContent = value;
+    }
+}
+
+// Load configuration from server
+async function loadConfig() {
+    const statusDiv = document.getElementById('config-status');
+    const form = document.getElementById('config-form');
+    
+    statusDiv.innerHTML = '<div style="color: #667eea;">📥 Loading configuration...</div>';
+    
+    try {
+        const response = await fetchAPI('/api/config');
+        currentConfig = response.config;
+        originalConfig = JSON.parse(JSON.stringify(response.config)); // Deep copy
+        
+        // Populate form fields
+        populateConfigForm(currentConfig);
+        
+        // Show form and hide status
+        form.style.display = 'block';
+        statusDiv.innerHTML = '<div style="color: var(--success-color);">✅ Configuration loaded successfully</div>';
+        
+        // Clear status after delay
+        setTimeout(() => {
+            statusDiv.innerHTML = '';
+        }, 3000);
+        
+    } catch (error) {
+        console.error('Failed to load configuration:', error);
+        statusDiv.innerHTML = '<div style="color: var(--error-color);">❌ Failed to load configuration: ' + error.message + '</div>';
+    }
+}
+
+// Populate configuration form with data
+function populateConfigForm(config) {
+    // Core directories
+    setValue('SOURCE_DIR', config.SOURCE_DIR);
+    setValue('DEST_DIR', config.DEST_DIR);
+    setValue('UNSORTED_DIR_BASE', config.UNSORTED_DIR_BASE);
+    
+    // Logging & verbosity
+    setValue('LOG_FILE', config.LOG_FILE);
+    setValue('VERBOSITY', config.VERBOSITY);
+    
+    // Processing modes
+    setCheckbox('INCREMENTAL_MODE', config.INCREMENTAL_MODE);
+    setValue('STATE_DB', config.STATE_DB);
+    setValue('SINCE_DATE', config.SINCE_DATE);
+    setCheckbox('BATCH_MODE', config.BATCH_MODE);
+    
+    // Duplicate detection
+    setCheckbox('FIND_DUPLICATES', config.FIND_DUPLICATES);
+    setCheckbox('RESOLVE_DUPLICATES', config.RESOLVE_DUPLICATES);
+    setValue('DUPLICATES_DB', config.DUPLICATES_DB);
+    
+    // Discogs integration
+    setCheckbox('DISCOGS_ENABLED', config.DISCOGS_ENABLED);
+    setValue('DISCOGS_USER_TOKEN', config.DISCOGS_USER_TOKEN);
+    setValue('DISCOGS_CONSUMER_KEY', config.DISCOGS_CONSUMER_KEY);
+    setValue('DISCOGS_CONSUMER_SECRET', config.DISCOGS_CONSUMER_SECRET);
+    setValue('DISCOGS_CONFIDENCE_THRESHOLD', config.DISCOGS_CONFIDENCE_THRESHOLD);
+    setValue('DISCOGS_RATE_LIMIT', config.DISCOGS_RATE_LIMIT);
+    setValue('DISCOGS_CACHE_EXPIRY', config.DISCOGS_CACHE_EXPIRY);
+    
+    // Electronic music organization
+    setValue('ORGANIZATION_MODE', config.ORGANIZATION_MODE);
+    setValue('LABEL_PRIORITY_THRESHOLD', config.LABEL_PRIORITY_THRESHOLD);
+    setValue('MIN_LABEL_RELEASES', config.MIN_LABEL_RELEASES);
+    setCheckbox('SEPARATE_REMIXES', config.SEPARATE_REMIXES);
+    setCheckbox('SEPARATE_COMPILATIONS', config.SEPARATE_COMPILATIONS);
+    setCheckbox('VINYL_SIDE_MARKERS', config.VINYL_SIDE_MARKERS);
+    setCheckbox('UNDERGROUND_DETECTION', config.UNDERGROUND_DETECTION);
+    
+    // Artist aliases
+    setCheckbox('GROUP_ARTIST_ALIASES', config.GROUP_ARTIST_ALIASES);
+    setCheckbox('USE_PRIMARY_ARTIST_NAME', config.USE_PRIMARY_ARTIST_NAME);
+    setValue('ARTIST_ALIAS_GROUPS', config.ARTIST_ALIAS_GROUPS);
+    
+    // Google Drive backup
+    setCheckbox('ENABLE_GDRIVE_BACKUP', config.ENABLE_GDRIVE_BACKUP);
+    setValue('GDRIVE_BACKUP_DIR', config.GDRIVE_BACKUP_DIR);
+    setValue('GDRIVE_MOUNT_POINT', config.GDRIVE_MOUNT_POINT);
+    setValue('MAX_PARALLEL_UPLOADS', config.MAX_PARALLEL_UPLOADS);
+    setCheckbox('CHECKSUM_VERIFY', config.CHECKSUM_VERIFY);
+    
+    // Notifications
+    setValue('NOTIFY_EMAIL', config.NOTIFY_EMAIL);
+    setValue('NOTIFY_WEBHOOK', config.NOTIFY_WEBHOOK);
+    
+    // Organization patterns
+    setValue('PATTERN_ARTIST', config.PATTERN_ARTIST);
+    setValue('PATTERN_LABEL', config.PATTERN_LABEL);
+    setValue('PATTERN_SERIES', config.PATTERN_SERIES);
+    setValue('PATTERN_REMIX', config.PATTERN_REMIX);
+    
+    // Update range displays
+    updateRangeDisplay('confidence-value', config.DISCOGS_CONFIDENCE_THRESHOLD || '0.7');
+    updateRangeDisplay('label-threshold-value', config.LABEL_PRIORITY_THRESHOLD || '0.8');
+}
+
+// Helper function to set input value
+function setValue(id, value) {
+    const element = document.getElementById(id);
+    if (element) {
+        element.value = value || '';
+    }
+}
+
+// Helper function to set checkbox value
+function setCheckbox(id, value) {
+    const element = document.getElementById(id);
+    if (element) {
+        element.checked = value === '1' || value === 1 || value === true;
+    }
+}
+
+// Helper function to get input value
+function getValue(id) {
+    const element = document.getElementById(id);
+    return element ? element.value : '';
+}
+
+// Helper function to get checkbox value
+function getCheckboxValue(id) {
+    const element = document.getElementById(id);
+    return element && element.checked ? '1' : '0';
+}
+
+// Save configuration to server
+async function saveConfig() {
+    const statusDiv = document.getElementById('config-status');
+    
+    if (Object.keys(currentConfig).length === 0) {
+        statusDiv.innerHTML = '<div style="color: var(--warning-color);">⚠️ Please load configuration first</div>';
+        return;
+    }
+    
+    statusDiv.innerHTML = '<div style="color: #667eea;">💾 Saving configuration...</div>';
+    
+    try {
+        // Gather all form values
+        const updatedConfig = {
+            // Core directories
+            SOURCE_DIR: getValue('SOURCE_DIR'),
+            DEST_DIR: getValue('DEST_DIR'),
+            UNSORTED_DIR_BASE: getValue('UNSORTED_DIR_BASE'),
+            
+            // Logging & verbosity
+            LOG_FILE: getValue('LOG_FILE'),
+            VERBOSITY: getValue('VERBOSITY'),
+            
+            // Processing modes
+            INCREMENTAL_MODE: getCheckboxValue('INCREMENTAL_MODE'),
+            STATE_DB: getValue('STATE_DB'),
+            SINCE_DATE: getValue('SINCE_DATE'),
+            BATCH_MODE: getCheckboxValue('BATCH_MODE'),
+            
+            // Duplicate detection
+            FIND_DUPLICATES: getCheckboxValue('FIND_DUPLICATES'),
+            RESOLVE_DUPLICATES: getCheckboxValue('RESOLVE_DUPLICATES'),
+            DUPLICATES_DB: getValue('DUPLICATES_DB'),
+            
+            // Discogs integration
+            DISCOGS_ENABLED: getCheckboxValue('DISCOGS_ENABLED'),
+            DISCOGS_USER_TOKEN: getValue('DISCOGS_USER_TOKEN'),
+            DISCOGS_CONSUMER_KEY: getValue('DISCOGS_CONSUMER_KEY'),
+            DISCOGS_CONSUMER_SECRET: getValue('DISCOGS_CONSUMER_SECRET'),
+            DISCOGS_CONFIDENCE_THRESHOLD: getValue('DISCOGS_CONFIDENCE_THRESHOLD'),
+            DISCOGS_RATE_LIMIT: getValue('DISCOGS_RATE_LIMIT'),
+            DISCOGS_CACHE_EXPIRY: getValue('DISCOGS_CACHE_EXPIRY'),
+            
+            // Electronic music organization
+            ORGANIZATION_MODE: getValue('ORGANIZATION_MODE'),
+            LABEL_PRIORITY_THRESHOLD: getValue('LABEL_PRIORITY_THRESHOLD'),
+            MIN_LABEL_RELEASES: getValue('MIN_LABEL_RELEASES'),
+            SEPARATE_REMIXES: getCheckboxValue('SEPARATE_REMIXES'),
+            SEPARATE_COMPILATIONS: getCheckboxValue('SEPARATE_COMPILATIONS'),
+            VINYL_SIDE_MARKERS: getCheckboxValue('VINYL_SIDE_MARKERS'),
+            UNDERGROUND_DETECTION: getCheckboxValue('UNDERGROUND_DETECTION'),
+            
+            // Artist aliases
+            GROUP_ARTIST_ALIASES: getCheckboxValue('GROUP_ARTIST_ALIASES'),
+            USE_PRIMARY_ARTIST_NAME: getCheckboxValue('USE_PRIMARY_ARTIST_NAME'),
+            ARTIST_ALIAS_GROUPS: getValue('ARTIST_ALIAS_GROUPS'),
+            
+            // Google Drive backup
+            ENABLE_GDRIVE_BACKUP: getCheckboxValue('ENABLE_GDRIVE_BACKUP'),
+            GDRIVE_BACKUP_DIR: getValue('GDRIVE_BACKUP_DIR'),
+            GDRIVE_MOUNT_POINT: getValue('GDRIVE_MOUNT_POINT'),
+            MAX_PARALLEL_UPLOADS: getValue('MAX_PARALLEL_UPLOADS'),
+            CHECKSUM_VERIFY: getCheckboxValue('CHECKSUM_VERIFY'),
+            
+            // Notifications
+            NOTIFY_EMAIL: getValue('NOTIFY_EMAIL'),
+            NOTIFY_WEBHOOK: getValue('NOTIFY_WEBHOOK'),
+            
+            // Organization patterns
+            PATTERN_ARTIST: getValue('PATTERN_ARTIST'),
+            PATTERN_LABEL: getValue('PATTERN_LABEL'),
+            PATTERN_SERIES: getValue('PATTERN_SERIES'),
+            PATTERN_REMIX: getValue('PATTERN_REMIX')
+        };
+        
+        // Send to server
+        const response = await fetch('/api/config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({ config: updatedConfig })
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to save configuration');
+        }
+        
+        currentConfig = updatedConfig;
+        statusDiv.innerHTML = '<div style="color: var(--success-color);">✅ Configuration saved successfully</div>';
+        
+        // Clear status after delay
+        setTimeout(() => {
+            statusDiv.innerHTML = '';
+        }, 3000);
+        
+    } catch (error) {
+        console.error('Failed to save configuration:', error);
+        statusDiv.innerHTML = '<div style="color: var(--error-color);">❌ Failed to save configuration: ' + error.message + '</div>';
+    }
+}
+
+// Reset configuration to original values
+function resetConfig() {
+    if (Object.keys(originalConfig).length === 0) {
+        alert('Please load configuration first');
+        return;
+    }
+    
+    if (!confirm('Are you sure you want to reset all changes? This will discard any unsaved modifications.')) {
+        return;
+    }
+    
+    // Repopulate form with original values
+    populateConfigForm(originalConfig);
+    
+    const statusDiv = document.getElementById('config-status');
+    statusDiv.innerHTML = '<div style="color: var(--success-color);">🔄 Configuration reset to original values</div>';
+    
+    // Clear status after delay
+    setTimeout(() => {
+        statusDiv.innerHTML = '';
+    }, 3000);
+}
+
+// Metadata Editing System
+let currentEditingAlbum = null;
+let originalMetadata = null;
+let selectedTracks = new Set();
+
+// Open metadata editor for a specific album
+async function openMetadataEditor(albumId) {
+    const modal = document.getElementById('metadata-edit-modal');
+    const loadingSection = document.getElementById('metadata-loading');
+    const formSection = document.getElementById('metadata-form');
+    
+    // Show modal and loading state
+    modal.style.display = 'flex';
+    loadingSection.style.display = 'block';
+    formSection.style.display = 'none';
+    
+    try {
+        // Fetch album metadata
+        const response = await fetchAPI(`/api/metadata/album/${albumId}`);
+        currentEditingAlbum = response.album;
+        originalMetadata = JSON.parse(JSON.stringify(response.album)); // Deep copy
+        
+        // Populate form
+        populateMetadataForm(currentEditingAlbum);
+        
+        // Hide loading, show form
+        loadingSection.style.display = 'none';
+        formSection.style.display = 'block';
+        
+        // Calculate and display metadata quality score
+        calculateMetadataQuality();
+        
+        // Load edit history
+        loadMetadataHistory(albumId);
+        
+    } catch (error) {
+        console.error('Failed to load album metadata:', error);
+        showError('Failed to load album metadata: ' + error.message);
+        closeMetadataEditor();
+    }
+}
+
+// Populate metadata form with album data
+function populateMetadataForm(album) {
+    // Album information
+    document.getElementById('edit-album-title').value = album.title || '';
+    document.getElementById('edit-album-artist').value = album.artist || '';
+    document.getElementById('edit-release-year').value = album.year || '';
+    document.getElementById('edit-genre').value = album.genre || '';
+    document.getElementById('edit-label').value = album.label || '';
+    document.getElementById('edit-catalog-number').value = album.catalog_number || '';
+    
+    // Populate tracks
+    populateTracksContainer(album.tracks || []);
+}
+
+// Populate tracks container with track editing fields
+function populateTracksContainer(tracks) {
+    const container = document.getElementById('tracks-container');
+    container.innerHTML = '';
+    
+    if (!tracks.length) {
+        container.innerHTML = '<p class="no-tracks">No tracks found for this album.</p>';
+        return;
+    }
+    
+    tracks.forEach((track, index) => {
+        const trackElement = document.createElement('div');
+        trackElement.className = 'track-edit-item';
+        trackElement.innerHTML = `
+            <div class="track-header">
+                <input type="checkbox" class="track-select" data-track-index="${index}" onchange="handleTrackSelection(${index}, this.checked)">
+                <span class="track-number">#${track.track_number || index + 1}</span>
+                <span class="track-title">${track.title || 'Untitled'}</span>
+                <button class="track-toggle" onclick="toggleTrackDetails(${index})">▼</button>
+            </div>
+            <div class="track-details" id="track-details-${index}" style="display: none;">
+                <div class="track-form-grid">
+                    <div class="form-group">
+                        <label>Track Number:</label>
+                        <input type="number" class="form-input track-field" data-field="track_number" data-index="${index}" value="${track.track_number || index + 1}" min="1">
+                    </div>
+                    <div class="form-group">
+                        <label>Title:</label>
+                        <input type="text" class="form-input track-field" data-field="title" data-index="${index}" value="${track.title || ''}" placeholder="Enter track title">
+                    </div>
+                    <div class="form-group">
+                        <label>Artist:</label>
+                        <input type="text" class="form-input track-field" data-field="artist" data-index="${index}" value="${track.artist || ''}" placeholder="Enter track artist">
+                    </div>
+                    <div class="form-group">
+                        <label>Duration:</label>
+                        <input type="text" class="form-input track-field" data-field="duration" data-index="${index}" value="${track.duration || ''}" placeholder="mm:ss">
+                    </div>
+                    <div class="form-group">
+                        <label>Genre:</label>
+                        <input type="text" class="form-input track-field" data-field="genre" data-index="${index}" value="${track.genre || ''}" placeholder="Enter genre">
+                    </div>
+                    <div class="form-group">
+                        <label>File Path:</label>
+                        <input type="text" class="form-input track-field" data-field="file_path" data-index="${index}" value="${track.file_path || ''}" readonly>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        container.appendChild(trackElement);
+    });
+    
+    // Add event listeners for real-time validation
+    container.querySelectorAll('.track-field').forEach(field => {
+        field.addEventListener('input', () => {
+            updateTrackField(field);
+            calculateMetadataQuality();
+        });
+    });
+}
+
+// Update track field data
+function updateTrackField(fieldElement) {
+    const index = parseInt(fieldElement.dataset.index);
+    const field = fieldElement.dataset.field;
+    const value = fieldElement.value;
+    
+    if (!currentEditingAlbum.tracks[index]) {
+        currentEditingAlbum.tracks[index] = {};
+    }
+    
+    currentEditingAlbum.tracks[index][field] = value;
+    
+    // Update track header if title changed
+    if (field === 'title') {
+        const trackHeader = document.querySelector(`[data-track-index="${index}"]`).closest('.track-edit-item').querySelector('.track-title');
+        trackHeader.textContent = value || 'Untitled';
+    }
+}
+
+// Toggle track details visibility
+function toggleTrackDetails(index) {
+    const details = document.getElementById(`track-details-${index}`);
+    const toggle = details.parentElement.querySelector('.track-toggle');
+    
+    if (details.style.display === 'none') {
+        details.style.display = 'block';
+        toggle.textContent = '▲';
+    } else {
+        details.style.display = 'none';
+        toggle.textContent = '▼';
+    }
+}
+
+// Handle track selection for bulk operations
+function handleTrackSelection(index, isSelected) {
+    if (isSelected) {
+        selectedTracks.add(index);
+    } else {
+        selectedTracks.delete(index);
+    }
+    
+    updateSelectedTracksCount();
+}
+
+// Toggle all tracks selection
+function toggleAllTracks() {
+    const checkboxes = document.querySelectorAll('.track-select');
+    const allSelected = Array.from(checkboxes).every(cb => cb.checked);
+    
+    checkboxes.forEach((checkbox, index) => {
+        checkbox.checked = !allSelected;
+        handleTrackSelection(index, !allSelected);
+    });
+}
+
+// Update selected tracks count
+function updateSelectedTracksCount() {
+    const countElement = document.getElementById('selected-tracks-count');
+    if (countElement) {
+        countElement.textContent = selectedTracks.size;
+    }
+}
+
+// Open bulk edit modal
+function bulkEditTracks() {
+    if (selectedTracks.size === 0) {
+        showError('Please select tracks to edit');
+        return;
+    }
+    
+    const modal = document.getElementById('bulk-edit-modal');
+    modal.style.display = 'flex';
+    
+    updateSelectedTracksCount();
+}
+
+// Close bulk edit modal
+function closeBulkEdit() {
+    const modal = document.getElementById('bulk-edit-modal');
+    modal.style.display = 'none';
+    
+    // Clear form
+    document.getElementById('bulk-artist').value = '';
+    document.getElementById('bulk-genre').value = '';
+    document.getElementById('bulk-year').value = '';
+    document.getElementById('bulk-track-numbers').checked = false;
+}
+
+// Apply bulk edit to selected tracks
+function applyBulkEdit() {
+    const artist = document.getElementById('bulk-artist').value.trim();
+    const genre = document.getElementById('bulk-genre').value.trim();
+    const year = document.getElementById('bulk-year').value.trim();
+    const autoNumber = document.getElementById('bulk-track-numbers').checked;
+    
+    let trackNumber = 1;
+    
+    selectedTracks.forEach(index => {
+        if (!currentEditingAlbum.tracks[index]) return;
+        
+        // Apply bulk changes
+        if (artist) currentEditingAlbum.tracks[index].artist = artist;
+        if (genre) currentEditingAlbum.tracks[index].genre = genre;
+        if (year) currentEditingAlbum.tracks[index].year = year;
+        if (autoNumber) currentEditingAlbum.tracks[index].track_number = trackNumber++;
+        
+        // Update form fields
+        const trackContainer = document.querySelector(`[data-track-index="${index}"]`).closest('.track-edit-item');
+        if (artist) {
+            const artistField = trackContainer.querySelector('[data-field="artist"]');
+            if (artistField) artistField.value = artist;
+        }
+        if (genre) {
+            const genreField = trackContainer.querySelector('[data-field="genre"]');
+            if (genreField) genreField.value = genre;
+        }
+        if (autoNumber) {
+            const numberField = trackContainer.querySelector('[data-field="track_number"]');
+            if (numberField) numberField.value = currentEditingAlbum.tracks[index].track_number;
+        }
+    });
+    
+    closeBulkEdit();
+    calculateMetadataQuality();
+    showSuccess(`Applied bulk changes to ${selectedTracks.size} tracks`);
+}
+
+// Auto-number tracks sequentially
+function resetTrackNumbers() {
+    currentEditingAlbum.tracks.forEach((track, index) => {
+        track.track_number = index + 1;
+        
+        const numberField = document.querySelector(`[data-index="${index}"][data-field="track_number"]`);
+        if (numberField) {
+            numberField.value = index + 1;
+        }
+    });
+    
+    calculateMetadataQuality();
+    showSuccess('Track numbers reset successfully');
+}
+
+// Calculate metadata quality score
+function calculateMetadataQuality() {
+    let totalScore = 0;
+    let maxScore = 0;
+    
+    // Basic album info (40% of score)
+    let basicScore = 0;
+    let basicMax = 6;
+    
+    if (document.getElementById('edit-album-title').value.trim()) basicScore++;
+    if (document.getElementById('edit-album-artist').value.trim()) basicScore++;
+    if (document.getElementById('edit-release-year').value.trim()) basicScore++;
+    if (document.getElementById('edit-genre').value.trim()) basicScore++;
+    if (document.getElementById('edit-label').value.trim()) basicScore++;
+    if (document.getElementById('edit-catalog-number').value.trim()) basicScore++;
+    
+    // Track info (50% of score)
+    let trackScore = 0;
+    let trackMax = 0;
+    
+    if (currentEditingAlbum.tracks && currentEditingAlbum.tracks.length > 0) {
+        currentEditingAlbum.tracks.forEach(track => {
+            trackMax += 4; // title, artist, track_number, duration
+            
+            if (track.title && track.title.trim()) trackScore++;
+            if (track.artist && track.artist.trim()) trackScore++;
+            if (track.track_number) trackScore++;
+            if (track.duration && track.duration.trim()) trackScore++;
+        });
+    }
+    
+    // Extended info (10% of score)
+    let extendedScore = 0;
+    let extendedMax = 2;
+    
+    // Add points for consistency and completeness
+    const genres = new Set();
+    const artists = new Set();
+    
+    if (currentEditingAlbum.tracks) {
+        currentEditingAlbum.tracks.forEach(track => {
+            if (track.genre) genres.add(track.genre);
+            if (track.artist) artists.add(track.artist);
+        });
+        
+        // Consistency points
+        if (genres.size <= 2) extendedScore++; // Genre consistency
+        if (artists.size <= 3 || artists.has(document.getElementById('edit-album-artist').value)) extendedScore++; // Artist consistency
+    }
+    
+    // Calculate percentages
+    const basicPercent = basicMax > 0 ? (basicScore / basicMax) * 100 : 0;
+    const trackPercent = trackMax > 0 ? (trackScore / trackMax) * 100 : 0;
+    const extendedPercent = extendedMax > 0 ? (extendedScore / extendedMax) * 100 : 0;
+    
+    // Weighted total score
+    const totalPercent = Math.round((basicPercent * 0.4 + trackPercent * 0.5 + extendedPercent * 0.1));
+    
+    // Update UI
+    document.getElementById('metadata-score').textContent = totalPercent;
+    document.getElementById('basic-info-score').textContent = `${basicScore}/${basicMax}`;
+    document.getElementById('track-info-score').textContent = `${trackScore}/${trackMax}`;
+    document.getElementById('extended-info-score').textContent = `${extendedScore}/${extendedMax}`;
+    
+    // Update score circle color
+    const scoreCircle = document.querySelector('.score-circle');
+    scoreCircle.className = `score-circle ${getQualityClass(totalPercent)}`;
+}
+
+// Get quality class based on score
+function getQualityClass(score) {
+    if (score >= 90) return 'excellent';
+    if (score >= 80) return 'good';
+    if (score >= 60) return 'fair';
+    return 'poor';
+}
+
+// Load metadata edit history
+async function loadMetadataHistory(albumId) {
+    try {
+        const response = await fetchAPI(`/api/metadata/history/${albumId}`);
+        const historyContainer = document.getElementById('metadata-history');
+        
+        if (response.history && response.history.length > 0) {
+            historyContainer.innerHTML = response.history.map(entry => `
+                <div class="history-entry">
+                    <div class="history-header">
+                        <span class="history-date">${new Date(entry.timestamp).toLocaleString()}</span>
+                        <span class="history-user">${entry.user || 'System'}</span>
+                    </div>
+                    <div class="history-changes">
+                        ${entry.changes.map(change => `
+                            <div class="history-change">
+                                <strong>${change.field}:</strong> 
+                                <span class="old-value">${change.old_value || 'Empty'}</span> → 
+                                <span class="new-value">${change.new_value || 'Empty'}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+        } else {
+            historyContainer.innerHTML = '<p class="no-history">No edit history available</p>';
+        }
+    } catch (error) {
+        console.error('Failed to load metadata history:', error);
+    }
+}
+
+// Preview metadata changes
+function previewMetadata() {
+    const modal = document.getElementById('metadata-preview-modal');
+    modal.style.display = 'flex';
+    
+    // Populate original metadata
+    displayMetadata('original-metadata-display', originalMetadata);
+    
+    // Collect current form data
+    const updatedMetadata = collectFormData();
+    displayMetadata('updated-metadata-display', updatedMetadata);
+    
+    // Generate changes summary
+    generateChangesSummary(originalMetadata, updatedMetadata);
+}
+
+// Collect form data
+function collectFormData() {
+    const formData = {
+        id: currentEditingAlbum.id,
+        title: document.getElementById('edit-album-title').value.trim(),
+        artist: document.getElementById('edit-album-artist').value.trim(),
+        year: document.getElementById('edit-release-year').value.trim(),
+        genre: document.getElementById('edit-genre').value.trim(),
+        label: document.getElementById('edit-label').value.trim(),
+        catalog_number: document.getElementById('edit-catalog-number').value.trim(),
+        tracks: []
+    };
+    
+    // Collect track data
+    const trackFields = document.querySelectorAll('.track-field');
+    const tracksData = {};
+    
+    trackFields.forEach(field => {
+        const index = parseInt(field.dataset.index);
+        const fieldName = field.dataset.field;
+        
+        if (!tracksData[index]) tracksData[index] = {};
+        tracksData[index][fieldName] = field.value.trim();
+    });
+    
+    // Convert to array
+    formData.tracks = Object.keys(tracksData).map(index => tracksData[index]);
+    
+    return formData;
+}
+
+// Display metadata in preview
+function displayMetadata(containerId, metadata) {
+    const container = document.getElementById(containerId);
+    
+    container.innerHTML = `
+        <div class="metadata-display">
+            <div class="metadata-album">
+                <h4>Album Information</h4>
+                <p><strong>Title:</strong> ${metadata.title || 'N/A'}</p>
+                <p><strong>Artist:</strong> ${metadata.artist || 'N/A'}</p>
+                <p><strong>Year:</strong> ${metadata.year || 'N/A'}</p>
+                <p><strong>Genre:</strong> ${metadata.genre || 'N/A'}</p>
+                <p><strong>Label:</strong> ${metadata.label || 'N/A'}</p>
+                <p><strong>Catalog #:</strong> ${metadata.catalog_number || 'N/A'}</p>
+            </div>
+            <div class="metadata-tracks">
+                <h4>Tracks (${metadata.tracks ? metadata.tracks.length : 0})</h4>
+                ${metadata.tracks ? metadata.tracks.map(track => `
+                    <div class="track-preview">
+                        <strong>#${track.track_number || '?'}</strong> 
+                        ${track.title || 'Untitled'} 
+                        ${track.artist ? `by ${track.artist}` : ''} 
+                        ${track.duration ? `(${track.duration})` : ''}
+                    </div>
+                `).join('') : '<p>No tracks</p>'}
+            </div>
+        </div>
+    `;
+}
+
+// Generate changes summary
+function generateChangesSummary(original, updated) {
+    const container = document.getElementById('changes-summary');
+    const changes = [];
+    
+    // Compare album fields
+    const albumFields = ['title', 'artist', 'year', 'genre', 'label', 'catalog_number'];
+    albumFields.forEach(field => {
+        const oldVal = original[field] || '';
+        const newVal = updated[field] || '';
+        
+        if (oldVal !== newVal) {
+            changes.push({
+                type: 'album',
+                field: field,
+                old: oldVal,
+                new: newVal
+            });
+        }
+    });
+    
+    // Compare tracks
+    const maxTracks = Math.max(
+        original.tracks ? original.tracks.length : 0,
+        updated.tracks ? updated.tracks.length : 0
+    );
+    
+    for (let i = 0; i < maxTracks; i++) {
+        const oldTrack = original.tracks && original.tracks[i] ? original.tracks[i] : {};
+        const newTrack = updated.tracks && updated.tracks[i] ? updated.tracks[i] : {};
+        
+        const trackFields = ['title', 'artist', 'track_number', 'duration', 'genre'];
+        trackFields.forEach(field => {
+            const oldVal = oldTrack[field] || '';
+            const newVal = newTrack[field] || '';
+            
+            if (oldVal !== newVal) {
+                changes.push({
+                    type: 'track',
+                    trackIndex: i + 1,
+                    field: field,
+                    old: oldVal,
+                    new: newVal
+                });
+            }
+        });
+    }
+    
+    if (changes.length === 0) {
+        container.innerHTML = '<p>No changes detected</p>';
+        return;
+    }
+    
+    container.innerHTML = `
+        <div class="changes-list">
+            ${changes.map(change => `
+                <div class="change-item">
+                    <strong>${change.type === 'album' ? 'Album' : `Track ${change.trackIndex}`} - ${change.field}:</strong><br>
+                    <span class="old-value">${change.old || 'Empty'}</span> → 
+                    <span class="new-value">${change.new || 'Empty'}</span>
+                </div>
+            `).join('')}
+        </div>
+        <p><strong>Total changes: ${changes.length}</strong></p>
+    `;
+}
+
+// Switch preview tab
+function switchPreviewTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.preview-tab').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelector(`[onclick="switchPreviewTab('${tabName}')"]`).classList.add('active');
+    
+    // Show corresponding content
+    document.getElementById('preview-before').style.display = tabName === 'before' ? 'block' : 'none';
+    document.getElementById('preview-after').style.display = tabName === 'after' ? 'block' : 'none';
+    document.getElementById('preview-diff').style.display = tabName === 'diff' ? 'block' : 'none';
+}
+
+// Confirm and save metadata changes
+async function confirmMetadataChanges() {
+    await saveMetadata();
+    closeMetadataPreview();
+}
+
+// Save metadata changes
+async function saveMetadata() {
+    const saveBtn = document.getElementById('save-metadata-btn');
+    saveBtn.disabled = true;
+    saveBtn.textContent = '💾 Saving...';
+    
+    try {
+        const updatedMetadata = collectFormData();
+        
+        const response = await fetch('/api/metadata/save', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                albumId: currentEditingAlbum.id,
+                metadata: updatedMetadata,
+                originalMetadata: originalMetadata
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok) {
+            throw new Error(result.error || 'Failed to save metadata');
+        }
+        
+        showSuccess('Metadata saved successfully!');
+        
+        // Update original metadata for future comparisons
+        originalMetadata = JSON.parse(JSON.stringify(updatedMetadata));
+        
+        // Refresh data in the UI
+        if (document.getElementById('albums').classList.contains('active')) {
+            loadAlbums();
+        }
+        
+        closeMetadataEditor();
+        
+    } catch (error) {
+        console.error('Failed to save metadata:', error);
+        showError('Failed to save metadata: ' + error.message);
+    } finally {
+        saveBtn.disabled = false;
+        saveBtn.textContent = '💾 Save Changes';
+    }
+}
+
+// Reset metadata form to original values
+function resetMetadataForm() {
+    if (!confirm('Are you sure you want to reset all changes? This will discard all unsaved modifications.')) {
+        return;
+    }
+    
+    currentEditingAlbum = JSON.parse(JSON.stringify(originalMetadata));
+    populateMetadataForm(currentEditingAlbum);
+    calculateMetadataQuality();
+    
+    // Clear selections
+    selectedTracks.clear();
+    updateSelectedTracksCount();
+    
+    showSuccess('Form reset to original values');
+}
+
+// Close metadata editor
+function closeMetadataEditor() {
+    const modal = document.getElementById('metadata-edit-modal');
+    modal.style.display = 'none';
+    
+    // Reset state
+    currentEditingAlbum = null;
+    originalMetadata = null;
+    selectedTracks.clear();
+}
+
+// Close metadata preview
+function closeMetadataPreview() {
+    const modal = document.getElementById('metadata-preview-modal');
+    modal.style.display = 'none';
+}
+
+// Initialize app when DOM is loaded
+document.addEventListener('DOMContentLoaded', init);

@@ -176,6 +176,25 @@ const healthLimiter = rateLimit({
     legacyHeaders: false,
 });
 
+// General API limiter for search and other endpoints
+const generalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: parseInt(process.env.API_RATE_LIMIT_MAX) || 300, // limit each IP to 300 requests per windowMs
+    message: {
+        error: 'Too many API requests from this IP, please try again later.',
+        retryAfter: Math.ceil((parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000) / 1000)
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => {
+        // Skip rate limiting for local development
+        const isLocal = req.ip === '127.0.0.1' || req.ip === '::1' || 
+                       req.ip.startsWith('192.168.') || req.ip.startsWith('10.') ||
+                       req.hostname === 'localhost';
+        return NODE_ENV === 'development' && isLocal;
+    }
+});
+
 // Middleware
 app.use(express.json());
 app.use(express.static('public'));
@@ -1122,8 +1141,164 @@ app.get('/api/export', exportLimiter, (req, res) => {
     });
 });
 
+// Configuration Management API
+app.get('/api/config', (req, res) => {
+    const fs = require('fs');
+    const path = require('path');
+    const configPath = path.join(__dirname, '..', 'ordr.fm.conf');
+    
+    try {
+        const configContent = fs.readFileSync(configPath, 'utf8');
+        const config = parseConfigFile(configContent);
+        res.json({
+            config: config,
+            configPath: configPath,
+            lastModified: fs.statSync(configPath).mtime
+        });
+    } catch (error) {
+        console.error('Config read error:', error);
+        res.status(500).json({ 
+            error: 'Failed to read configuration',
+            details: error.message 
+        });
+    }
+});
+
+app.post('/api/config', (req, res) => {
+    const fs = require('fs');
+    const path = require('path');
+    const configPath = path.join(__dirname, '..', 'ordr.fm.conf');
+    
+    try {
+        const { config } = req.body;
+        if (!config || typeof config !== 'object') {
+            return res.status(400).json({ error: 'Invalid configuration data' });
+        }
+        
+        // Create backup of current config
+        const backupPath = `${configPath}.backup.${Date.now()}`;
+        fs.copyFileSync(configPath, backupPath);
+        
+        // Generate new config content
+        const configContent = generateConfigFile(config);
+        fs.writeFileSync(configPath, configContent, 'utf8');
+        
+        res.json({ 
+            message: 'Configuration updated successfully',
+            backupPath: backupPath,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        console.error('Config write error:', error);
+        res.status(500).json({ 
+            error: 'Failed to write configuration',
+            details: error.message 
+        });
+    }
+});
+
+// Parse configuration file into object
+function parseConfigFile(content) {
+    const config = {};
+    const lines = content.split('\n');
+    
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed && !trimmed.startsWith('#') && trimmed.includes('=')) {
+            const [key, ...valueParts] = trimmed.split('=');
+            let value = valueParts.join('=').trim();
+            
+            // Remove quotes
+            if ((value.startsWith('"') && value.endsWith('"')) || 
+                (value.startsWith("'") && value.endsWith("'"))) {
+                value = value.slice(1, -1);
+            }
+            
+            config[key.trim()] = value;
+        }
+    }
+    
+    return config;
+}
+
+// Generate configuration file from object
+function generateConfigFile(config) {
+    const configSections = [
+        {
+            title: 'Basic Directory Settings',
+            keys: ['SOURCE_DIR', 'DEST_DIR', 'UNSORTED_DIR_BASE', 'LOG_FILE', 'VERBOSITY']
+        },
+        {
+            title: 'Incremental Processing Settings',
+            keys: ['INCREMENTAL_MODE', 'STATE_DB', 'SINCE_DATE']
+        },
+        {
+            title: 'Duplicate Detection Settings',
+            keys: ['FIND_DUPLICATES', 'RESOLVE_DUPLICATES', 'DUPLICATES_DB']
+        },
+        {
+            title: 'Automation and Batch Processing',
+            keys: ['BATCH_MODE', 'NOTIFY_EMAIL', 'NOTIFY_WEBHOOK', 'LOCK_FILE']
+        },
+        {
+            title: 'Discogs API Integration',
+            keys: ['DISCOGS_ENABLED', 'DISCOGS_USER_TOKEN', 'DISCOGS_CONSUMER_KEY', 'DISCOGS_CONSUMER_SECRET', 
+                   'DISCOGS_CACHE_DIR', 'DISCOGS_CACHE_EXPIRY', 'DISCOGS_RATE_LIMIT']
+        },
+        {
+            title: 'Metadata Enrichment Preferences',
+            keys: ['DISCOGS_CONFIDENCE_THRESHOLD', 'DISCOGS_CATALOG_NUMBERS', 'DISCOGS_REMIX_ARTISTS', 'DISCOGS_LABEL_SERIES']
+        },
+        {
+            title: 'Electronic Music Organization',
+            keys: ['ORGANIZATION_MODE', 'LABEL_PRIORITY_THRESHOLD', 'MIN_LABEL_RELEASES', 'SEPARATE_REMIXES',
+                   'SEPARATE_COMPILATIONS', 'VINYL_SIDE_MARKERS', 'UNDERGROUND_DETECTION']
+        },
+        {
+            title: 'Organization Patterns',
+            keys: ['PATTERN_ARTIST', 'PATTERN_ARTIST_CATALOG', 'PATTERN_LABEL', 'PATTERN_SERIES', 
+                   'PATTERN_REMIX', 'PATTERN_UNDERGROUND', 'PATTERN_COMPILATION']
+        },
+        {
+            title: 'Artist and Content Detection',
+            keys: ['REMIX_KEYWORDS', 'VA_ARTISTS', 'UNDERGROUND_PATTERNS', 'ARTIST_ALIAS_GROUPS',
+                   'GROUP_ARTIST_ALIASES', 'USE_PRIMARY_ARTIST_NAME']
+        },
+        {
+            title: 'Google Drive Backup Configuration',
+            keys: ['ENABLE_GDRIVE_BACKUP', 'GDRIVE_BACKUP_DIR', 'GDRIVE_MOUNT_POINT', 'BACKUP_LOG',
+                   'MAX_PARALLEL_UPLOADS', 'CHECKSUM_VERIFY', 'BACKUP_DB']
+        },
+        {
+            title: 'Validation Configuration',
+            keys: ['STRICT_MODE']
+        }
+    ];
+    
+    let content = '# ordr.fm Configuration File\n';
+    content += '# Generated by the visualization dashboard\n';
+    content += `# Last updated: ${new Date().toISOString()}\n\n`;
+    
+    for (const section of configSections) {
+        content += `# ${section.title}\n`;
+        for (const key of section.keys) {
+            if (config.hasOwnProperty(key)) {
+                const value = config[key];
+                // Add quotes if value contains spaces or special characters
+                const quotedValue = (value && (value.includes(' ') || value.includes('|') || value.includes(','))) 
+                    ? `"${value}"` : value;
+                content += `${key}=${quotedValue}\n`;
+            }
+        }
+        content += '\n';
+    }
+    
+    return content;
+}
+
 // Advanced Search API
 app.get('/api/search/albums', generalLimiter, (req, res) => {
+    console.log('=== SEARCH API CALLED ===');
     const db = getDb();
     const {
         album,
@@ -1140,15 +1315,14 @@ app.get('/api/search/albums', generalLimiter, (req, res) => {
     let query = `
         SELECT 
             a.id,
-            a.album,
-            a.artist,
+            a.album_title as album,
+            a.album_artist as artist,
             a.year,
             a.label,
             a.quality,
             a.organization_mode,
             a.catalog_number,
-            a.tracks_count,
-            a.path
+            a.album_path as path
         FROM albums a
         WHERE 1=1
     `;
@@ -1157,12 +1331,12 @@ app.get('/api/search/albums', generalLimiter, (req, res) => {
     
     // Build dynamic WHERE conditions
     if (album) {
-        query += ` AND a.album LIKE ?`;
+        query += ` AND a.album_title LIKE ?`;
         params.push(`%${album}%`);
     }
     
     if (artist) {
-        query += ` AND a.artist LIKE ?`;
+        query += ` AND a.album_artist LIKE ?`;
         params.push(`%${artist}%`);
     }
     
@@ -1192,12 +1366,17 @@ app.get('/api/search/albums', generalLimiter, (req, res) => {
     }
     
     // Add ordering and pagination
-    query += ` ORDER BY a.created_at DESC LIMIT ? OFFSET ?`;
+    query += ` ORDER BY a.id DESC LIMIT ? OFFSET ?`;
     params.push(parseInt(limit), parseInt(offset));
+    
+    console.log('Executing search query:', query);
+    console.log('With parameters:', params);
     
     db.all(query, params, (err, albums) => {
         if (err) {
             console.error('Search error:', err);
+            console.error('Query was:', query);
+            console.error('Params were:', params);
             db.close();
             return res.status(500).json({ error: 'Search failed', details: err.message });
         }
@@ -1213,12 +1392,12 @@ app.get('/api/search/albums', generalLimiter, (req, res) => {
         
         // Apply same filters for count
         if (album) {
-            countQuery += ` AND a.album LIKE ?`;
+            countQuery += ` AND a.album_title LIKE ?`;
             countParams.push(`%${album}%`);
         }
         
         if (artist) {
-            countQuery += ` AND a.artist LIKE ?`;
+            countQuery += ` AND a.album_artist LIKE ?`;
             countParams.push(`%${artist}%`);
         }
         
@@ -1994,6 +2173,372 @@ function hasAudioFiles(dirPath) {
         return false;
     }
 }
+
+// Metadata Editing API Endpoints
+
+// Get album metadata for editing
+app.get('/api/metadata/album/:id', (req, res) => {
+    const { id } = req.params;
+    const db = getDb();
+    
+    // Get album data
+    db.get(`
+        SELECT 
+            a.id,
+            a.album_title as title,
+            a.album_artist as artist,
+            a.year,
+            a.genre,
+            a.label,
+            a.catalog_number,
+            a.quality,
+            a.organization_mode,
+            a.album_path as path
+        FROM albums a 
+        WHERE a.id = ?
+    `, [id], (err, album) => {
+        if (err) {
+            db.close();
+            console.error('Album metadata error:', err);
+            return res.status(500).json({ error: 'Failed to fetch album metadata' });
+        }
+        
+        if (!album) {
+            db.close();
+            return res.status(404).json({ error: 'Album not found' });
+        }
+        
+        // Get tracks for this album
+        db.all(`
+            SELECT 
+                t.id,
+                t.track_number,
+                t.title,
+                t.artist,
+                t.duration,
+                t.genre,
+                t.file_path
+            FROM tracks t 
+            WHERE t.album_id = ?
+            ORDER BY t.track_number ASC
+        `, [id], (err, tracks) => {
+            db.close();
+            
+            if (err) {
+                console.error('Tracks fetch error:', err);
+                return res.status(500).json({ error: 'Failed to fetch tracks' });
+            }
+            
+            album.tracks = tracks || [];
+            
+            res.json({ album });
+        });
+    });
+});
+
+// Get metadata edit history
+app.get('/api/metadata/history/:albumId', (req, res) => {
+    const { albumId } = req.params;
+    const db = getDb();
+    
+    db.all(`
+        SELECT 
+            timestamp,
+            user_id,
+            changes,
+            metadata_version
+        FROM metadata_history 
+        WHERE album_id = ? 
+        ORDER BY timestamp DESC 
+        LIMIT 20
+    `, [albumId], (err, history) => {
+        db.close();
+        
+        if (err) {
+            console.error('History fetch error:', err);
+            return res.status(500).json({ error: 'Failed to fetch history' });
+        }
+        
+        const parsedHistory = (history || []).map(entry => ({
+            timestamp: entry.timestamp,
+            user: entry.user_id || 'System',
+            changes: JSON.parse(entry.changes || '[]'),
+            version: entry.metadata_version
+        }));
+        
+        res.json({ history: parsedHistory });
+    });
+});
+
+// Save metadata changes
+app.post('/api/metadata/save', (req, res) => {
+    const { albumId, metadata, originalMetadata } = req.body;
+    
+    if (!albumId || !metadata) {
+        return res.status(400).json({ error: 'Album ID and metadata are required' });
+    }
+    
+    const db = getDb();
+    
+    // Begin transaction
+    db.serialize(() => {
+        db.run('BEGIN TRANSACTION');
+        
+        try {
+            // Update album metadata
+            db.run(`
+                UPDATE albums SET
+                    album_title = ?,
+                    album_artist = ?,
+                    year = ?,
+                    genre = ?,
+                    label = ?,
+                    catalog_number = ?,
+                    updated_at = datetime('now')
+                WHERE id = ?
+            `, [
+                metadata.title || null,
+                metadata.artist || null,
+                metadata.year || null,
+                metadata.genre || null,
+                metadata.label || null,
+                metadata.catalog_number || null,
+                albumId
+            ], function(err) {
+                if (err) {
+                    console.error('Album update error:', err);
+                    db.run('ROLLBACK');
+                    db.close();
+                    return res.status(500).json({ error: 'Failed to update album metadata' });
+                }
+                
+                // Update tracks if provided
+                if (metadata.tracks && metadata.tracks.length > 0) {
+                    let trackUpdateCount = 0;
+                    const totalTracks = metadata.tracks.length;
+                    
+                    metadata.tracks.forEach((track, index) => {
+                        db.run(`
+                            UPDATE tracks SET
+                                track_number = ?,
+                                title = ?,
+                                artist = ?,
+                                duration = ?,
+                                genre = ?,
+                                updated_at = datetime('now')
+                            WHERE album_id = ? AND (id = ? OR track_number = ?)
+                        `, [
+                            track.track_number || index + 1,
+                            track.title || null,
+                            track.artist || null,
+                            track.duration || null,
+                            track.genre || null,
+                            albumId,
+                            track.id || null,
+                            index + 1  // Fallback to position-based matching
+                        ], function(trackErr) {
+                            trackUpdateCount++;
+                            
+                            if (trackErr) {
+                                console.error('Track update error:', trackErr);
+                            }
+                            
+                            // When all tracks are processed
+                            if (trackUpdateCount === totalTracks) {
+                                // Record metadata change in history
+                                const changes = generateMetadataChanges(originalMetadata, metadata);
+                                
+                                db.run(`
+                                    INSERT OR IGNORE INTO metadata_history 
+                                    (album_id, timestamp, user_id, changes, metadata_version)
+                                    VALUES (?, datetime('now'), ?, ?, ?)
+                                `, [
+                                    albumId,
+                                    'webapp', // User identifier
+                                    JSON.stringify(changes),
+                                    Date.now() // Simple version number
+                                ], function(historyErr) {
+                                    if (historyErr) {
+                                        console.warn('History insert warning:', historyErr);
+                                    }
+                                    
+                                    // Commit transaction
+                                    db.run('COMMIT', (commitErr) => {
+                                        db.close();
+                                        
+                                        if (commitErr) {
+                                            console.error('Commit error:', commitErr);
+                                            return res.status(500).json({ error: 'Failed to save changes' });
+                                        }
+                                        
+                                        // Broadcast metadata update
+                                        broadcast({
+                                            type: 'metadata_updated',
+                                            data: {
+                                                albumId: albumId,
+                                                changes: changes.length,
+                                                timestamp: new Date().toISOString()
+                                            }
+                                        }, 'metadata');
+                                        
+                                        res.json({ 
+                                            success: true,
+                                            message: 'Metadata saved successfully',
+                                            changes: changes.length,
+                                            timestamp: new Date().toISOString()
+                                        });
+                                    });
+                                });
+                            }
+                        });
+                    });
+                } else {
+                    // No tracks to update, just commit album changes
+                    const changes = generateMetadataChanges(originalMetadata, metadata);
+                    
+                    db.run(`
+                        INSERT OR IGNORE INTO metadata_history 
+                        (album_id, timestamp, user_id, changes, metadata_version)
+                        VALUES (?, datetime('now'), ?, ?, ?)
+                    `, [
+                        albumId,
+                        'webapp',
+                        JSON.stringify(changes),
+                        Date.now()
+                    ], function(historyErr) {
+                        if (historyErr) {
+                            console.warn('History insert warning:', historyErr);
+                        }
+                        
+                        db.run('COMMIT', (commitErr) => {
+                            db.close();
+                            
+                            if (commitErr) {
+                                console.error('Commit error:', commitErr);
+                                return res.status(500).json({ error: 'Failed to save changes' });
+                            }
+                            
+                            broadcast({
+                                type: 'metadata_updated',
+                                data: {
+                                    albumId: albumId,
+                                    changes: changes.length,
+                                    timestamp: new Date().toISOString()
+                                }
+                            }, 'metadata');
+                            
+                            res.json({ 
+                                success: true,
+                                message: 'Album metadata saved successfully',
+                                changes: changes.length,
+                                timestamp: new Date().toISOString()
+                            });
+                        });
+                    });
+                }
+            });
+            
+        } catch (error) {
+            db.run('ROLLBACK');
+            db.close();
+            console.error('Metadata save error:', error);
+            res.status(500).json({ error: 'Failed to save metadata', details: error.message });
+        }
+    });
+});
+
+// Generate metadata changes for history tracking
+function generateMetadataChanges(original, updated) {
+    const changes = [];
+    
+    // Compare album fields
+    const albumFields = {
+        title: 'Album Title',
+        artist: 'Album Artist', 
+        year: 'Release Year',
+        genre: 'Genre',
+        label: 'Record Label',
+        catalog_number: 'Catalog Number'
+    };
+    
+    Object.entries(albumFields).forEach(([field, displayName]) => {
+        const oldValue = original?.[field] || '';
+        const newValue = updated?.[field] || '';
+        
+        if (oldValue !== newValue) {
+            changes.push({
+                field: displayName,
+                old_value: oldValue,
+                new_value: newValue,
+                type: 'album'
+            });
+        }
+    });
+    
+    // Compare tracks
+    const originalTracks = original?.tracks || [];
+    const updatedTracks = updated?.tracks || [];
+    const maxTracks = Math.max(originalTracks.length, updatedTracks.length);
+    
+    for (let i = 0; i < maxTracks; i++) {
+        const oldTrack = originalTracks[i] || {};
+        const newTrack = updatedTracks[i] || {};
+        
+        const trackFields = {
+            title: 'Title',
+            artist: 'Artist',
+            track_number: 'Track Number',
+            duration: 'Duration',
+            genre: 'Genre'
+        };
+        
+        Object.entries(trackFields).forEach(([field, displayName]) => {
+            const oldValue = oldTrack[field] || '';
+            const newValue = newTrack[field] || '';
+            
+            if (oldValue !== newValue) {
+                changes.push({
+                    field: `Track ${i + 1} ${displayName}`,
+                    old_value: oldValue,
+                    new_value: newValue,
+                    type: 'track',
+                    track_index: i + 1
+                });
+            }
+        });
+    }
+    
+    return changes;
+}
+
+// Initialize metadata_history table if it doesn't exist
+function initMetadataHistoryTable() {
+    const db = getDb();
+    
+    db.run(`
+        CREATE TABLE IF NOT EXISTS metadata_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            album_id INTEGER NOT NULL,
+            timestamp TEXT NOT NULL,
+            user_id TEXT,
+            changes TEXT NOT NULL,
+            metadata_version INTEGER,
+            FOREIGN KEY (album_id) REFERENCES albums (id)
+        )
+    `, (err) => {
+        if (err) {
+            console.error('Failed to create metadata_history table:', err);
+        } else {
+            console.log('Metadata history table initialized');
+        }
+        db.close();
+    });
+}
+
+// Initialize the metadata history table on server start
+setTimeout(() => {
+    initMetadataHistoryTable();
+}, 1000);
 
 // Export broadcast function for external use (if needed)
 module.exports = { broadcast };

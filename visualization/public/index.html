@@ -1437,6 +1437,7 @@
             <button class="tab" onclick="showTab('labels')">Labels</button>
             <button class="tab" onclick="showTab('timeline')">Timeline</button>
             <button class="tab" onclick="showTab('moves')">Move History</button>
+            <button class="tab" onclick="showTab('config')">Configuration</button>
         </div>
         
         <!-- Overview Tab -->
@@ -2103,6 +2104,246 @@
                 </div>
             </div>
         </div>
+
+        <!-- Configuration Tab -->
+        <div id="config" class="tab-content">
+            <div class="section">
+                <h3>⚙️ System Configuration</h3>
+                <div class="config-controls">
+                    <button onclick="loadConfig()" class="action-btn primary">📥 Load Configuration</button>
+                    <button onclick="saveConfig()" class="action-btn success" style="background: var(--success-color);">💾 Save Changes</button>
+                    <button onclick="resetConfig()" class="action-btn secondary" style="background: var(--warning-color); color: white;">🔄 Reset to Default</button>
+                </div>
+                <div id="config-status" class="status-message"></div>
+            </div>
+
+            <div id="config-form" class="config-form" style="display: none;">
+                <!-- Core Directories -->
+                <div class="card">
+                    <h4>📁 Core Directories</h4>
+                    <div class="config-section">
+                        <div class="search-field">
+                            <label>Source Directory:</label>
+                            <input type="text" id="SOURCE_DIR" class="search-input" placeholder="Directory containing unorganized music">
+                        </div>
+                        <div class="search-field">
+                            <label>Destination Directory:</label>
+                            <input type="text" id="DEST_DIR" class="search-input" placeholder="Where organized music will be stored">
+                        </div>
+                        <div class="search-field">
+                            <label>Unsorted Directory Base:</label>
+                            <input type="text" id="UNSORTED_DIR_BASE" class="search-input" placeholder="Location for incomplete metadata albums">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Logging & Verbosity -->
+                <div class="card">
+                    <h4>📝 Logging & Verbosity</h4>
+                    <div class="config-section">
+                        <div class="search-field">
+                            <label>Log File Path:</label>
+                            <input type="text" id="LOG_FILE" class="search-input" placeholder="Path to log file">
+                        </div>
+                        <div class="search-field">
+                            <label>Verbosity Level:</label>
+                            <select id="VERBOSITY" class="search-select">
+                                <option value="0">0 - Quiet (FATAL errors only)</option>
+                                <option value="1">1 - Info (Progress and key actions)</option>
+                                <option value="2">2 - Debug (All messages)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Processing Modes -->
+                <div class="card">
+                    <h4>⚡ Processing Modes</h4>
+                    <div class="config-section">
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="INCREMENTAL_MODE"> Enable Incremental Processing</label>
+                            <input type="text" id="STATE_DB" class="search-input" placeholder="State database path (optional)">
+                        </div>
+                        <div class="search-field">
+                            <label>Since Date (YYYY-MM-DD):</label>
+                            <input type="date" id="SINCE_DATE" class="search-input">
+                        </div>
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="BATCH_MODE"> Enable Batch Mode</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Duplicate Detection -->
+                <div class="card">
+                    <h4>🔍 Duplicate Detection</h4>
+                    <div class="config-section">
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="FIND_DUPLICATES"> Enable Duplicate Detection</label>
+                        </div>
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="RESOLVE_DUPLICATES"> Auto-Resolve Duplicates</label>
+                        </div>
+                        <div class="search-field">
+                            <label>Duplicates Database Path:</label>
+                            <input type="text" id="DUPLICATES_DB" class="search-input" placeholder="Optional: custom database path">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Discogs Integration -->
+                <div class="card">
+                    <h4>🎵 Discogs API Integration</h4>
+                    <div class="config-section">
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="DISCOGS_ENABLED"> Enable Discogs Metadata Enrichment</label>
+                        </div>
+                        <div class="search-field">
+                            <label>User Token:</label>
+                            <input type="password" id="DISCOGS_USER_TOKEN" class="search-input" placeholder="Get from discogs.com/settings/developers">
+                            <small style="color: var(--text-secondary); font-size: 12px;">Recommended for personal use</small>
+                        </div>
+                        <div class="search-field">
+                            <label>Consumer Key (Alternative):</label>
+                            <input type="text" id="DISCOGS_CONSUMER_KEY" class="search-input" placeholder="For applications only">
+                        </div>
+                        <div class="search-field">
+                            <label>Consumer Secret:</label>
+                            <input type="password" id="DISCOGS_CONSUMER_SECRET" class="search-input" placeholder="For applications only">
+                        </div>
+                        <div class="search-field">
+                            <label>Confidence Threshold: <span id="confidence-value">0.7</span></label>
+                            <input type="range" id="DISCOGS_CONFIDENCE_THRESHOLD" class="search-input" min="0" max="1" step="0.1" value="0.7" oninput="updateRangeDisplay('confidence-value', this.value)">
+                        </div>
+                        <div class="search-field">
+                            <label>Rate Limit (requests/min):</label>
+                            <input type="number" id="DISCOGS_RATE_LIMIT" class="search-input" min="25" max="60" value="60">
+                        </div>
+                        <div class="search-field">
+                            <label>Cache Expiry (hours):</label>
+                            <input type="number" id="DISCOGS_CACHE_EXPIRY" class="search-input" min="1" max="168" value="24">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Electronic Music Organization -->
+                <div class="card">
+                    <h4>🎛️ Electronic Music Organization</h4>
+                    <div class="config-section">
+                        <div class="search-field">
+                            <label>Organization Mode:</label>
+                            <select id="ORGANIZATION_MODE" class="search-select">
+                                <option value="artist">Artist-based</option>
+                                <option value="label">Label-based</option>
+                                <option value="series">Series-based</option>
+                                <option value="hybrid">Hybrid (Intelligent)</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label>Label Priority Threshold: <span id="label-threshold-value">0.8</span></label>
+                            <input type="range" id="LABEL_PRIORITY_THRESHOLD" class="search-input" min="0" max="1" step="0.1" value="0.8" oninput="updateRangeDisplay('label-threshold-value', this.value)">
+                        </div>
+                        <div class="search-field">
+                            <label>Min Label Releases:</label>
+                            <input type="number" id="MIN_LABEL_RELEASES" class="search-input" min="1" max="10" value="3">
+                        </div>
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="SEPARATE_REMIXES"> Separate Remix Organization</label>
+                        </div>
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="SEPARATE_COMPILATIONS"> Separate Compilation Handling</label>
+                        </div>
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="VINYL_SIDE_MARKERS"> Add Vinyl Side Markers</label>
+                        </div>
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="UNDERGROUND_DETECTION"> Underground/White Label Detection</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Artist Aliases -->
+                <div class="card">
+                    <h4>👥 Artist Alias Management</h4>
+                    <div class="config-section">
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="GROUP_ARTIST_ALIASES"> Enable Artist Alias Grouping</label>
+                        </div>
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="USE_PRIMARY_ARTIST_NAME"> Use Primary Artist Name</label>
+                        </div>
+                        <div class="search-field">
+                            <label>Artist Alias Groups:</label>
+                            <textarea id="ARTIST_ALIAS_GROUPS" class="search-input" rows="4" placeholder="Artist1,Alias1,Alias2|Artist2,Alias3,Alias4"></textarea>
+                            <small style="color: var(--text-secondary); font-size: 12px;">Pipe-separated groups, comma-separated aliases within groups</small>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Google Drive Backup -->
+                <div class="card">
+                    <h4>☁️ Google Drive Backup</h4>
+                    <div class="config-section">
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="ENABLE_GDRIVE_BACKUP"> Enable Google Drive Backup</label>
+                        </div>
+                        <div class="search-field">
+                            <label>Backup Directory:</label>
+                            <input type="text" id="GDRIVE_BACKUP_DIR" class="search-input" placeholder="/ordr.fm_backups">
+                        </div>
+                        <div class="search-field">
+                            <label>Mount Point:</label>
+                            <input type="text" id="GDRIVE_MOUNT_POINT" class="search-input" placeholder="/home/pi/gdrive">
+                        </div>
+                        <div class="search-field">
+                            <label>Max Parallel Uploads:</label>
+                            <input type="number" id="MAX_PARALLEL_UPLOADS" class="search-input" min="1" max="10" value="3">
+                        </div>
+                        <div class="search-field checkbox-group">
+                            <label class="checkbox-label"><input type="checkbox" id="CHECKSUM_VERIFY"> Verify Backup Integrity</label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Notifications -->
+                <div class="card">
+                    <h4>🔔 Notifications</h4>
+                    <div class="config-section">
+                        <div class="search-field">
+                            <label>Email Notifications:</label>
+                            <input type="email" id="NOTIFY_EMAIL" class="search-input" placeholder="your@email.com">
+                        </div>
+                        <div class="search-field">
+                            <label>Webhook URL:</label>
+                            <input type="url" id="NOTIFY_WEBHOOK" class="search-input" placeholder="https://hooks.slack.com/...">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Advanced Patterns -->
+                <div class="card">
+                    <h4>🎨 Organization Patterns</h4>
+                    <div class="config-section">
+                        <div class="search-field">
+                            <label>Artist Pattern:</label>
+                            <input type="text" id="PATTERN_ARTIST" class="search-input" placeholder="{quality}/{artist}/{album} ({year})">
+                        </div>
+                        <div class="search-field">
+                            <label>Label Pattern:</label>
+                            <input type="text" id="PATTERN_LABEL" class="search-input" placeholder="{quality}/Labels/{label}/{artist}/{album} ({year})">
+                        </div>
+                        <div class="search-field">
+                            <label>Series Pattern:</label>
+                            <input type="text" id="PATTERN_SERIES" class="search-input" placeholder="{quality}/Series/{series}/{album} ({year})">
+                        </div>
+                        <div class="search-field">
+                            <label>Remix Pattern:</label>
+                            <input type="text" id="PATTERN_REMIX" class="search-input" placeholder="{quality}/Remixes/{original_artist}/{remixer}/{title}">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
     
     <!-- Mobile-optimized components -->
@@ -2141,6 +2382,186 @@
     <div class="swipe-indicator right" id="swipe-right">Next →</div>
     
     <div class="tooltip" id="tooltip"></div>
+    
+    <!-- Metadata Editing Modal -->
+    <div class="modal" id="metadata-edit-modal" style="display: none;">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h2>📝 Edit Metadata</h2>
+                <button class="modal-close" onclick="closeMetadataEditor()">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div id="metadata-loading" class="loading-section">
+                    <div class="loading-spinner"></div>
+                    <p>Loading album metadata...</p>
+                </div>
+                
+                <div id="metadata-form" style="display: none;">
+                    <!-- Album Information -->
+                    <div class="metadata-section">
+                        <h3>🎵 Album Information</h3>
+                        <div class="form-grid">
+                            <div class="form-group">
+                                <label for="edit-album-title">Album Title:</label>
+                                <input type="text" id="edit-album-title" class="form-input" placeholder="Enter album title">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-album-artist">Album Artist:</label>
+                                <input type="text" id="edit-album-artist" class="form-input" placeholder="Enter album artist">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-release-year">Release Year:</label>
+                                <input type="number" id="edit-release-year" class="form-input" min="1900" max="2030" placeholder="YYYY">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-genre">Genre:</label>
+                                <input type="text" id="edit-genre" class="form-input" placeholder="Enter genre">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-label">Record Label:</label>
+                                <input type="text" id="edit-label" class="form-input" placeholder="Enter record label">
+                            </div>
+                            <div class="form-group">
+                                <label for="edit-catalog-number">Catalog Number:</label>
+                                <input type="text" id="edit-catalog-number" class="form-input" placeholder="Enter catalog number">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Track Information -->
+                    <div class="metadata-section">
+                        <h3>🎶 Track Information</h3>
+                        <div class="track-edit-controls">
+                            <button class="btn btn-secondary" onclick="toggleAllTracks()">📋 Toggle All</button>
+                            <button class="btn btn-secondary" onclick="bulkEditTracks()">✏️ Bulk Edit</button>
+                            <button class="btn btn-secondary" onclick="resetTrackNumbers()">🔢 Auto Number</button>
+                        </div>
+                        <div id="tracks-container">
+                            <!-- Tracks will be dynamically populated -->
+                        </div>
+                    </div>
+
+                    <!-- Metadata Quality Score -->
+                    <div class="metadata-section">
+                        <h3>📊 Metadata Quality</h3>
+                        <div class="quality-score">
+                            <div class="score-circle">
+                                <span id="metadata-score">--</span>%
+                            </div>
+                            <div class="quality-details">
+                                <div class="quality-item">
+                                    <span class="quality-label">Basic Info:</span>
+                                    <span id="basic-info-score" class="quality-value">--/--</span>
+                                </div>
+                                <div class="quality-item">
+                                    <span class="quality-label">Track Info:</span>
+                                    <span id="track-info-score" class="quality-value">--/--</span>
+                                </div>
+                                <div class="quality-item">
+                                    <span class="quality-label">Extended Info:</span>
+                                    <span id="extended-info-score" class="quality-value">--/--</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Metadata History -->
+                    <div class="metadata-section">
+                        <h3>📜 Edit History</h3>
+                        <div id="metadata-history">
+                            <p class="no-history">No edit history available</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="resetMetadataForm()">🔄 Reset</button>
+                <button class="btn btn-warning" onclick="previewMetadata()">👁️ Preview</button>
+                <button class="btn btn-success" onclick="saveMetadata()" id="save-metadata-btn">💾 Save Changes</button>
+                <button class="btn btn-secondary" onclick="closeMetadataEditor()">❌ Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bulk Edit Modal -->
+    <div class="modal" id="bulk-edit-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>✏️ Bulk Edit Tracks</h2>
+                <button class="modal-close" onclick="closeBulkEdit()">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="bulk-edit-options">
+                    <div class="form-group">
+                        <label for="bulk-artist">Artist (apply to all selected):</label>
+                        <input type="text" id="bulk-artist" class="form-input" placeholder="Leave empty to keep existing">
+                    </div>
+                    <div class="form-group">
+                        <label for="bulk-genre">Genre (apply to all selected):</label>
+                        <input type="text" id="bulk-genre" class="form-input" placeholder="Leave empty to keep existing">
+                    </div>
+                    <div class="form-group">
+                        <label for="bulk-year">Year (apply to all selected):</label>
+                        <input type="number" id="bulk-year" class="form-input" min="1900" max="2030" placeholder="Leave empty to keep existing">
+                    </div>
+                    <div class="form-group">
+                        <label>
+                            <input type="checkbox" id="bulk-track-numbers"> Auto-generate track numbers for selected tracks
+                        </label>
+                    </div>
+                </div>
+                <div class="selected-tracks-info">
+                    <p>Selected tracks: <span id="selected-tracks-count">0</span></p>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn btn-success" onclick="applyBulkEdit()">✅ Apply to Selected</button>
+                <button class="btn btn-secondary" onclick="closeBulkEdit()">❌ Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Metadata Preview Modal -->
+    <div class="modal" id="metadata-preview-modal" style="display: none;">
+        <div class="modal-content large">
+            <div class="modal-header">
+                <h2>👁️ Metadata Preview</h2>
+                <button class="modal-close" onclick="closeMetadataPreview()">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="preview-tabs">
+                    <button class="preview-tab active" onclick="switchPreviewTab('before')">Before</button>
+                    <button class="preview-tab" onclick="switchPreviewTab('after')">After</button>
+                    <button class="preview-tab" onclick="switchPreviewTab('diff')">Changes</button>
+                </div>
+                
+                <div id="preview-before" class="preview-content">
+                    <h4>Original Metadata</h4>
+                    <div id="original-metadata-display"></div>
+                </div>
+                
+                <div id="preview-after" class="preview-content" style="display: none;">
+                    <h4>Updated Metadata</h4>
+                    <div id="updated-metadata-display"></div>
+                </div>
+                
+                <div id="preview-diff" class="preview-content" style="display: none;">
+                    <h4>Changes Summary</h4>
+                    <div id="changes-summary"></div>
+                </div>
+            </div>
+            
+            <div class="modal-footer">
+                <button class="btn btn-success" onclick="confirmMetadataChanges()">✅ Confirm & Save</button>
+                <button class="btn btn-secondary" onclick="closeMetadataPreview()">❌ Cancel</button>
+            </div>
+        </div>
+    </div>
     
     <script src="app.js"></script>
 </body>
