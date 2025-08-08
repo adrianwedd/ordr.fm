@@ -303,7 +303,7 @@ app.get('/api/albums', (req, res) => {
         params.push(mode);
     }
     
-    query += ' ORDER BY processing_date DESC LIMIT ? OFFSET ?';
+    query += ' ORDER BY processed_date DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), parseInt(offset));
     
     db.all(query, params, (err, rows) => {
@@ -410,14 +410,14 @@ app.get('/api/timeline', (req, res) => {
     const db = getDb();
     
     const query = `
-        SELECT DATE(processing_date) as date,
+        SELECT DATE(processed_date) as date,
                COUNT(*) as albums_processed,
-               SUM(CASE WHEN quality = 'Lossless' THEN 1 ELSE 0 END) as lossless,
-               SUM(CASE WHEN quality = 'Lossy' THEN 1 ELSE 0 END) as lossy,
-               SUM(CASE WHEN quality = 'Mixed' THEN 1 ELSE 0 END) as mixed
+               SUM(CASE WHEN quality_type = 'Lossless' THEN 1 ELSE 0 END) as lossless,
+               SUM(CASE WHEN quality_type = 'Lossy' THEN 1 ELSE 0 END) as lossy,
+               SUM(CASE WHEN quality_type = 'Mixed' THEN 1 ELSE 0 END) as mixed
         FROM albums
-        WHERE processing_date IS NOT NULL
-        GROUP BY DATE(processing_date)
+        WHERE processed_date IS NOT NULL
+        GROUP BY DATE(processed_date)
         ORDER BY date DESC
         LIMIT 30
     `;
@@ -1090,15 +1090,15 @@ app.get('/api/performance', (req, res) => {
     // Processing performance analysis
     db.all(`
         SELECT 
-            DATE(processing_date) as date,
+            DATE(processed_date) as date,
             COUNT(*) as albums_processed,
             0 as avg_duration_ms,
             0 as min_duration_ms,
             0 as max_duration_ms,
             COUNT(CASE WHEN discogs_confidence > 0 THEN 1 END) as discogs_enriched
         FROM albums
-        WHERE processing_date IS NOT NULL
-        GROUP BY DATE(processing_date)
+        WHERE processed_date IS NOT NULL
+        GROUP BY DATE(processed_date)
         ORDER BY date DESC
         LIMIT 30
     `, (err, performance) => {

@@ -3,7 +3,16 @@
 # Handles SQLite operations for metadata, state, and duplicate tracking
 
 # Source common utilities
-source "${BASH_SOURCE%/*}/common.sh"
+if [[ -f "${BASH_SOURCE%/*}/common.sh" ]]; then
+    source "${BASH_SOURCE%/*}/common.sh"
+elif [[ -f "$(dirname "$0")/common.sh" ]]; then
+    source "$(dirname "$0")/common.sh" 
+elif [[ -f "./lib/common.sh" ]]; then
+    source "./lib/common.sh"
+else
+    echo "Error: Cannot find common.sh" >&2
+    exit 1
+fi
 
 # Initialize metadata database
 init_metadata_db() {
@@ -389,14 +398,9 @@ init_databases() {
     return $?
 }
 
-# SQL escape helper function
-sql_escape() {
-    echo "$1" | sed "s/'/''/g"
-}
-
 # Export all functions
 export -f init_databases init_metadata_db init_state_db init_duplicates_db
 export -f track_album_metadata create_move_operation update_move_operation_status
 export -f record_file_rename get_move_operation list_move_operations
 export -f export_metadata_json update_organization_stats
-export -f directory_needs_processing record_directory_processing sql_escape
+export -f directory_needs_processing record_directory_processing
