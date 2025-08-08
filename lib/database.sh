@@ -370,9 +370,21 @@ VALUES ('$(sql_escape "$dir_path")', '$status', '$(sql_escape "$error_message")'
 EOF
 }
 
+# Initialize all databases (wrapper function for CI)
+init_databases() {
+    log $LOG_INFO "Initializing all databases"
+    init_metadata_db && init_state_db && init_duplicates_db
+    return $?
+}
+
+# SQL escape helper function
+sql_escape() {
+    echo "$1" | sed "s/'/''/g"
+}
+
 # Export all functions
-export -f init_metadata_db init_state_db init_duplicates_db
+export -f init_databases init_metadata_db init_state_db init_duplicates_db
 export -f track_album_metadata create_move_operation update_move_operation_status
 export -f record_file_rename get_move_operation list_move_operations
 export -f export_metadata_json update_organization_stats
-export -f directory_needs_processing record_directory_processing
+export -f directory_needs_processing record_directory_processing sql_escape

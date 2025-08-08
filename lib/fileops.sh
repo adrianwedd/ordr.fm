@@ -190,6 +190,23 @@ create_directory_safe() {
     return 1
 }
 
+# Check if directory contains audio files
+directory_has_audio_files() {
+    local dir="$1"
+    local audio_exts="${AUDIO_EXTENSIONS:-mp3|flac|wav|m4a|aac|ogg|wma}"
+    
+    if [[ ! -d "$dir" ]]; then
+        return 1
+    fi
+    
+    # Check for audio files
+    if find "$dir" -type f -iregex ".*\.\($audio_exts\)" -print -quit | grep -q .; then
+        return 0
+    fi
+    
+    return 1
+}
+
 # Export all functions
 export -f secure_move_file move_to_unsorted perform_atomic_directory_move
-export -f check_directory_permissions create_directory_safe
+export -f check_directory_permissions create_directory_safe directory_has_audio_files

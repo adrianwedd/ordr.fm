@@ -2,11 +2,13 @@
 # Common utility functions for ordr.fm
 # Provides logging, sanitization, and basic utilities
 
-# Logging levels
-LOG_ERROR=0
-LOG_WARNING=1
-LOG_INFO=2
-LOG_DEBUG=3
+# Logging levels - only set if not already defined
+if [[ -z "${LOG_ERROR:-}" ]]; then
+    readonly LOG_ERROR=0
+    readonly LOG_WARNING=1
+    readonly LOG_INFO=2
+    readonly LOG_DEBUG=3
+fi
 
 # Function to log messages with severity levels
 log() {
