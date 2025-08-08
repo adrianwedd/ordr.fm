@@ -58,7 +58,7 @@ jobs:
     - name: Test database schema
       run: |
         # Test SQLite schema creation
-        sqlite3 test.db < server/database/schema.sql
+        sqlite3 test.db < visualization/database/schema.sql
         
         # Verify tables were created
         TABLES=$(sqlite3 test.db ".tables")
@@ -175,8 +175,8 @@ jobs:
 
     - name: Initialize databases
       run: |
-        sqlite3 ordr.fm.metadata.db < server/database/schema.sql
-        sqlite3 ordr.fm.state.db < server/database/schema.sql
+        sqlite3 ordr.fm.metadata.db < visualization/database/schema.sql
+        sqlite3 ordr.fm.state.db < visualization/database/schema.sql
 
     - name: Test full workflow
       run: |

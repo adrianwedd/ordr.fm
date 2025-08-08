@@ -29,21 +29,21 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
-        cache-dependency-path: 'server/package-lock.json'
+        cache-dependency-path: 'visualization/package-lock.json'
 
     - name: Install dependencies
       run: |
-        cd server
+        cd visualization
         npm ci
 
     - name: Initialize test database
       run: |
-        cd server
+        cd visualization
         sqlite3 test.db < database/schema.sql
 
     - name: Run Node.js tests
       run: |
-        cd server
+        cd visualization
         npm test
       env:
         NODE_ENV: test
@@ -103,7 +103,7 @@ jobs:
     - name: Test Docker image
       run: |
         docker run --rm \
-          -v $PWD/server/database/schema.sql:/tmp/schema.sql \
+          -v $PWD/visualization/database/schema.sql:/tmp/schema.sql \
           ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
           bash -c "sqlite3 /tmp/test.db < /tmp/schema.sql && echo 'Database test passed'"
 
