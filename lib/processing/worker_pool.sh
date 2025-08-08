@@ -3,11 +3,11 @@
 # Provides high-performance parallel processing for ordr.fm
 
 # Ensure log levels are defined for workers
-readonly LOG_QUIET=${LOG_QUIET:-0}
-readonly LOG_INFO=${LOG_INFO:-1}
-readonly LOG_DEBUG=${LOG_DEBUG:-2}
-readonly LOG_WARNING=${LOG_WARNING:-3}
-readonly LOG_ERROR=${LOG_ERROR:-4}
+if [[ -z "${LOG_QUIET:-}" ]]; then readonly LOG_QUIET=0; fi
+if [[ -z "${LOG_INFO:-}" ]]; then readonly LOG_INFO=1; fi
+if [[ -z "${LOG_DEBUG:-}" ]]; then readonly LOG_DEBUG=2; fi
+if [[ -z "${LOG_WARNING:-}" ]]; then readonly LOG_WARNING=3; fi
+if [[ -z "${LOG_ERROR:-}" ]]; then readonly LOG_ERROR=4; fi
 
 # Worker pool configuration
 declare -g WORKER_COUNT=${WORKER_COUNT:-4}

@@ -33,13 +33,15 @@ CREATE TABLE IF NOT EXISTS albums (
     organized_path TEXT,
     processed_date DATETIME DEFAULT CURRENT_TIMESTAMP,
     discogs_release_id INTEGER,
-    discogs_confidence REAL,
-    INDEX idx_album_artist (album_artist),
-    INDEX idx_label (label),
-    INDEX idx_quality (quality_type),
-    INDEX idx_year (album_year),
-    INDEX idx_hash (album_hash)
+    discogs_confidence REAL
 );
+
+-- Create indexes for albums table
+CREATE INDEX IF NOT EXISTS idx_album_artist ON albums(album_artist);
+CREATE INDEX IF NOT EXISTS idx_label ON albums(label);
+CREATE INDEX IF NOT EXISTS idx_quality ON albums(quality_type);
+CREATE INDEX IF NOT EXISTS idx_year ON albums(album_year);
+CREATE INDEX IF NOT EXISTS idx_hash ON albums(album_hash);
 
 -- Tracks table for individual files
 CREATE TABLE IF NOT EXISTS tracks (
@@ -54,9 +56,11 @@ CREATE TABLE IF NOT EXISTS tracks (
     bitrate INTEGER,
     format TEXT,
     file_size INTEGER,
-    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE,
-    INDEX idx_album_id (album_id)
+    FOREIGN KEY (album_id) REFERENCES albums(id) ON DELETE CASCADE
 );
+
+-- Create indexes for tracks table
+CREATE INDEX IF NOT EXISTS idx_album_id ON tracks(album_id);
 
 -- Artist aliases for grouping
 CREATE TABLE IF NOT EXISTS artist_aliases (
@@ -64,10 +68,12 @@ CREATE TABLE IF NOT EXISTS artist_aliases (
     primary_artist TEXT NOT NULL,
     alias_name TEXT NOT NULL UNIQUE,
     confidence REAL DEFAULT 1.0,
-    source TEXT DEFAULT 'manual',
-    INDEX idx_primary (primary_artist),
-    INDEX idx_alias (alias_name)
+    source TEXT DEFAULT 'manual'
 );
+
+-- Create indexes for artist_aliases table
+CREATE INDEX IF NOT EXISTS idx_primary ON artist_aliases(primary_artist);
+CREATE INDEX IF NOT EXISTS idx_alias ON artist_aliases(alias_name);
 
 -- Labels for electronic music organization
 CREATE TABLE IF NOT EXISTS labels (
@@ -75,9 +81,11 @@ CREATE TABLE IF NOT EXISTS labels (
     label_name TEXT UNIQUE NOT NULL,
     release_count INTEGER DEFAULT 0,
     primary_genre TEXT,
-    is_electronic BOOLEAN DEFAULT 0,
-    INDEX idx_label_name (label_name)
+    is_electronic BOOLEAN DEFAULT 0
 );
+
+-- Create indexes for labels table
+CREATE INDEX IF NOT EXISTS idx_label_name ON labels(label_name);
 
 -- Move operations for undo/rollback
 CREATE TABLE IF NOT EXISTS move_operations (
@@ -87,10 +95,12 @@ CREATE TABLE IF NOT EXISTS move_operations (
     status TEXT DEFAULT 'IN_PROGRESS' CHECK(status IN ('IN_PROGRESS', 'SUCCESS', 'FAILED', 'ROLLED_BACK')),
     timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
     rollback_timestamp DATETIME,
-    error_message TEXT,
-    INDEX idx_status (status),
-    INDEX idx_timestamp (timestamp)
+    error_message TEXT
 );
+
+-- Create indexes for move_operations table
+CREATE INDEX IF NOT EXISTS idx_status ON move_operations(status);
+CREATE INDEX IF NOT EXISTS idx_timestamp ON move_operations(timestamp);
 
 -- File renames for detailed tracking
 CREATE TABLE IF NOT EXISTS file_renames (
@@ -165,10 +175,12 @@ CREATE TABLE IF NOT EXISTS albums (
     format_mix TEXT,
     album_hash TEXT,
     quality_score REAL,
-    processed_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-    INDEX idx_hash (album_hash),
-    INDEX idx_artist_title (album_artist, album_title)
+    processed_date DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Create indexes for duplicates table
+CREATE INDEX IF NOT EXISTS idx_hash ON albums(album_hash);
+CREATE INDEX IF NOT EXISTS idx_artist_title ON albums(album_artist, album_title);
 EOF
     
     return $?
