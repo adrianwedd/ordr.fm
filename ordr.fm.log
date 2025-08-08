@@ -1,19 +1,91 @@
-[2025-08-04 19:19:35] [INFO ] --- ordr.fm Script Started ---
-[2025-08-04 19:19:35] [INFO ] Configuration:
-[2025-08-04 19:19:35] [INFO ]   Source Directory: .
-[2025-08-04 19:19:35] [INFO ]   Destination Directory: /home/plex/Music/sorted_music
-[2025-08-04 19:19:35] [INFO ]   Unsorted Directory Base: /home/plex/Music/Unsorted and Incomplete/unsorted
-[2025-08-04 19:19:35] [INFO ]   Log File: ordr.fm.log
-[2025-08-04 19:19:35] [INFO ]   Verbosity: DEBUG
-[2025-08-04 19:19:35] [INFO ]   Mode: Dry Run
-[2025-08-04 19:19:35] [INFO ]   Incremental Mode: Disabled
-[2025-08-04 19:19:35] [INFO ]   Duplicate Detection: Disabled
-[2025-08-04 19:19:35] [INFO ] All required dependencies are installed.
-[2025-08-04 19:19:35] [INFO ]   Discogs Integration: Enabled
-[2025-08-04 19:19:35] [DEBUG] Discogs integration initialized. Cache: ./discogs_cache, Rate limiter: ./discogs_rate_limiter
-[2025-08-04 19:19:35] [INFO ] (Dry Run) Would create unsorted directory: /home/plex/Music/Unsorted and Incomplete/unsorted/unsorted_20250804_191935
-[2025-08-04 19:19:35] [INFO ] Scanning for album directories in ....
-[2025-08-04 19:19:35] [INFO ] Found 174 potential album directories. Processing...
-[2025-08-04 19:19:35] [DEBUG] Processing directory: ./test_source
-[2025-08-04 19:19:35] [INFO ] Processing album directory: ./test_source
-[2025-08-04 19:19:35] [INFO ] SKIP: No audio files found in './test_source'. Skipping.
+[2025-08-08 13:47:19] [INFO ] --- ordr.fm Script Started ---
+[2025-08-08 13:47:19] [INFO ] Configuration:
+[2025-08-08 13:47:19] [INFO ]   Source Directory: /home/plex/Music/Unsorted and Incomplete/Incomplete Albums
+[2025-08-08 13:47:19] [INFO ]   Destination Directory: /home/plex/Music/sorted_music
+[2025-08-08 13:47:19] [INFO ]   Unsorted Directory Base: /home/plex/Music/Unsorted and Incomplete/unsorted
+[2025-08-08 13:47:19] [INFO ]   Log File: ordr.fm.log
+[2025-08-08 13:47:19] [INFO ]   Verbosity: INFO
+[2025-08-08 13:47:19] [INFO ]   Mode: Live Run
+[2025-08-08 13:47:19] [INFO ]   Incremental Mode: Disabled
+[2025-08-08 13:47:19] [INFO ]   Duplicate Detection: Disabled
+[2025-08-08 13:47:19] [INFO ] All required dependencies are installed.
+[2025-08-08 13:47:19] [INFO ]   Discogs Integration: Enabled
+[2025-08-08 13:47:19] [DEBUG] Discogs integration initialized. Cache: ./discogs_cache, Rate limiter: ./discogs_rate_limiter
+[2025-08-08 13:47:19] [DEBUG]   Parallel Processing: Disabled
+[2025-08-08 13:47:19] [INFO ] Created unsorted directory for this run: /home/plex/Music/Unsorted and Incomplete/unsorted/unsorted_20250808_134719
+[2025-08-08 13:47:19] [INFO ] Scanning for album directories in /home/plex/Music/Unsorted and Incomplete/Incomplete Albums...
+[2025-08-08 13:47:19] [INFO ] Found 54 potential album directories. Processing...
+[2025-08-08 13:47:19] [DEBUG] Processing directory: /home/plex/Music/Unsorted and Incomplete/Incomplete Albums/kit clayton - the adventures of (1999, parralel)
+[2025-08-08 13:47:19] [INFO ] Processing album directory: /home/plex/Music/Unsorted and Incomplete/Incomplete Albums/kit clayton - the adventures of (1999, parralel)
+[2025-08-08 13:47:19] [DEBUG] Raw exiftool output for '/home/plex/Music/Unsorted and Incomplete/Incomplete Albums/kit clayton - the adventures of (1999, parralel)':\n[{
+  "SourceFile": "/home/plex/Music/Unsorted and Incomplete/Incomplete Albums/kit clayton - the adventures of (1999, parralel)/adventures...EP-01.mp3",
+  "ExifToolVersion": 12.57,
+  "FileName": "adventures...EP-01.mp3",
+  "Directory": "/home/plex/Music/Unsorted and Incomplete/Incomplete Albums/kit clayton - the adventures of (1999, parralel)",
+  "FileSize": "4.1 MB",
+  "FileModifyDate": "2024:03:21 07:41:08+11:00",
+  "FileAccessDate": "2024:03:21 07:41:08+11:00",
+  "FileInodeChangeDate": "2025:01:03 19:57:42+11:00",
+  "FilePermissions": "-rwxrwxrwx",
+  "FileType": "MP3",
+  "FileTypeExtension": "mp3",
+  "MIMEType": "audio/mpeg",
+  "MPEGAudioVersion": 1,
+  "AudioLayer": 3,
+  "AudioBitrate": "128 kbps",
+  "SampleRate": 44100,
+  "ChannelMode": "Joint Stereo",
+  "MSStereo": "Off",
+  "IntensityStereo": "On",
+  "CopyrightFlag": true,
+  "OriginalMedia": true,
+  "Emphasis": "None",
+  "ID3Size": 460,
+  "EncodedBy": "",
+  "UserDefinedURL": "",
+  "Copyright": "",
+  "Year": "",
+  "Genre": "Techno",
+  "Comment": "",
+  "Title": "W-Shape",
+  "Album": "The Angular Adventures Of Kit Clayton In The Land Of Sound & Shape EP",
+  "Track": 1,
+  "PeakValue": 32673,
+  "AverageLevel": 5499,
+  "Composer": "",
+  "OriginalArtist": "",
+  "Artist": "Kit Clayton",
+  "Duration": "0:04:13 (approx)"
+}]
+[2025-08-08 13:47:19] [DEBUG] Determined Album Artist: Kit Clayton
+[2025-08-08 13:47:20] [DEBUG] Determined Album Title: The Angular Adventures Of Kit Clayton In The Land Of Sound & Shape EP
+[2025-08-08 13:47:20] [DEBUG] Determined Album Quality: Lossy
+[2025-08-08 13:47:20] [DEBUG] Collected Titles: W-Shape;
+[2025-08-08 13:47:20] [DEBUG] Collected Track Numbers: 1;
+[2025-08-08 13:47:20] [DEBUG] Collected Disc Numbers: ;
+[2025-08-08 13:47:20] [DEBUG] Attempting to resolve artist alias for: 'Kit Clayton'
+[2025-08-08 13:47:20] [DEBUG] GROUP_ARTIST_ALIASES=1
+[2025-08-08 13:47:20] [DEBUG] ARTIST_ALIAS_GROUPS='Uwe Schmidt,Atom TM,Atom Heart,Atom™,Eyephone,Senor Coconut,Atomu Shinzo,Lassigue Bendthaus,Lisa Carbon,Roger Tubesound|Aphex Twin,AFX,Polygon Window,Caustic Window,The Dice Man|Four Tet,Kieran Hebden,00110100 01010100|Boards of Canada,Hell Interface'
+[2025-08-08 13:47:20] [DEBUG] No alias resolution for 'Kit Clayton' (returned same value)
+[2025-08-08 13:47:20] [DEBUG] Attempting to enrich metadata with Discogs for: Kit Clayton - The Angular Adventures Of Kit Clayton In The Land Of Sound & Shape EP (was: Kit Clayton)
+[2025-08-08 13:47:20] [DEBUG] Searching Discogs for: artist:"Kit Clayton" release_title:"The Angular Adventures Of Kit Clayton In The Land Of Sound & Shape EP"
+[2025-08-08 13:47:20] [DEBUG] Using cached Discogs response for key: 51165802dd9e4f321e7b233702c6b93f
+[2025-08-08 13:47:20] [DEBUG] No Discogs metadata found for this release
+[2025-08-08 13:47:20] [DEBUG] Mode selected: artist (default fallback)
+[2025-08-08 13:47:20] [DEBUG] Selected organization mode: artist
+[2025-08-08 13:47:20] [INFO ] Proposed new album path for '/home/plex/Music/Unsorted and Incomplete/Incomplete Albums/kit clayton - the adventures of (1999, parralel)': /home/plex/Music/sorted_music/Lossy/Kit Clayton/The Angular Adventures Of Kit Clayton In The Land Of Sound {album} Shape EP 
+[2025-08-08 13:47:20] [INFO ] (Live Run) Moving album directory '/home/plex/Music/Unsorted and Incomplete/Incomplete Albums/kit clayton - the adventures of (1999, parralel)' to '/home/plex/Music/sorted_music/Lossy/Kit Clayton/The Angular Adventures Of Kit Clayton In The Land Of Sound {album} Shape EP '
+[2025-08-08 13:47:20] [INFO ] Starting atomic move operation: move_1754624840_2111782
+[2025-08-08 13:47:20] [DEBUG] Source: /home/plex/Music/Unsorted and Incomplete/Incomplete Albums/kit clayton - the adventures of (1999, parralel)
+[2025-08-08 13:47:20] [DEBUG] Destination: /home/plex/Music/sorted_music/Lossy/Kit Clayton/The Angular Adventures Of Kit Clayton In The Land Of Sound {album} Shape EP 
+[2025-08-08 13:47:20] [INFO ] Moving album files...
+[2025-08-08 13:47:20] [DEBUG] Performing atomic directory move: move_1754624840_2111782
+[2025-08-08 13:47:20] [INFO ] Using rsync to move directory atomically...
+[2025-08-08 13:47:20] [DEBUG] rsync succeeded without sudo
+[2025-08-08 13:47:20] [DEBUG] Successfully removed source directory: /home/plex/Music/Unsorted and Incomplete/Incomplete Albums/kit clayton - the adventures of (1999, parralel)
+[2025-08-08 13:47:20] [DEBUG] Renaming tracks in album: /home/plex/Music/sorted_music/Lossy/Kit Clayton/The Angular Adventures Of Kit Clayton In The Land Of Sound {album} Shape EP 
+[2025-08-08 13:47:21] [INFO ] Renaming: 'adventures...EP-01.mp3' -> '01 - W-Shape.mp3'
+[2025-08-08 13:47:21] [WARNING] Failed to record file rename
+[2025-08-08 13:47:21] [INFO ] Track renaming completed: 0 renamed, 0 errors
+[2025-08-08 13:47:21] [INFO ] Album move completed successfully: move_1754624840_2111782
+[2025-08-08 13:47:21] [INFO ] Successfully moved album: kit clayton - the adventures of (1999, parralel)

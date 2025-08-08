@@ -140,13 +140,20 @@ const DB_PATH = process.env.ORDRFM_DB || path.join(__dirname, '..', 'ordr.fm.met
 // Rate limiting configuration
 const limiter = rateLimit({
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000, // 15 minutes
-    max: parseInt(process.env.RATE_LIMIT_MAX) || 100, // limit each IP to 100 requests per windowMs
+    max: parseInt(process.env.RATE_LIMIT_MAX) || 500, // Increased from 100 to 500 requests per windowMs
     message: {
         error: 'Too many requests from this IP, please try again later.',
         retryAfter: Math.ceil((parseInt(process.env.RATE_LIMIT_WINDOW) || 15 * 60 * 1000) / 1000)
     },
     standardHeaders: true, // Return rate limit info in the `RateLimit-*` headers
     legacyHeaders: false, // Disable the `X-RateLimit-*` headers
+    skip: (req) => {
+        // Skip rate limiting for local development
+        const isLocal = req.ip === '127.0.0.1' || req.ip === '::1' || 
+                       req.ip.startsWith('192.168.') || req.ip.startsWith('10.') ||
+                       req.hostname === 'localhost';
+        return NODE_ENV === 'development' && isLocal;
+    }
 });
 
 // Stricter rate limit for resource-intensive endpoints
@@ -1115,6 +1122,157 @@ app.get('/api/export', exportLimiter, (req, res) => {
     });
 });
 
+// Advanced Search API
+app.get('/api/search/albums', generalLimiter, (req, res) => {
+    const db = getDb();
+    const {
+        album,
+        artist,
+        label,
+        year_from,
+        year_to,
+        quality,
+        org_mode,
+        limit = 100,
+        offset = 0
+    } = req.query;
+    
+    let query = `
+        SELECT 
+            a.id,
+            a.album,
+            a.artist,
+            a.year,
+            a.label,
+            a.quality,
+            a.organization_mode,
+            a.catalog_number,
+            a.tracks_count,
+            a.path
+        FROM albums a
+        WHERE 1=1
+    `;
+    
+    const params = [];
+    
+    // Build dynamic WHERE conditions
+    if (album) {
+        query += ` AND a.album LIKE ?`;
+        params.push(`%${album}%`);
+    }
+    
+    if (artist) {
+        query += ` AND a.artist LIKE ?`;
+        params.push(`%${artist}%`);
+    }
+    
+    if (label) {
+        query += ` AND a.label LIKE ?`;
+        params.push(`%${label}%`);
+    }
+    
+    if (year_from) {
+        query += ` AND a.year >= ?`;
+        params.push(parseInt(year_from));
+    }
+    
+    if (year_to) {
+        query += ` AND a.year <= ?`;
+        params.push(parseInt(year_to));
+    }
+    
+    if (quality) {
+        query += ` AND a.quality = ?`;
+        params.push(quality);
+    }
+    
+    if (org_mode) {
+        query += ` AND a.organization_mode = ?`;
+        params.push(org_mode);
+    }
+    
+    // Add ordering and pagination
+    query += ` ORDER BY a.created_at DESC LIMIT ? OFFSET ?`;
+    params.push(parseInt(limit), parseInt(offset));
+    
+    db.all(query, params, (err, albums) => {
+        if (err) {
+            console.error('Search error:', err);
+            db.close();
+            return res.status(500).json({ error: 'Search failed', details: err.message });
+        }
+        
+        // Get total count for pagination
+        let countQuery = `
+            SELECT COUNT(*) as total
+            FROM albums a
+            WHERE 1=1
+        `;
+        
+        const countParams = [];
+        
+        // Apply same filters for count
+        if (album) {
+            countQuery += ` AND a.album LIKE ?`;
+            countParams.push(`%${album}%`);
+        }
+        
+        if (artist) {
+            countQuery += ` AND a.artist LIKE ?`;
+            countParams.push(`%${artist}%`);
+        }
+        
+        if (label) {
+            countQuery += ` AND a.label LIKE ?`;
+            countParams.push(`%${label}%`);
+        }
+        
+        if (year_from) {
+            countQuery += ` AND a.year >= ?`;
+            countParams.push(parseInt(year_from));
+        }
+        
+        if (year_to) {
+            countQuery += ` AND a.year <= ?`;
+            countParams.push(parseInt(year_to));
+        }
+        
+        if (quality) {
+            countQuery += ` AND a.quality = ?`;
+            countParams.push(quality);
+        }
+        
+        if (org_mode) {
+            countQuery += ` AND a.organization_mode = ?`;
+            countParams.push(org_mode);
+        }
+        
+        db.get(countQuery, countParams, (err, countResult) => {
+            db.close();
+            
+            if (err) {
+                console.error('Count error:', err);
+                return res.status(500).json({ error: 'Count failed', details: err.message });
+            }
+            
+            res.json({
+                albums: albums || [],
+                total: countResult?.total || 0,
+                limit: parseInt(limit),
+                offset: parseInt(offset),
+                filters_applied: {
+                    album: !!album,
+                    artist: !!artist,
+                    label: !!label,
+                    year_range: !!(year_from || year_to),
+                    quality: !!quality,
+                    organization_mode: !!org_mode
+                }
+            });
+        });
+    });
+});
+
 // Health check
 app.get('/api/health', healthLimiter, (req, res) => {
     // Check if database exists
@@ -1394,10 +1552,145 @@ app.post('/api/actions/backup-database', (req, res) => {
     });
 });
 
+// Global backup state tracking
+let activeBackups = new Map(); // Map<backupId, {process, target, startTime, pid}>
+let backupCounter = 0;
+
+// Check if backup is already running
+function isBackupRunning(target = null) {
+    if (target) {
+        return Array.from(activeBackups.values()).some(backup => backup.target === target);
+    }
+    return activeBackups.size > 0;
+}
+
+// Get running backup processes from system
+function getSystemBackupProcesses() {
+    const { execSync } = require('child_process');
+    try {
+        const result = execSync('ps aux | grep -E "(backup_to_gdrive|backup_unprocessed_to_gdrive|rclone)" | grep -v grep', 
+                              { encoding: 'utf8' });
+        return result.trim().split('\n').filter(line => line.length > 0);
+    } catch (error) {
+        return [];
+    }
+}
+
+// Kill system backup processes
+function killSystemBackupProcesses() {
+    const { exec } = require('child_process');
+    return new Promise((resolve) => {
+        // Kill backup scripts first
+        exec('pkill -f "backup.*gdrive"', (error1) => {
+            // Then kill any remaining rclone processes
+            exec('pkill -f "rclone.*gdrive:ordr.fm"', (error2) => {
+                console.log('Killed system backup processes');
+                resolve();
+            });
+        });
+    });
+}
+
+// Get backup status
+app.get('/api/actions/backup-status', (req, res) => {
+    const systemProcesses = getSystemBackupProcesses();
+    
+    res.json({
+        activeBackups: Array.from(activeBackups.entries()).map(([id, backup]) => ({
+            id,
+            target: backup.target,
+            startTime: backup.startTime,
+            pid: backup.pid
+        })),
+        systemProcesses: systemProcesses,
+        hasRunning: activeBackups.size > 0 || systemProcesses.length > 0
+    });
+});
+
+// Cancel backup
+app.post('/api/actions/backup-cancel', async (req, res) => {
+    const { backupId, killAll = false } = req.body;
+    
+    let cancelledCount = 0;
+    
+    if (killAll || !backupId) {
+        // Cancel all backups
+        for (const [id, backup] of activeBackups.entries()) {
+            try {
+                if (backup.process && !backup.process.killed) {
+                    backup.process.kill('SIGTERM');
+                    console.log(`Cancelled backup ${id}`);
+                    cancelledCount++;
+                }
+            } catch (error) {
+                console.error(`Error cancelling backup ${id}:`, error);
+            }
+        }
+        
+        // Also kill any system processes
+        await killSystemBackupProcesses();
+        
+        activeBackups.clear();
+        
+        broadcast({
+            type: 'backup_cancelled',
+            data: {
+                message: `Cancelled ${cancelledCount} backups and cleaned up system processes`,
+                timestamp: new Date().toISOString()
+            }
+        }, 'backup');
+        
+        res.json({ 
+            message: `Cancelled ${cancelledCount} backups`,
+            killedAll: true 
+        });
+    } else {
+        // Cancel specific backup
+        const backup = activeBackups.get(backupId);
+        if (backup) {
+            try {
+                if (backup.process && !backup.process.killed) {
+                    backup.process.kill('SIGTERM');
+                    console.log(`Cancelled backup ${backupId}`);
+                    cancelledCount = 1;
+                }
+                activeBackups.delete(backupId);
+                
+                broadcast({
+                    type: 'backup_cancelled',
+                    data: {
+                        backupId,
+                        message: `Cancelled backup ${backupId}`,
+                        timestamp: new Date().toISOString()
+                    }
+                }, 'backup');
+                
+                res.json({ 
+                    message: `Cancelled backup ${backupId}`,
+                    backupId 
+                });
+            } catch (error) {
+                res.status(500).json({ error: `Failed to cancel backup: ${error.message}` });
+            }
+        } else {
+            res.status(404).json({ error: 'Backup not found' });
+        }
+    }
+});
+
 // Start cloud backup
 app.post('/api/actions/backup-cloud', (req, res) => {
-    const { target = 'gdrive' } = req.body;
+    const { target = 'gdrive', force = false } = req.body;
     const { spawn } = require('child_process');
+    
+    // Check if backup is already running
+    if (!force && (isBackupRunning(target) || getSystemBackupProcesses().length > 0)) {
+        return res.status(409).json({ 
+            error: 'Backup already running',
+            suggestion: 'Cancel existing backup first or use force=true to override',
+            runningBackups: Array.from(activeBackups.keys())
+        });
+    }
     
     let command;
     if (target === 'gdrive') {
@@ -1406,10 +1699,21 @@ app.post('/api/actions/backup-cloud', (req, res) => {
         return res.status(400).json({ error: 'Unsupported backup target' });
     }
     
-    console.log('Starting cloud backup with command:', command);
+    // Generate unique backup ID
+    const backupId = `backup_${++backupCounter}_${Date.now()}`;
+    
+    console.log(`Starting cloud backup ${backupId} with command:`, command);
     
     const process = spawn('bash', ['-c', command], {
         stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    // Store process info
+    activeBackups.set(backupId, {
+        process: process,
+        target: target,
+        startTime: new Date().toISOString(),
+        pid: process.pid
     });
     
     let output = '';
@@ -1423,6 +1727,7 @@ app.post('/api/actions/backup-cloud', (req, res) => {
         broadcast({
             type: 'backup_update',
             data: {
+                backupId,
                 status: 'running',
                 output: chunk,
                 timestamp: new Date().toISOString()
@@ -1436,6 +1741,7 @@ app.post('/api/actions/backup-cloud', (req, res) => {
     
     process.on('close', (code) => {
         const result = {
+            backupId,
             success: code === 0,
             exitCode: code,
             output: output,
@@ -1443,17 +1749,36 @@ app.post('/api/actions/backup-cloud', (req, res) => {
             timestamp: new Date().toISOString()
         };
         
+        // Remove from active backups
+        activeBackups.delete(backupId);
+        
         // Broadcast completion status
         broadcast({
             type: 'backup_complete',
             data: result
         }, 'backup');
         
-        console.log('Cloud backup completed with exit code:', code);
+        console.log(`Cloud backup ${backupId} completed with exit code:`, code);
+    });
+    
+    // Handle process errors
+    process.on('error', (error) => {
+        console.error(`Backup ${backupId} error:`, error);
+        activeBackups.delete(backupId);
+        
+        broadcast({
+            type: 'backup_error',
+            data: {
+                backupId,
+                error: error.message,
+                timestamp: new Date().toISOString()
+            }
+        }, 'backup');
     });
     
     res.json({ 
         message: 'Cloud backup started',
+        backupId: backupId,
         target: target,
         timestamp: new Date().toISOString() 
     });

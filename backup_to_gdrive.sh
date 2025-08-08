@@ -3,6 +3,41 @@
 
 set -eu
 
+# Process locking to prevent concurrent runs
+LOCK_FILE="/tmp/ordr_fm_backup_gdrive.lock"
+PID_FILE="/tmp/ordr_fm_backup_gdrive.pid"
+
+# Function to cleanup on exit
+cleanup() {
+    rm -f "$LOCK_FILE" "$PID_FILE"
+    exit ${1:-0}
+}
+
+# Set up signal handlers
+trap 'echo "Backup interrupted by user"; cleanup 1' INT TERM
+
+# Check if another backup is running
+if [ -f "$LOCK_FILE" ]; then
+    if [ -f "$PID_FILE" ]; then
+        OLD_PID=$(cat "$PID_FILE")
+        if kill -0 "$OLD_PID" 2>/dev/null; then
+            echo "❌ ERROR: Backup already running (PID: $OLD_PID)"
+            echo "   Use 'kill $OLD_PID' to stop it, or wait for completion"
+            exit 1
+        else
+            echo "⚠️  Removing stale lock file (process $OLD_PID no longer exists)"
+            rm -f "$LOCK_FILE" "$PID_FILE"
+        fi
+    else
+        echo "⚠️  Removing orphaned lock file"
+        rm -f "$LOCK_FILE"
+    fi
+fi
+
+# Create lock file and store PID
+echo $$ > "$PID_FILE"
+touch "$LOCK_FILE"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -65,10 +100,13 @@ if [ $? -eq 0 ]; then
     # Show summary
     echo -e "\n${BLUE}[INFO]${NC} Backup summary:"
     rclone size "$GDRIVE_DEST"
+    
+    echo -e "\n${BLUE}[INFO]${NC} Disk space after backup:"
+    df -h /
+    
+    # Cleanup and exit successfully
+    cleanup 0
 else
     echo -e "\n${RED}[ERROR]${NC} Backup failed\! Check log: $LOG_FILE"
-    exit 1
+    cleanup 1
 fi
-
-echo -e "\n${BLUE}[INFO]${NC} Disk space after backup:"
-df -h /

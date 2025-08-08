@@ -3,7 +3,7 @@
 ```yaml
 - button "🌙 Dark Mode"
 - banner:
-  - 'heading "🎵 ordr.fm Visualization Dashboard Connected (Updated: 2:55:28 PM)" [level=1]'
+  - heading "🎵 ordr.fm Visualization Dashboard Connected (Real-time)" [level=1]
 - button "Overview"
 - button "Actions"
 - button "Collection Health"
@@ -18,6 +18,7 @@
 - text: 2 Albums 8 Tracks 1 Artists 0 Labels
 - heading "💿 Quality Distribution" [level=2]
 - heading "📁 Organization Modes" [level=2]
+- button "⚙️"
 - heading "Quick Actions" [level=3]
 - button "×"
 - heading "🔄 Refresh Data" [level=3]

@@ -31,6 +31,7 @@
   "devDependencies": {
     "@playwright/test": "^1.54.2",
     "nodemon": "^3.0.2",
+    "playwright": "^1.54.2",
     "pm2": "^6.0.8"
   }
 }

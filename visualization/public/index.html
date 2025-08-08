@@ -441,6 +441,296 @@
         .mobile-skeleton-text.long {
             width: 90%;
         }
+
+        /* Advanced Search & Filter System Styles */
+        .search-container {
+            background: var(--bg-card);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 4px 6px var(--shadow);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border-color);
+        }
+
+        .search-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 20px;
+        }
+
+        .search-header h2 {
+            color: #667eea;
+            margin: 0;
+            font-size: 20px;
+        }
+
+        .search-toggle {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .search-toggle:hover {
+            background: var(--bg-accent);
+            border-color: #667eea;
+        }
+
+        .search-form {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px;
+        }
+
+        .search-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 12px;
+            align-items: end;
+        }
+
+        .search-field {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .search-field label {
+            font-size: 14px;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }
+
+        .search-input, .search-select {
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            background: var(--input-bg);
+            color: var(--text-primary);
+            transition: all 0.2s ease;
+        }
+
+        .search-input:focus, .search-select:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 2px rgba(102, 126, 234, 0.2);
+        }
+
+        .search-actions {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .search-btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-weight: 500;
+        }
+
+        .search-btn.primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .search-btn.primary:hover {
+            background: #5a67d8;
+            transform: translateY(-1px);
+        }
+
+        .search-btn.secondary {
+            background: var(--button-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+
+        .search-btn.secondary:hover {
+            background: var(--bg-accent);
+        }
+
+        .search-filters {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin-top: 12px;
+        }
+
+        .filter-chip {
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+            padding: 6px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            border: 1px solid rgba(102, 126, 234, 0.2);
+        }
+
+        .filter-chip .remove {
+            cursor: pointer;
+            padding: 2px 4px;
+            border-radius: 50%;
+            background: rgba(102, 126, 234, 0.2);
+            font-size: 10px;
+            line-height: 1;
+        }
+
+        .filter-chip .remove:hover {
+            background: rgba(102, 126, 234, 0.3);
+        }
+
+        .search-stats {
+            background: var(--bg-accent);
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin: 16px 0;
+            font-size: 14px;
+            color: var(--text-secondary);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .search-results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 16px 0;
+        }
+
+        .sort-controls {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+
+        .sort-select {
+            padding: 6px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--input-bg);
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+
+        .view-toggle {
+            display: flex;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .view-btn {
+            padding: 6px 12px;
+            background: var(--input-bg);
+            border: none;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .view-btn.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .grid-view {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 16px;
+        }
+
+        .grid-item {
+            background: var(--bg-accent);
+            border-radius: 8px;
+            padding: 16px;
+            border: 1px solid var(--border-color);
+            transition: all 0.2s ease;
+        }
+
+        .grid-item:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px var(--shadow);
+        }
+
+        .grid-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }
+
+        .grid-item-title {
+            font-weight: bold;
+            color: var(--text-primary);
+            font-size: 16px;
+            line-height: 1.3;
+        }
+
+        .grid-item-subtitle {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        .grid-item-meta {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
+        .meta-tag {
+            background: rgba(102, 126, 234, 0.1);
+            color: #667eea;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+        }
+
+        .search-collapsed .search-form {
+            display: none;
+        }
+
+        @media (max-width: 768px) {
+            .search-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .search-actions {
+                justify-content: stretch;
+            }
+            
+            .search-btn {
+                flex: 1;
+                text-align: center;
+            }
+            
+            .search-results-header {
+                flex-direction: column;
+                gap: 12px;
+                align-items: stretch;
+            }
+            
+            .sort-controls {
+                justify-content: space-between;
+            }
+        }
         
         header {
             background: var(--header-bg);
@@ -848,6 +1138,52 @@
             align-items: center;
             gap: 8px;
             border: 1px solid #e2e8f0;
+        }
+        
+        /* New backup management styles */
+        .backup-status-info {
+            margin: 10px 0;
+            padding: 12px;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+        
+        .backup-status-active {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            color: #92400e;
+        }
+        
+        .backup-status-idle {
+            background: #d1fae5;
+            border: 1px solid #10b981;
+            color: #065f46;
+        }
+        
+        .btn-danger {
+            background: var(--error-color);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            margin-left: 10px;
+        }
+        
+        .btn-danger:hover {
+            background: #dc2626;
+            transform: translateY(-1px);
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .btn:disabled:hover {
+            transform: none;
         }
         
         .activity-log {
@@ -1282,20 +1618,25 @@
                         </div>
                         
                         <div class="action-card">
-                            <h3>Cloud Backup</h3>
-                            <p>Sync organized music to Google Drive</p>
+                            <h3>📤 Cloud Backup</h3>
+                            <p>Backup organized and unprocessed music to Google Drive</p>
                             <div class="backup-status" id="cloud-backup-status">
                                 <span class="status-indicator" id="cloud-backup-indicator">⏱️</span>
                                 <span id="cloud-backup-text">Status: Checking...</span>
                             </div>
                             <div class="action-controls">
-                                <select id="backup-target" class="action-input">
-                                    <option value="gdrive">Google Drive</option>
-                                    <option value="rclone">Custom rclone remote</option>
-                                </select>
+                                <label class="checkbox-label">
+                                    <input type="radio" name="backup-type" value="organized" checked> Backup organized music
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="radio" name="backup-type" value="unprocessed"> Backup unprocessed folders
+                                </label>
+                                <label class="checkbox-label">
+                                    <input type="radio" name="backup-type" value="both"> Backup both organized & unprocessed
+                                </label>
                                 <div class="action-buttons">
-                                    <button class="action-btn primary" onclick="startCloudBackup()">Start Backup</button>
-                                    <button class="action-btn secondary" onclick="pauseCloudBackup()">Pause</button>
+                                    <button class="action-btn secondary" onclick="startCloudBackup(true)">🔍 Dry Run</button>
+                                    <button class="action-btn primary" onclick="startCloudBackup(false)">📤 Start Backup</button>
                                 </div>
                             </div>
                             <div class="progress-section" id="backup-progress" style="display: none;">
@@ -1566,24 +1907,119 @@
         
         <!-- Albums Tab -->
         <div id="albums" class="tab-content">
+            <!-- Advanced Search Interface -->
+            <div class="search-container" id="albums-search-container">
+                <div class="search-header">
+                    <h2>🔍 Advanced Album Search</h2>
+                    <button class="search-toggle" id="albums-search-toggle" onclick="toggleAlbumsSearch()">
+                        🔽 Hide Search
+                    </button>
+                </div>
+                <div class="search-form" id="albums-search-form">
+                    <div class="search-row">
+                        <div class="search-field">
+                            <label>Album Title</label>
+                            <input type="text" class="search-input" id="search-album-title" placeholder="Search album titles...">
+                        </div>
+                        <div class="search-field">
+                            <label>Artist Name</label>
+                            <input type="text" class="search-input" id="search-artist-name" placeholder="Search artists...">
+                        </div>
+                        <div class="search-field">
+                            <label>Label</label>
+                            <input type="text" class="search-input" id="search-label-name" placeholder="Search labels...">
+                        </div>
+                    </div>
+                    <div class="search-row">
+                        <div class="search-field">
+                            <label>Year Range</label>
+                            <div style="display: flex; gap: 8px;">
+                                <input type="number" class="search-input" id="search-year-from" placeholder="From" min="1900" max="2030" style="width: 80px;">
+                                <input type="number" class="search-input" id="search-year-to" placeholder="To" min="1900" max="2030" style="width: 80px;">
+                            </div>
+                        </div>
+                        <div class="search-field">
+                            <label>Quality</label>
+                            <select class="search-select" id="search-quality">
+                                <option value="">All Qualities</option>
+                                <option value="Lossless">Lossless</option>
+                                <option value="Lossy">Lossy</option>
+                                <option value="Mixed">Mixed</option>
+                            </select>
+                        </div>
+                        <div class="search-field">
+                            <label>Organization Mode</label>
+                            <select class="search-select" id="search-org-mode">
+                                <option value="">All Modes</option>
+                                <option value="artist">Artist Mode</option>
+                                <option value="label">Label Mode</option>
+                                <option value="compilation">Compilation</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="search-actions">
+                        <button class="search-btn primary" onclick="performAlbumSearch()">🔍 Search Albums</button>
+                        <button class="search-btn secondary" onclick="clearAlbumSearch()">🗑️ Clear Filters</button>
+                        <button class="search-btn secondary" onclick="saveAlbumSearch()">💾 Save Search</button>
+                    </div>
+                    <div class="search-filters" id="albums-active-filters"></div>
+                </div>
+            </div>
+            
+            <!-- Search Statistics -->
+            <div class="search-stats" id="albums-search-stats" style="display: none;">
+                <span id="albums-results-count">0 results found</span>
+                <span id="albums-search-time">Search took 0ms</span>
+            </div>
+            
+            <!-- Results View Controls -->
+            <div class="search-results-header" id="albums-results-header">
+                <div class="sort-controls">
+                    <label>Sort by:</label>
+                    <select class="sort-select" id="albums-sort" onchange="sortAlbumResults()">
+                        <option value="recent">Most Recent</option>
+                        <option value="artist">Artist A-Z</option>
+                        <option value="album">Album A-Z</option>
+                        <option value="year-desc">Year (Newest)</option>
+                        <option value="year-asc">Year (Oldest)</option>
+                        <option value="label">Label A-Z</option>
+                        <option value="quality">Quality</option>
+                    </select>
+                </div>
+                <div class="view-toggle">
+                    <button class="view-btn active" id="table-view-btn" onclick="switchAlbumView('table')">📋 Table</button>
+                    <button class="view-btn" id="grid-view-btn" onclick="switchAlbumView('grid')">⚏ Grid</button>
+                </div>
+            </div>
+            
             <div class="card">
-                <h2>📀 Recent Albums</h2>
-                <div class="table-container">
+                <h2 id="albums-table-title">📀 Albums Collection</h2>
+                
+                <!-- Table View -->
+                <div class="table-container" id="albums-table-view">
                     <table id="albums-table">
                         <thead>
                             <tr>
-                                <th>Artist</th>
-                                <th>Album</th>
-                                <th>Year</th>
-                                <th>Label</th>
-                                <th>Quality</th>
-                                <th>Mode</th>
+                                <th onclick="sortAlbumTable('artist')">Artist ↕️</th>
+                                <th onclick="sortAlbumTable('album')">Album ↕️</th>
+                                <th onclick="sortAlbumTable('year')">Year ↕️</th>
+                                <th onclick="sortAlbumTable('label')">Label ↕️</th>
+                                <th onclick="sortAlbumTable('quality')">Quality ↕️</th>
+                                <th onclick="sortAlbumTable('mode')">Mode ↕️</th>
+                                <th>Actions</th>
                             </tr>
                         </thead>
                         <tbody id="albums-tbody">
-                            <tr><td colspan="6" class="loading">Loading...</td></tr>
+                            <tr><td colspan="7" class="loading">Loading...</td></tr>
                         </tbody>
                     </table>
+                </div>
+                
+                <!-- Grid View -->
+                <div class="grid-view" id="albums-grid-view" style="display: none;">
+                    <div id="albums-grid-container">
+                        <div class="loading">Loading albums...</div>
+                    </div>
                 </div>
             </div>
         </div>

@@ -27,6 +27,9 @@ async function init() {
         // Initialize WebSocket connection
         initWebSocket();
         
+        // Initialize mobile touch gestures
+        initMobileGestures();
+        
         // Check health
         const health = await fetchAPI('/api/health');
         if (health.status === 'healthy') {
@@ -234,10 +237,14 @@ function showProcessingNotification(data) {
     
     document.body.appendChild(notification);
     
-    // Auto-remove after 5 seconds
+    // Auto-remove after 5 seconds with safety check
     setTimeout(() => {
-        if (notification.parentNode) {
-            notification.remove();
+        try {
+            if (notification && notification.parentNode) {
+                notification.remove();
+            }
+        } catch (error) {
+            console.warn('Failed to remove notification:', error);
         }
     }, 5000);
 }
@@ -255,10 +262,14 @@ function showAlert(data) {
     
     document.body.appendChild(alert);
     
-    // Auto-remove after 10 seconds for alerts
+    // Auto-remove after 10 seconds for alerts with safety check
     setTimeout(() => {
-        if (alert.parentNode) {
-            alert.remove();
+        try {
+            if (alert && alert.parentNode) {
+                alert.remove();
+            }
+        } catch (error) {
+            console.warn('Failed to remove alert:', error);
         }
     }, 10000);
 }
@@ -783,26 +794,26 @@ async function loadOverview() {
 async function loadAlbums() {
     try {
         const albums = await fetchAPI('/api/albums?limit=100');
-        const tbody = document.getElementById('albums-tbody');
         
-        if (albums.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="6">No albums found</td></tr>';
-            return;
-        }
+        // Update the global albums data for search system
+        allAlbumsData = albums.map(album => ({
+            id: album.id,
+            artist: album.album_artist || album.artist,
+            album: album.album_title || album.album,
+            year: album.year,
+            label: album.label,
+            quality: album.quality,
+            organization_mode: album.organization_mode || 'artist'
+        }));
         
-        tbody.innerHTML = albums.map(album => `
-            <tr>
-                <td>${album.album_artist || 'Unknown'}</td>
-                <td>${album.album_title || 'Unknown'}</td>
-                <td>${album.year || '-'}</td>
-                <td>${album.label || '-'}</td>
-                <td>${album.quality || '-'}</td>
-                <td>${album.organization_mode || 'artist'}</td>
-            </tr>
-        `).join('');
+        // Update the display
+        updateAlbumsDisplay();
         
     } catch (error) {
         showError('Failed to load albums: ' + error.message);
+        // Fallback to empty state
+        allAlbumsData = [];
+        updateAlbumsDisplay();
     }
 }
 
@@ -1673,6 +1684,10 @@ document.addEventListener('DOMContentLoaded', () => {
     makeChartsResponsive();
     initMobileFeatures();
     
+    // Initialize backup status monitoring
+    checkBackupStatus();
+    setInterval(checkBackupStatus, 10000); // Check every 10 seconds
+    
     // Re-initialize touch interactions on window resize
     let resizeTimer;
     window.addEventListener('resize', () => {
@@ -2136,8 +2151,122 @@ async function restoreDatabase() {
     // TODO: Implement database restore functionality
 }
 
+// Global backup state
+let currentBackupId = null;
+let backupStatus = { hasRunning: false, activeBackups: [] };
+
+// Check backup status
+async function checkBackupStatus() {
+    try {
+        const status = await fetchAPI('/api/actions/backup-status');
+        backupStatus = status;
+        updateBackupUI();
+        return status;
+    } catch (error) {
+        console.error('Failed to check backup status:', error);
+        return null;
+    }
+}
+
+// Update backup UI based on status
+function updateBackupUI() {
+    const startBtn = document.getElementById('start-cloud-backup');
+    if (!startBtn) {
+        console.warn('Start backup button not found, skipping UI update');
+        return;
+    }
+    
+    const cancelBtn = document.getElementById('cancel-cloud-backup') || createCancelButton();
+    const statusDiv = document.getElementById('backup-status-info') || createStatusDiv();
+    
+    if (backupStatus.hasRunning) {
+        startBtn.disabled = true;
+        startBtn.textContent = 'Backup Running...';
+        cancelBtn.style.display = 'inline-block';
+        statusDiv.innerHTML = `
+            <div class="backup-status-active">
+                📊 Active Backups: ${backupStatus.activeBackups.length} | 
+                System Processes: ${backupStatus.systemProcesses.length}
+                <br>
+                ${backupStatus.activeBackups.map(b => `ID: ${b.id} (${b.target}) - Started: ${new Date(b.startTime).toLocaleTimeString()}`).join('<br>')}
+            </div>
+        `;
+    } else {
+        startBtn.disabled = false;
+        startBtn.textContent = '🌥️ Start Google Drive Backup';
+        cancelBtn.style.display = 'none';
+        statusDiv.innerHTML = '<div class="backup-status-idle">✅ No backups running</div>';
+    }
+}
+
+// Create cancel button if it doesn't exist
+function createCancelButton() {
+    const existing = document.getElementById('cancel-cloud-backup');
+    if (existing) return existing;
+    
+    const button = document.createElement('button');
+    button.id = 'cancel-cloud-backup';
+    button.className = 'btn btn-danger';
+    button.innerHTML = '⏹️ Cancel All Backups';
+    button.style.display = 'none';
+    button.onclick = cancelAllBackups;
+    
+    // Insert after start backup button with safety check
+    const startBtn = document.getElementById('start-cloud-backup');
+    if (startBtn && startBtn.parentNode) {
+        startBtn.parentNode.insertBefore(button, startBtn.nextSibling);
+    } else {
+        console.warn('Could not find start backup button to insert cancel button');
+        // Fallback: try to append to backup section
+        const backupSection = document.querySelector('#backup-actions, .backup-section, [data-backup-section]');
+        if (backupSection) {
+            backupSection.appendChild(button);
+        }
+    }
+    
+    return button;
+}
+
+// Create status div if it doesn't exist
+function createStatusDiv() {
+    const existing = document.getElementById('backup-status-info');
+    if (existing) return existing;
+    
+    const div = document.createElement('div');
+    div.id = 'backup-status-info';
+    div.className = 'backup-status-info';
+    
+    // Insert before backup controls
+    const container = document.querySelector('.backup-section') || document.querySelector('[data-section="actions"]');
+    if (container) {
+        const firstChild = container.querySelector('h3') || container.firstChild;
+        container.insertBefore(div, firstChild.nextSibling);
+    }
+    
+    return div;
+}
+
 // Start cloud backup
 async function startCloudBackup() {
+    // First check if any backups are running
+    const status = await checkBackupStatus();
+    if (status && status.hasRunning) {
+        const userChoice = confirm(
+            `⚠️ Backup Already Running!\n\n` +
+            `Active backups: ${status.activeBackups.length}\n` +
+            `System processes: ${status.systemProcesses.length}\n\n` +
+            `Do you want to:\n` +
+            `• Cancel existing backups and start new one? (OK)\n` +
+            `• Keep existing backups running? (Cancel)`
+        );
+        
+        if (userChoice) {
+            await cancelAllBackups();
+        } else {
+            return;
+        }
+    }
+    
     const target = document.getElementById('backup-target').value;
     const indicator = document.getElementById('cloud-backup-indicator');
     const text = document.getElementById('cloud-backup-text');
@@ -2169,15 +2298,23 @@ async function startCloudBackup() {
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
-                target: target
+                target: target,
+                force: true // Override any remaining conflicts
             })
         });
         
         const result = await response.json();
         
         if (response.ok) {
-            statusText.textContent = 'Cloud backup started...';
+            currentBackupId = result.backupId;
+            statusText.textContent = `Cloud backup started (ID: ${currentBackupId})...`;
             progressBar.style.width = '20%';
+            
+            // Update UI state
+            setTimeout(checkBackupStatus, 1000);
+        } else if (response.status === 409) {
+            // Conflict - backup already running
+            throw new Error(`${result.error}\n\nSuggestion: ${result.suggestion}`);
         } else {
             throw new Error(result.error || 'Failed to start backup');
         }
@@ -2185,7 +2322,74 @@ async function startCloudBackup() {
     } catch (error) {
         indicator.textContent = '❌';
         text.textContent = 'Backup failed to start';
-        showError('Failed to start cloud backup: ' + error.message);
+        showError('Failed to start cloud backup:\n' + error.message);
+    }
+}
+
+// Cancel all backups
+async function cancelAllBackups() {
+    try {
+        const response = await fetch('/api/actions/backup-cancel', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                killAll: true
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showSuccess(`✅ ${result.message}`);
+            currentBackupId = null;
+            
+            // Update progress display
+            const indicator = document.getElementById('cloud-backup-indicator');
+            const text = document.getElementById('cloud-backup-text');
+            const progressSection = document.getElementById('backup-progress');
+            
+            indicator.textContent = '⏹️';
+            text.textContent = 'Backup cancelled';
+            progressSection.style.display = 'none';
+            
+            // Refresh status
+            setTimeout(checkBackupStatus, 1000);
+        } else {
+            throw new Error(result.error || 'Failed to cancel backups');
+        }
+    } catch (error) {
+        showError('Failed to cancel backups: ' + error.message);
+    }
+}
+
+// Cancel specific backup
+async function cancelBackup(backupId) {
+    try {
+        const response = await fetch('/api/actions/backup-cancel', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                backupId: backupId
+            })
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok) {
+            showSuccess(`✅ Cancelled backup: ${backupId}`);
+            if (currentBackupId === backupId) {
+                currentBackupId = null;
+            }
+            setTimeout(checkBackupStatus, 1000);
+        } else {
+            throw new Error(result.error || 'Failed to cancel backup');
+        }
+    } catch (error) {
+        showError('Failed to cancel backup: ' + error.message);
     }
 }
 
@@ -2202,23 +2406,83 @@ function handleBackupUpdate(data) {
     const progressBar = document.getElementById('backup-progress-bar');
     const statusText = document.getElementById('backup-status-text');
     
-    if (data.type === 'backup_update') {
-        indicator.textContent = '⏳';
-        text.textContent = 'Backup in progress...';
-        statusText.textContent = 'Syncing files...';
-        progressBar.style.width = '60%';
-    } else if (data.type === 'backup_complete') {
-        if (data.data.success) {
-            indicator.textContent = '✅';
-            text.textContent = 'Backup completed successfully';
-            statusText.textContent = 'All files synced';
-            progressBar.style.width = '100%';
-        } else {
+    console.log('Backup update:', data);
+    
+    switch(data.type) {
+        case 'backup_update':
+            indicator.textContent = '⏳';
+            text.textContent = 'Backup in progress...';
+            if (data.data.backupId) {
+                statusText.textContent = `Syncing files... (${data.data.backupId})`;
+            } else {
+                statusText.textContent = 'Syncing files...';
+            }
+            progressBar.style.width = '60%';
+            
+            // Update backup status if we have an active backup
+            if (data.data.backupId && currentBackupId !== data.data.backupId) {
+                currentBackupId = data.data.backupId;
+            }
+            break;
+            
+        case 'backup_complete':
+            if (data.data.success) {
+                indicator.textContent = '✅';
+                text.textContent = 'Backup completed successfully';
+                statusText.textContent = `All files synced (${data.data.backupId || 'Unknown'})`;
+                progressBar.style.width = '100%';
+                showSuccess(`✅ Backup completed: ${data.data.backupId || 'Unknown'}`);
+            } else {
+                indicator.textContent = '❌';
+                text.textContent = 'Backup failed';
+                statusText.textContent = `Backup failed (${data.data.backupId || 'Unknown'})`;
+                showError(`Cloud backup failed: ${data.data.error || 'Unknown error'}\nBackup ID: ${data.data.backupId || 'Unknown'}`);
+            }
+            
+            // Clear current backup ID if it matches
+            if (data.data.backupId === currentBackupId) {
+                currentBackupId = null;
+            }
+            
+            // Update backup status
+            setTimeout(checkBackupStatus, 1000);
+            break;
+            
+        case 'backup_cancelled':
+            indicator.textContent = '⏹️';
+            text.textContent = 'Backup cancelled';
+            statusText.textContent = data.data.message || 'Backup was cancelled';
+            progressBar.style.width = '0%';
+            
+            showSuccess(data.data.message || 'Backup cancelled');
+            
+            // Clear current backup ID if it matches
+            if (data.data.backupId === currentBackupId) {
+                currentBackupId = null;
+            }
+            
+            // Update backup status
+            setTimeout(checkBackupStatus, 1000);
+            break;
+            
+        case 'backup_error':
             indicator.textContent = '❌';
-            text.textContent = 'Backup failed';
-            statusText.textContent = 'Backup failed';
-            showError('Cloud backup failed: ' + (data.data.error || 'Unknown error'));
-        }
+            text.textContent = 'Backup error';
+            statusText.textContent = `Error: ${data.data.error}`;
+            
+            showError(`Backup error: ${data.data.error}\nBackup ID: ${data.data.backupId || 'Unknown'}`);
+            
+            // Clear current backup ID if it matches
+            if (data.data.backupId === currentBackupId) {
+                currentBackupId = null;
+            }
+            
+            // Update backup status
+            setTimeout(checkBackupStatus, 1000);
+            break;
+            
+        default:
+            console.log('Unknown backup update type:', data.type);
     }
 }
 
@@ -2717,4 +2981,798 @@ async function applyEnrichment() {
         console.error('Apply enrichment error:', error);
         alert(`❌ Failed to apply enrichment: ${error.message}`);
     }
+}
+
+// Advanced Search & Filter System
+let currentSearchFilters = {};
+let currentSortOrder = 'recent';
+let currentViewMode = 'table';
+let searchCache = {};
+let allAlbumsData = [];
+
+// Toggle Albums Search Interface
+function toggleAlbumsSearch() {
+    const container = document.getElementById('albums-search-container');
+    const toggle = document.getElementById('albums-search-toggle');
+    
+    if (container.classList.contains('search-collapsed')) {
+        container.classList.remove('search-collapsed');
+        toggle.innerHTML = '🔽 Hide Search';
+    } else {
+        container.classList.add('search-collapsed');
+        toggle.innerHTML = '🔼 Show Search';
+    }
+}
+
+// Perform Advanced Album Search
+async function performAlbumSearch() {
+    const startTime = performance.now();
+    
+    // Gather search criteria
+    const filters = {
+        album: document.getElementById('search-album-title').value.trim(),
+        artist: document.getElementById('search-artist-name').value.trim(),
+        label: document.getElementById('search-label-name').value.trim(),
+        yearFrom: document.getElementById('search-year-from').value,
+        yearTo: document.getElementById('search-year-to').value,
+        quality: document.getElementById('search-quality').value,
+        orgMode: document.getElementById('search-org-mode').value
+    };
+    
+    // Remove empty filters
+    currentSearchFilters = Object.fromEntries(
+        Object.entries(filters).filter(([key, value]) => value !== '')
+    );
+    
+    try {
+        // Build API query parameters
+        const params = new URLSearchParams();
+        if (currentSearchFilters.album) params.append('album', currentSearchFilters.album);
+        if (currentSearchFilters.artist) params.append('artist', currentSearchFilters.artist);
+        if (currentSearchFilters.label) params.append('label', currentSearchFilters.label);
+        if (currentSearchFilters.yearFrom) params.append('year_from', currentSearchFilters.yearFrom);
+        if (currentSearchFilters.yearTo) params.append('year_to', currentSearchFilters.yearTo);
+        if (currentSearchFilters.quality) params.append('quality', currentSearchFilters.quality);
+        if (currentSearchFilters.orgMode) params.append('org_mode', currentSearchFilters.orgMode);
+        
+        // Make search request
+        const response = await fetchAPI(`/api/search/albums?${params.toString()}`);
+        allAlbumsData = response.albums || [];
+        
+        // Update search statistics
+        const endTime = performance.now();
+        const searchTime = Math.round(endTime - startTime);
+        
+        document.getElementById('albums-results-count').textContent = `${allAlbumsData.length} results found`;
+        document.getElementById('albums-search-time').textContent = `Search took ${searchTime}ms`;
+        document.getElementById('albums-search-stats').style.display = 'flex';
+        
+        // Update active filters display
+        updateActiveFilters();
+        
+        // Apply current sort and display results
+        sortAlbumResults();
+        
+    } catch (error) {
+        console.error('Album search error:', error);
+        showError(`Search failed: ${error.message}`);
+        document.getElementById('albums-search-stats').style.display = 'none';
+    }
+}
+
+// Clear Album Search Filters
+function clearAlbumSearch() {
+    // Clear all input fields
+    document.getElementById('search-album-title').value = '';
+    document.getElementById('search-artist-name').value = '';
+    document.getElementById('search-label-name').value = '';
+    document.getElementById('search-year-from').value = '';
+    document.getElementById('search-year-to').value = '';
+    document.getElementById('search-quality').value = '';
+    document.getElementById('search-org-mode').value = '';
+    
+    // Clear filters and reload all albums
+    currentSearchFilters = {};
+    document.getElementById('albums-search-stats').style.display = 'none';
+    updateActiveFilters();
+    
+    // Reload all albums
+    loadAlbums();
+}
+
+// Save Album Search (placeholder for future implementation)
+function saveAlbumSearch() {
+    if (Object.keys(currentSearchFilters).length === 0) {
+        alert('No active filters to save');
+        return;
+    }
+    
+    const searchName = prompt('Enter a name for this search:');
+    if (searchName) {
+        // Save to localStorage for demo purposes
+        const savedSearches = JSON.parse(localStorage.getItem('savedAlbumSearches') || '{}');
+        savedSearches[searchName] = {
+            filters: currentSearchFilters,
+            created: new Date().toISOString()
+        };
+        localStorage.setItem('savedAlbumSearches', JSON.stringify(savedSearches));
+        alert(`Search "${searchName}" saved successfully!`);
+    }
+}
+
+// Update Active Filters Display
+function updateActiveFilters() {
+    const container = document.getElementById('albums-active-filters');
+    container.innerHTML = '';
+    
+    Object.entries(currentSearchFilters).forEach(([key, value]) => {
+        const chip = document.createElement('div');
+        chip.className = 'filter-chip';
+        
+        let displayText = '';
+        switch(key) {
+            case 'album': displayText = `Album: ${value}`; break;
+            case 'artist': displayText = `Artist: ${value}`; break;
+            case 'label': displayText = `Label: ${value}`; break;
+            case 'yearFrom': displayText = `From: ${value}`; break;
+            case 'yearTo': displayText = `To: ${value}`; break;
+            case 'quality': displayText = `Quality: ${value}`; break;
+            case 'orgMode': displayText = `Mode: ${value}`; break;
+        }
+        
+        chip.innerHTML = `
+            ${displayText}
+            <span class="remove" onclick="removeFilter('${key}')">✕</span>
+        `;
+        container.appendChild(chip);
+    });
+}
+
+// Remove Individual Filter
+function removeFilter(filterKey) {
+    delete currentSearchFilters[filterKey];
+    
+    // Clear the corresponding input field
+    const inputMap = {
+        'album': 'search-album-title',
+        'artist': 'search-artist-name',
+        'label': 'search-label-name',
+        'yearFrom': 'search-year-from',
+        'yearTo': 'search-year-to',
+        'quality': 'search-quality',
+        'orgMode': 'search-org-mode'
+    };
+    
+    const inputId = inputMap[filterKey];
+    if (inputId) {
+        document.getElementById(inputId).value = '';
+    }
+    
+    // Re-perform search
+    performAlbumSearch();
+}
+
+// Sort Album Results
+function sortAlbumResults() {
+    const sortBy = document.getElementById('albums-sort').value;
+    currentSortOrder = sortBy;
+    
+    if (!allAlbumsData || allAlbumsData.length === 0) {
+        return;
+    }
+    
+    let sortedData = [...allAlbumsData];
+    
+    switch(sortBy) {
+        case 'artist':
+            sortedData.sort((a, b) => (a.artist || '').localeCompare(b.artist || ''));
+            break;
+        case 'album':
+            sortedData.sort((a, b) => (a.album || '').localeCompare(b.album || ''));
+            break;
+        case 'year-desc':
+            sortedData.sort((a, b) => (b.year || 0) - (a.year || 0));
+            break;
+        case 'year-asc':
+            sortedData.sort((a, b) => (a.year || 0) - (b.year || 0));
+            break;
+        case 'label':
+            sortedData.sort((a, b) => (a.label || '').localeCompare(b.label || ''));
+            break;
+        case 'quality':
+            sortedData.sort((a, b) => (a.quality || '').localeCompare(b.quality || ''));
+            break;
+        case 'recent':
+        default:
+            // Keep original order (most recent first)
+            break;
+    }
+    
+    allAlbumsData = sortedData;
+    updateAlbumsDisplay();
+}
+
+// Switch Album View Mode
+function switchAlbumView(mode) {
+    currentViewMode = mode;
+    
+    const tableView = document.getElementById('albums-table-view');
+    const gridView = document.getElementById('albums-grid-view');
+    const tableBtn = document.getElementById('table-view-btn');
+    const gridBtn = document.getElementById('grid-view-btn');
+    
+    if (mode === 'table') {
+        tableView.style.display = 'block';
+        gridView.style.display = 'none';
+        tableBtn.classList.add('active');
+        gridBtn.classList.remove('active');
+    } else {
+        tableView.style.display = 'none';
+        gridView.style.display = 'block';
+        tableBtn.classList.remove('active');
+        gridBtn.classList.add('active');
+    }
+    
+    updateAlbumsDisplay();
+}
+
+// Sort Album Table by Column
+function sortAlbumTable(column) {
+    const select = document.getElementById('albums-sort');
+    const sortMap = {
+        'artist': 'artist',
+        'album': 'album',
+        'year': 'year-desc',
+        'label': 'label',
+        'quality': 'quality',
+        'mode': 'recent'
+    };
+    
+    select.value = sortMap[column] || 'recent';
+    sortAlbumResults();
+}
+
+// Update Albums Display
+function updateAlbumsDisplay() {
+    if (currentViewMode === 'table') {
+        updateAlbumsTable();
+    } else {
+        updateAlbumsGrid();
+    }
+}
+
+// Update Albums Table
+function updateAlbumsTable() {
+    const tbody = document.getElementById('albums-tbody');
+    
+    if (!allAlbumsData || allAlbumsData.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" class="loading">No albums found</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = allAlbumsData.map(album => `
+        <tr onclick="selectAlbum('${album.id || ''}')">
+            <td>${album.artist || 'Unknown Artist'}</td>
+            <td>${album.album || 'Unknown Album'}</td>
+            <td>${album.year || 'N/A'}</td>
+            <td>${album.label || 'N/A'}</td>
+            <td>
+                <span class="meta-tag" style="background: ${getQualityColor(album.quality)}20; color: ${getQualityColor(album.quality)}">
+                    ${album.quality || 'Unknown'}
+                </span>
+            </td>
+            <td>${album.organization_mode || 'N/A'}</td>
+            <td>
+                <button class="action-btn secondary" onclick="event.stopPropagation(); viewAlbumDetails('${album.id || ''}')">📋 Details</button>
+                <button class="action-btn secondary" onclick="event.stopPropagation(); editAlbumMetadata('${album.id || ''}')">✏️ Edit</button>
+            </td>
+        </tr>
+    `).join('');
+}
+
+// Update Albums Grid
+function updateAlbumsGrid() {
+    const container = document.getElementById('albums-grid-container');
+    
+    if (!allAlbumsData || allAlbumsData.length === 0) {
+        container.innerHTML = '<div class="loading">No albums found</div>';
+        return;
+    }
+    
+    container.innerHTML = allAlbumsData.map(album => `
+        <div class="grid-item" onclick="selectAlbum('${album.id || ''}')">
+            <div class="grid-item-header">
+                <div>
+                    <div class="grid-item-title">${album.album || 'Unknown Album'}</div>
+                    <div class="grid-item-subtitle">${album.artist || 'Unknown Artist'}</div>
+                </div>
+            </div>
+            <div class="grid-item-meta">
+                <span class="meta-tag">${album.year || 'N/A'}</span>
+                <span class="meta-tag" style="background: ${getQualityColor(album.quality)}20; color: ${getQualityColor(album.quality)}">
+                    ${album.quality || 'Unknown'}
+                </span>
+                ${album.label ? `<span class="meta-tag">${album.label}</span>` : ''}
+                ${album.organization_mode ? `<span class="meta-tag">${album.organization_mode}</span>` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+// Get Quality Color
+function getQualityColor(quality) {
+    switch(quality?.toLowerCase()) {
+        case 'lossless': return '#10b981';
+        case 'lossy': return '#f59e0b';
+        case 'mixed': return '#8b5cf6';
+        default: return '#6b7280';
+    }
+}
+
+// Select Album (placeholder)
+function selectAlbum(albumId) {
+    console.log('Selected album:', albumId);
+    // This would integrate with metadata editing functionality
+}
+
+// View Album Details (placeholder)
+function viewAlbumDetails(albumId) {
+    alert(`View details for album: ${albumId}\n\nThis would open a detailed view of the album.`);
+}
+
+// Edit Album Metadata (placeholder - would integrate with #124)
+function editAlbumMetadata(albumId) {
+    alert(`Edit metadata for album: ${albumId}\n\nThis would open the metadata editing interface.`);
+}
+
+// Mobile Gestures & Touch Enhancement System
+let touchStartX = 0;
+let touchStartY = 0;
+let touchEndX = 0;
+let touchEndY = 0;
+let currentTabIndex = 0;
+let tabs = [];
+let isSwipeEnabled = true;
+let pullToRefreshY = 0;
+let isPullToRefresh = false;
+
+// Initialize Mobile Touch Gestures
+function initMobileGestures() {
+    // Only enable on mobile devices
+    if (!isMobile()) {
+        return;
+    }
+    
+    // Get all tab buttons for swipe navigation
+    tabs = Array.from(document.querySelectorAll('.tab'));
+    currentTabIndex = tabs.findIndex(tab => tab.classList.contains('active'));
+    
+    // Add touch event listeners to the main container
+    const container = document.querySelector('.container');
+    if (container) {
+        container.addEventListener('touchstart', handleTouchStart, { passive: false });
+        container.addEventListener('touchmove', handleTouchMove, { passive: false });
+        container.addEventListener('touchend', handleTouchEnd, { passive: false });
+    }
+    
+    // Initialize pull-to-refresh
+    initPullToRefresh();
+    
+    // Initialize mobile-specific UI enhancements
+    enhanceMobileUI();
+    
+    // Add vibration feedback support
+    initHapticFeedback();
+    
+    console.log('Mobile gestures initialized');
+}
+
+// Check if device is mobile
+function isMobile() {
+    return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+           window.innerWidth <= 768;
+}
+
+// Handle touch start
+function handleTouchStart(e) {
+    if (!isSwipeEnabled) return;
+    
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    touchEndX = touchStartX;
+    touchEndY = touchStartY;
+    
+    // Check for pull-to-refresh
+    if (window.scrollY === 0) {
+        isPullToRefresh = true;
+        pullToRefreshY = touchStartY;
+    }
+}
+
+// Handle touch move
+function handleTouchMove(e) {
+    if (!isSwipeEnabled) return;
+    
+    touchEndX = e.touches[0].clientX;
+    touchEndY = e.touches[0].clientY;
+    
+    // Handle pull-to-refresh visual feedback
+    if (isPullToRefresh && touchEndY > pullToRefreshY + 50) {
+        showPullToRefreshIndicator();
+        if (touchEndY > pullToRefreshY + 100) {
+            e.preventDefault(); // Prevent default scroll when threshold reached
+        }
+    }
+    
+    // Show swipe indicators for horizontal swipes
+    const deltaX = touchEndX - touchStartX;
+    const deltaY = Math.abs(touchEndY - touchStartY);
+    
+    if (Math.abs(deltaX) > 50 && deltaY < 100) {
+        showSwipeIndicator(deltaX > 0 ? 'right' : 'left');
+    }
+}
+
+// Handle touch end
+function handleTouchEnd(e) {
+    if (!isSwipeEnabled) return;
+    
+    const deltaX = touchEndX - touchStartX;
+    const deltaY = touchEndY - touchStartY;
+    const minSwipeDistance = 100;
+    const maxVerticalMovement = 150;
+    
+    // Hide indicators
+    hideSwipeIndicators();
+    
+    // Handle pull-to-refresh
+    if (isPullToRefresh && deltaY > 100) {
+        triggerPullToRefresh();
+    }
+    isPullToRefresh = false;
+    
+    // Check if this was a horizontal swipe
+    if (Math.abs(deltaX) > minSwipeDistance && Math.abs(deltaY) < maxVerticalMovement) {
+        handleSwipeGesture(deltaX);
+    }
+    
+    // Reset touch coordinates
+    touchStartX = 0;
+    touchStartY = 0;
+    touchEndX = 0;
+    touchEndY = 0;
+}
+
+// Handle swipe gestures for tab navigation
+function handleSwipeGesture(deltaX) {
+    const threshold = 100;
+    
+    if (deltaX > threshold) {
+        // Swipe right - go to previous tab
+        navigateToTab('previous');
+        triggerHapticFeedback('light');
+    } else if (deltaX < -threshold) {
+        // Swipe left - go to next tab
+        navigateToTab('next');
+        triggerHapticFeedback('light');
+    }
+}
+
+// Navigate between tabs
+function navigateToTab(direction) {
+    if (tabs.length === 0) return;
+    
+    let newTabIndex = currentTabIndex;
+    
+    if (direction === 'previous') {
+        newTabIndex = currentTabIndex > 0 ? currentTabIndex - 1 : tabs.length - 1;
+    } else if (direction === 'next') {
+        newTabIndex = currentTabIndex < tabs.length - 1 ? currentTabIndex + 1 : 0;
+    }
+    
+    // Activate the new tab
+    tabs[newTabIndex].click();
+    currentTabIndex = newTabIndex;
+    
+    // Show navigation feedback
+    showNavigationFeedback(direction);
+}
+
+// Show swipe indicators
+function showSwipeIndicator(direction) {
+    const indicator = document.getElementById(`swipe-${direction}`);
+    if (indicator) {
+        indicator.classList.add('show');
+    }
+}
+
+// Hide swipe indicators
+function hideSwipeIndicators() {
+    document.getElementById('swipe-left')?.classList.remove('show');
+    document.getElementById('swipe-right')?.classList.remove('show');
+}
+
+// Show navigation feedback
+function showNavigationFeedback(direction) {
+    const message = direction === 'previous' ? '← Previous Tab' : 'Next Tab →';
+    showToast(message);
+}
+
+// Initialize pull-to-refresh
+function initPullToRefresh() {
+    // Add pull-to-refresh indicator to header
+    const header = document.querySelector('header');
+    if (header && !document.getElementById('pull-refresh-indicator')) {
+        const indicator = document.createElement('div');
+        indicator.id = 'pull-refresh-indicator';
+        indicator.className = 'pull-refresh-indicator';
+        indicator.innerHTML = '🔄 Pull to refresh';
+        indicator.style.cssText = `
+            position: absolute;
+            top: -40px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 14px;
+            opacity: 0;
+            transition: all 0.3s ease;
+            pointer-events: none;
+            z-index: 1000;
+        `;
+        header.style.position = 'relative';
+        header.appendChild(indicator);
+    }
+}
+
+// Show pull-to-refresh indicator
+function showPullToRefreshIndicator() {
+    const indicator = document.getElementById('pull-refresh-indicator');
+    if (indicator) {
+        indicator.style.opacity = '1';
+        indicator.style.top = '10px';
+    }
+}
+
+// Trigger pull-to-refresh
+function triggerPullToRefresh() {
+    const indicator = document.getElementById('pull-refresh-indicator');
+    if (indicator) {
+        indicator.innerHTML = '🔄 Refreshing...';
+        indicator.style.opacity = '1';
+    }
+    
+    // Trigger haptic feedback
+    triggerHapticFeedback('medium');
+    
+    // Refresh current tab data
+    refreshCurrentTab();
+    
+    // Hide indicator after delay
+    setTimeout(() => {
+        if (indicator) {
+            indicator.style.opacity = '0';
+            indicator.style.top = '-40px';
+            indicator.innerHTML = '🔄 Pull to refresh';
+        }
+    }, 1500);
+}
+
+// Refresh current tab
+function refreshCurrentTab() {
+    const activeTab = document.querySelector('.tab.active');
+    if (activeTab) {
+        const tabName = activeTab.textContent.toLowerCase().trim();
+        const refreshFunctions = {
+            'overview': loadOverview,
+            'albums': loadAlbums,
+            'artists': loadArtists,
+            'labels': loadLabels,
+            'health': loadHealth,
+            'duplicates': loadDuplicates,
+            'insights': loadInsights
+        };
+        
+        const refreshFunc = refreshFunctions[tabName];
+        if (refreshFunc) {
+            refreshFunc();
+        }
+    }
+}
+
+// Enhance mobile UI elements
+function enhanceMobileUI() {
+    // Add mobile-optimized styles
+    addMobileStyles();
+    
+    // Enhance table scrolling on mobile
+    enhanceTableScrolling();
+    
+    // Add mobile-friendly button interactions
+    addMobileButtonEffects();
+    
+    // Initialize mobile menu
+    initMobileMenu();
+}
+
+// Add mobile-specific styles
+function addMobileStyles() {
+    const style = document.createElement('style');
+    style.textContent = `
+        /* Mobile gesture feedback */
+        .touch-highlight {
+            -webkit-tap-highlight-color: rgba(102, 126, 234, 0.2);
+            tap-highlight-color: rgba(102, 126, 234, 0.2);
+        }
+        
+        /* Enhanced touch targets */
+        @media (max-width: 768px) {
+            button, .tab, .action-btn {
+                min-height: 48px;
+                min-width: 48px;
+            }
+            
+            /* Table enhancements */
+            .table-container {
+                -webkit-overflow-scrolling: touch;
+                overflow-scrolling: touch;
+            }
+            
+            /* Card hover effects for touch */
+            .card:active {
+                transform: scale(0.98);
+                transition: transform 0.1s ease;
+            }
+            
+            /* Search input improvements */
+            .search-input:focus {
+                zoom: 1;
+                -webkit-user-select: text;
+            }
+        }
+        
+        /* Toast notifications */
+        .toast {
+            position: fixed;
+            bottom: 100px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0, 0, 0, 0.8);
+            color: white;
+            padding: 12px 20px;
+            border-radius: 25px;
+            font-size: 14px;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .toast.show {
+            opacity: 1;
+        }
+    `;
+    document.head.appendChild(style);
+}
+
+// Enhance table scrolling
+function enhanceTableScrolling() {
+    const tables = document.querySelectorAll('.table-container');
+    tables.forEach(table => {
+        table.style.webkitOverflowScrolling = 'touch';
+        table.style.overflowScrolling = 'touch';
+    });
+}
+
+// Add mobile button effects
+function addMobileButtonEffects() {
+    const buttons = document.querySelectorAll('button, .tab, .action-btn');
+    buttons.forEach(button => {
+        button.classList.add('touch-highlight');
+    });
+}
+
+// Initialize mobile menu functionality
+function initMobileMenu() {
+    // Mobile menu is already in HTML, just ensure functionality
+    const fab = document.getElementById('mobile-fab');
+    const menu = document.getElementById('mobile-menu');
+    
+    if (fab && menu) {
+        fab.style.display = isMobile() ? 'flex' : 'none';
+    }
+}
+
+// Mobile menu functions
+function toggleMobileMenu() {
+    const menu = document.getElementById('mobile-menu');
+    if (menu) {
+        menu.classList.toggle('open');
+        triggerHapticFeedback('light');
+    }
+}
+
+function closeMobileMenu() {
+    const menu = document.getElementById('mobile-menu');
+    if (menu) {
+        menu.classList.remove('open');
+    }
+}
+
+// Haptic feedback support
+function initHapticFeedback() {
+    // Check if vibration is supported
+    if ('vibrate' in navigator) {
+        console.log('Haptic feedback available');
+    }
+}
+
+function triggerHapticFeedback(intensity = 'light') {
+    if ('vibrate' in navigator) {
+        const patterns = {
+            light: [10],
+            medium: [20],
+            heavy: [30]
+        };
+        navigator.vibrate(patterns[intensity] || patterns.light);
+    }
+}
+
+// Toast notification system
+function showToast(message, duration = 2000) {
+    // Remove existing toast
+    const existingToast = document.querySelector('.toast');
+    if (existingToast) {
+        existingToast.remove();
+    }
+    
+    // Create new toast
+    const toast = document.createElement('div');
+    toast.className = 'toast';
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    // Show toast
+    setTimeout(() => {
+        toast.classList.add('show');
+    }, 100);
+    
+    // Hide toast
+    setTimeout(() => {
+        toast.classList.remove('show');
+        setTimeout(() => {
+            toast.remove();
+        }, 300);
+    }, duration);
+}
+
+// Mobile-specific utility functions
+function refreshCurrentTab() {
+    showToast('Refreshing...', 1000);
+    const activeTab = tabs.find(tab => tab.classList.contains('active'));
+    if (activeTab) {
+        activeTab.click();
+    }
+}
+
+function testPushNotification() {
+    if ('Notification' in window) {
+        if (Notification.permission === 'granted') {
+            new Notification('ordr.fm Dashboard', {
+                body: 'Push notification test successful! 🎵',
+                icon: '/icons/icon-192x192.png'
+            });
+        } else if (Notification.permission !== 'denied') {
+            Notification.requestPermission().then(permission => {
+                if (permission === 'granted') {
+                    new Notification('ordr.fm Dashboard', {
+                        body: 'Push notification test successful! 🎵',
+                        icon: '/icons/icon-192x192.png'
+                    });
+                }
+            });
+        }
+    }
+    triggerHapticFeedback('medium');
 }

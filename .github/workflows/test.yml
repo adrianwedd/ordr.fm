@@ -112,21 +112,21 @@ jobs:
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
-        cache-dependency-path: 'server/package-lock.json'
+        cache-dependency-path: 'visualization/package-lock.json'
 
     - name: Install dependencies
       run: |
-        cd server
+        cd visualization
         npm ci
 
     - name: Create test database
       run: |
-        cd server
+        cd visualization
         sqlite3 test.db < database/schema.sql
 
     - name: Run tests
       run: |
-        cd server
+        cd visualization
         npm test
       env:
         NODE_ENV: test
@@ -135,7 +135,7 @@ jobs:
 
     - name: Test server startup
       run: |
-        cd server
+        cd visualization
         timeout 10s npm start || [ $? -eq 124 ]
       env:
         NODE_ENV: test
@@ -155,7 +155,7 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
-        cache-dependency-path: 'server/package-lock.json'
+        cache-dependency-path: 'visualization/package-lock.json'
 
     - name: Install system dependencies
       run: |
@@ -170,7 +170,7 @@ jobs:
 
     - name: Install Node.js dependencies
       run: |
-        cd server
+        cd visualization
         npm ci
 
     - name: Initialize databases
@@ -197,7 +197,7 @@ jobs:
           --verbose
         
         # Start server in background
-        cd server
+        cd visualization
         PORT=3001 METADATA_DB=../ordr.fm.metadata.db npm start &
         SERVER_PID=$!
         
@@ -223,16 +223,16 @@ jobs:
       with:
         node-version: '18'
         cache: 'npm'
-        cache-dependency-path: 'server/package-lock.json'
+        cache-dependency-path: 'visualization/package-lock.json'
 
     - name: Install dependencies
       run: |
-        cd server
+        cd visualization
         npm ci
 
     - name: Lint JavaScript
       run: |
-        cd server
+        cd visualization
         npm run lint || echo "No lint script found, skipping..."
 
     - name: Check shell scripts with shellcheck
