@@ -2008,6 +2008,794 @@
                 gap: 8px;
             }
         }
+        
+        /* Metadata Editor Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.7);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.3s ease, visibility 0.3s ease;
+        }
+        
+        .modal-overlay.show {
+            opacity: 1;
+            visibility: visible;
+        }
+        
+        .modal-content {
+            background: var(--bg-card);
+            border-radius: 8px;
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+            max-width: 90vw;
+            max-height: 90vh;
+            overflow-y: auto;
+            transform: scale(0.9);
+            transition: transform 0.3s ease;
+        }
+        
+        .modal-overlay.show .modal-content {
+            transform: scale(1);
+        }
+        
+        .metadata-editor {
+            width: 600px;
+            max-width: 95vw;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .modal-header h2 {
+            color: var(--text-primary);
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: background-color 0.2s ease;
+        }
+        
+        .close-btn:hover {
+            background: var(--bg-accent);
+            color: var(--text-primary);
+        }
+        
+        .modal-body {
+            padding: 24px;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        
+        .form-group input {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--input-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+        
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        
+        .tracks-section {
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .tracks-section h3 {
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            font-size: 1.1rem;
+        }
+        
+        .track-row {
+            display: grid;
+            grid-template-columns: 80px 1fr 1fr;
+            gap: 12px;
+            margin-bottom: 12px;
+            padding: 8px;
+            border-radius: 4px;
+            transition: background-color 0.2s ease;
+        }
+        
+        .track-row:hover {
+            background: var(--bg-accent);
+        }
+        
+        .track-number input {
+            text-align: center;
+        }
+        
+        .form-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            margin-top: 24px;
+            padding-top: 20px;
+            border-top: 1px solid var(--border-color);
+        }
+        
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s ease, transform 0.1s ease;
+        }
+        
+        .btn:hover {
+            transform: translateY(-1px);
+        }
+        
+        .btn.primary {
+            background: #667eea;
+            color: white;
+        }
+        
+        .btn.primary:hover {
+            background: #5a67d8;
+        }
+        
+        .btn.secondary {
+            background: var(--button-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+        
+        .btn.secondary:hover {
+            background: var(--bg-accent);
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .metadata-editor {
+                width: 95vw;
+                max-height: 85vh;
+            }
+            
+            .form-row {
+                grid-template-columns: 1fr;
+                gap: 12px;
+            }
+            
+            .track-row {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+            
+            .form-actions {
+                flex-direction: column;
+            }
+        }
+        
+        /* Audio Player Styles */
+        .audio-player {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-card);
+            border-top: 2px solid var(--border-color);
+            z-index: 500;
+            transform: translateY(100%);
+            transition: transform 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+        
+        .audio-player.show {
+            transform: translateY(0);
+        }
+        
+        .player-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .track-info {
+            flex: 1;
+        }
+        
+        .track-title {
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 1rem;
+            margin-bottom: 2px;
+        }
+        
+        .track-artist {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+        
+        .player-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 20px;
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        
+        .player-close:hover {
+            background: var(--bg-accent);
+            color: var(--text-primary);
+        }
+        
+        .waveform-container {
+            position: relative;
+            padding: 15px 20px;
+            cursor: pointer;
+        }
+        
+        #waveform-canvas {
+            width: 100%;
+            height: 80px;
+            background: var(--bg-secondary);
+            border-radius: 4px;
+        }
+        
+        .playhead {
+            position: absolute;
+            top: 15px;
+            bottom: 15px;
+            width: 2px;
+            background: #667eea;
+            pointer-events: none;
+            transition: left 0.1s ease;
+        }
+        
+        .player-controls {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 15px 20px;
+        }
+        
+        .control-btn {
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            transition: all 0.2s ease;
+            min-width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .control-btn:hover {
+            background: var(--bg-accent);
+            transform: scale(1.1);
+        }
+        
+        #play-btn {
+            background: #667eea;
+            color: white;
+            font-size: 14px;
+        }
+        
+        #play-btn:hover {
+            background: #5a67d8;
+        }
+        
+        .progress-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+        }
+        
+        .time {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            min-width: 40px;
+            text-align: center;
+        }
+        
+        .progress-bar {
+            flex: 1;
+            height: 6px;
+            background: var(--bg-secondary);
+            border-radius: 3px;
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: #667eea;
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.1s ease;
+        }
+        
+        .volume-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        #volume-slider {
+            width: 80px;
+            height: 4px;
+            background: var(--bg-secondary);
+            border-radius: 2px;
+            outline: none;
+            -webkit-appearance: none;
+        }
+        
+        #volume-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: #667eea;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        
+        #volume-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            background: #667eea;
+            border-radius: 50%;
+            cursor: pointer;
+            border: none;
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .player-controls {
+                flex-wrap: wrap;
+                gap: 10px;
+            }
+            
+            .progress-container {
+                order: -1;
+                width: 100%;
+            }
+            
+            .volume-container {
+                flex: 1;
+                justify-content: flex-end;
+            }
+            
+            #volume-slider {
+                width: 60px;
+            }
+        }
+        
+        /* Backup Management Styles */
+        .backup-dashboard {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+        
+        .backup-status {
+            padding: 15px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+            border-left: 4px solid var(--border-color);
+        }
+        
+        .backup-status.running {
+            border-left-color: #f59e0b;
+            background: rgba(245, 158, 11, 0.1);
+        }
+        
+        .backup-status.success {
+            border-left-color: #10b981;
+            background: rgba(16, 185, 129, 0.1);
+        }
+        
+        .backup-status.error {
+            border-left-color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+        
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-color);
+            border-top: 2px solid #f59e0b;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .backup-controls {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .backup-info {
+            padding: 15px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+        }
+        
+        .backup-details {
+            margin-top: 10px;
+        }
+        
+        .backup-details .detail-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+            font-size: 0.9rem;
+        }
+        
+        .backup-details .detail-label {
+            color: var(--text-secondary);
+        }
+        
+        .backup-details .detail-value {
+            color: var(--text-primary);
+        }
+        
+        .backup-logs {
+            padding: 15px;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+        }
+        
+        .log-list {
+            margin-top: 10px;
+        }
+        
+        .log-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px;
+            border-radius: 4px;
+            margin-bottom: 5px;
+            cursor: pointer;
+            transition: background-color 0.2s ease;
+        }
+        
+        .log-item:hover {
+            background: var(--bg-accent);
+        }
+        
+        .log-filename {
+            color: var(--text-primary);
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        
+        .log-date {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+        
+        .log-size {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .backup-controls {
+                flex-direction: column;
+            }
+            
+            .backup-controls .btn {
+                width: 100%;
+            }
+        }
+        
+        /* Enhanced Error System Styles */
+        .error-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1100;
+            max-width: 400px;
+            pointer-events: none;
+        }
+        
+        .error-notification {
+            background: var(--bg-card);
+            border: 1px solid #ef4444;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            box-shadow: 0 4px 20px rgba(239, 68, 68, 0.3);
+            animation: slideIn 0.3s ease-out;
+            pointer-events: auto;
+            cursor: pointer;
+            transition: transform 0.2s ease, box-shadow 0.2s ease;
+        }
+        
+        .error-notification:hover {
+            transform: translateX(-5px);
+            box-shadow: 0 6px 25px rgba(239, 68, 68, 0.4);
+        }
+        
+        .error-notification.error {
+            border-color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+        }
+        
+        .error-notification.warning {
+            border-color: #f59e0b;
+            background: rgba(245, 158, 11, 0.1);
+            box-shadow: 0 4px 20px rgba(245, 158, 11, 0.3);
+        }
+        
+        .error-notification.info {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+            box-shadow: 0 4px 20px rgba(59, 130, 246, 0.3);
+        }
+        
+        .error-content {
+            display: flex;
+            align-items: flex-start;
+            padding: 16px;
+            gap: 12px;
+        }
+        
+        .error-icon {
+            font-size: 20px;
+            flex-shrink: 0;
+            margin-top: 2px;
+        }
+        
+        .error-message {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .error-message strong {
+            color: var(--text-primary);
+            font-weight: 600;
+            display: block;
+            margin-bottom: 4px;
+        }
+        
+        .error-message p {
+            color: var(--text-primary);
+            margin: 0;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+        
+        .error-message small {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            display: block;
+            margin-top: 4px;
+        }
+        
+        .error-dismiss {
+            color: var(--text-secondary);
+            font-size: 18px;
+            flex-shrink: 0;
+            opacity: 0.6;
+            transition: opacity 0.2s ease;
+        }
+        
+        .error-notification:hover .error-dismiss {
+            opacity: 1;
+        }
+        
+        /* Connection status styles */
+        #status {
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+        
+        #status.connected {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+        
+        #status.disconnected {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+            animation: pulse 1s ease-in-out infinite alternate;
+        }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes slideOut {
+            from {
+                transform: translateX(0);
+                opacity: 1;
+            }
+            to {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+        }
+        
+        @keyframes pulse {
+            from {
+                opacity: 0.6;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+        
+        /* Mobile responsiveness */
+        @media (max-width: 768px) {
+            .error-container {
+                top: 10px;
+                right: 10px;
+                left: 10px;
+                max-width: none;
+            }
+            
+            .error-notification {
+                margin-bottom: 8px;
+            }
+        }
+
+        /* Search Presets & History Styles */
+        .preset-item, .history-item {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 12px;
+            margin-bottom: 10px;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .preset-item:hover, .history-item:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.1);
+        }
+
+        .preset-header, .history-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .preset-name, .history-query {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+
+        .preset-date, .history-date {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        .preset-filters, .history-results {
+            font-size: 12px;
+            color: var(--text-secondary);
+            line-height: 1.4;
+        }
+
+        .preset-actions, .history-actions {
+            margin-top: 8px;
+            display: flex;
+            gap: 8px;
+        }
+
+        .preset-btn, .history-btn {
+            padding: 4px 8px;
+            font-size: 11px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .preset-btn.load, .history-btn.load {
+            background: #667eea;
+            color: white;
+        }
+
+        .preset-btn.delete, .history-btn.delete {
+            background: #dc3545;
+            color: white;
+        }
+
+        .preset-btn:hover, .history-btn:hover {
+            opacity: 0.8;
+        }
+
+        .no-presets, .no-history {
+            text-align: center;
+            padding: 40px 20px;
+            color: var(--text-secondary);
+        }
+
+        .preset-filter-tag, .history-filter-tag {
+            display: inline-block;
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            margin-right: 4px;
+            margin-bottom: 2px;
+        }
     </style>
 </head>
 <body>
@@ -2342,6 +3130,41 @@
                     </div>
                 </div>
             </div>
+                <!-- Backup Management -->
+                <div class="card">
+                    <h2>💾 Backup Management</h2>
+                    <div class="backup-dashboard" id="backup-dashboard">
+                        <div class="backup-status" id="backup-status">
+                            <div class="status-indicator" id="backup-status-indicator">
+                                <div class="spinner" style="display: none;"></div>
+                                <span id="backup-status-text">Checking status...</span>
+                            </div>
+                        </div>
+                        
+                        <div class="backup-controls">
+                            <button class="btn primary" id="start-backup-btn" onclick="startBackup()">
+                                🚀 Start Backup
+                            </button>
+                            <button class="btn secondary" onclick="refreshBackupStatus()">
+                                🔄 Refresh Status
+                            </button>
+                            <button class="btn secondary" onclick="viewBackupLogs()">
+                                📋 View Logs
+                            </button>
+                        </div>
+                        
+                        <div class="backup-info" id="backup-info" style="display: none;">
+                            <h3>Last Backup</h3>
+                            <div class="backup-details" id="backup-details"></div>
+                        </div>
+                        
+                        <div class="backup-logs" id="backup-logs" style="display: none;">
+                            <h3>Recent Backup Logs</h3>
+                            <div class="log-list" id="backup-log-list"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
         
         <!-- Collection Health Tab -->
@@ -2563,6 +3386,8 @@
                         <button class="search-btn primary" onclick="performAlbumSearch()">🔍 Search Albums</button>
                         <button class="search-btn secondary" onclick="clearAlbumSearch()">🗑️ Clear Filters</button>
                         <button class="search-btn secondary" onclick="saveAlbumSearch()">💾 Save Search</button>
+                        <button class="search-btn secondary" onclick="showSearchPresets()">📂 Load Preset</button>
+                        <button class="search-btn secondary" onclick="showSearchHistory()">🕐 History</button>
                     </div>
                     <div class="search-filters" id="albums-active-filters"></div>
                 </div>
@@ -2623,6 +3448,42 @@
                         <div class="loading">Loading albums...</div>
                     </div>
                 </div>
+            </div>
+            
+            <!-- Audio Player -->
+            <div id="audio-player" class="audio-player" style="display: none;">
+                <div class="player-header">
+                    <div class="track-info">
+                        <div class="track-title" id="player-track-title">No track selected</div>
+                        <div class="track-artist" id="player-track-artist">Unknown Artist</div>
+                    </div>
+                    <button class="player-close" onclick="closeAudioPlayer()">&times;</button>
+                </div>
+                
+                <div class="waveform-container">
+                    <canvas id="waveform-canvas" width="800" height="100"></canvas>
+                    <div class="playhead" id="playhead"></div>
+                </div>
+                
+                <div class="player-controls">
+                    <button class="control-btn" id="play-btn" onclick="togglePlayPause()">
+                        ▶️
+                    </button>
+                    <div class="progress-container">
+                        <span class="time" id="current-time">0:00</span>
+                        <div class="progress-bar" onclick="seekToPosition(event)">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <span class="time" id="total-time">0:00</span>
+                    </div>
+                    <div class="volume-container">
+                        <button class="control-btn" onclick="toggleMute()">🔊</button>
+                        <input type="range" id="volume-slider" min="0" max="100" value="50" 
+                               oninput="setVolume(this.value)">
+                    </div>
+                </div>
+                
+                <audio id="audio-element" preload="none"></audio>
             </div>
         </div>
         
@@ -3341,6 +4202,53 @@
             <div class="modal-footer">
                 <button class="btn btn-success" onclick="confirmMetadataChanges()">✅ Confirm & Save</button>
                 <button class="btn btn-secondary" onclick="closeMetadataPreview()">❌ Cancel</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search Presets Modal -->
+    <div class="modal" id="search-presets-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📂 Saved Search Presets</h2>
+                <button class="modal-close" onclick="closeSearchPresets()">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div id="search-presets-list">
+                    <div class="loading">Loading saved searches...</div>
+                </div>
+                
+                <div class="preset-actions" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+                    <button class="btn btn-danger" onclick="clearAllPresets()">🗑️ Clear All Presets</button>
+                    <button class="btn btn-secondary" onclick="exportPresets()">💾 Export</button>
+                    <input type="file" id="import-presets" accept=".json" style="display: none;" onchange="importPresets()">
+                    <button class="btn btn-secondary" onclick="document.getElementById('import-presets').click()">📁 Import</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Search History Modal -->
+    <div class="modal" id="search-history-modal" style="display: none;">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>🕐 Search History</h2>
+                <button class="modal-close" onclick="closeSearchHistory()">&times;</button>
+            </div>
+            
+            <div class="modal-body">
+                <div class="history-stats">
+                    <p>Your recent searches (last 50):</p>
+                </div>
+                
+                <div id="search-history-list">
+                    <div class="loading">Loading search history...</div>
+                </div>
+                
+                <div class="history-actions" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #eee;">
+                    <button class="btn btn-danger" onclick="clearSearchHistory()">🗑️ Clear History</button>
+                </div>
             </div>
         </div>
     </div>

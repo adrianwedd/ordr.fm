@@ -33,6 +33,9 @@ async function init() {
         // Initialize configuration management
         initConfigManagement();
         
+        // Initialize enhanced error handling and connection monitoring
+        startConnectionMonitoring();
+        
         // Check health
         const health = await fetchAPI('/api/health');
         if (health.status === 'healthy') {
@@ -648,23 +651,211 @@ function testPushNotification() {
 }
 
 // Fetch wrapper with error handling
-async function fetchAPI(endpoint) {
-    try {
-        const response = await fetch(API_BASE + endpoint);
-        if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+async function fetchAPI(endpoint, options = {}) {
+    let response;
+    let retries = 3;
+    let lastError;
+    
+    // Retry logic for network issues
+    while (retries > 0) {
+        try {
+            response = await fetch(API_BASE + endpoint, {
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                },
+                ...options
+            });
+            break; // Success, exit retry loop
+        } catch (networkError) {
+            lastError = networkError;
+            retries--;
+            if (retries > 0) {
+                console.warn(`Network error, retrying... (${retries} attempts left)`, networkError);
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second before retry
+            }
         }
+    }
+    
+    if (!response) {
+        throw new Error(`Network request failed after retries: ${lastError.message}`);
+    }
+    
+    // Handle specific HTTP status codes
+    if (!response.ok) {
+        let errorMessage;
+        let errorData = null;
+        
+        try {
+            errorData = await response.json();
+            errorMessage = errorData.error || errorData.message || 'Unknown error';
+        } catch (parseError) {
+            errorMessage = response.statusText || `HTTP ${response.status}`;
+        }
+        
+        // Specific error handling based on status codes
+        switch (response.status) {
+            case 400:
+                throw new Error(`Bad request: ${errorMessage}`);
+            case 401:
+                throw new Error(`Authentication required: ${errorMessage}`);
+            case 403:
+                throw new Error(`Access denied: ${errorMessage}`);
+            case 404:
+                throw new Error(`Resource not found: ${errorMessage}`);
+            case 409:
+                throw new Error(`Conflict: ${errorMessage}`);
+            case 429:
+                throw new Error(`Rate limited: Please try again later`);
+            case 500:
+                throw new Error(`Server error: ${errorMessage}`);
+            case 502:
+                throw new Error(`Bad gateway: Server temporarily unavailable`);
+            case 503:
+                throw new Error(`Service unavailable: ${errorMessage}`);
+            default:
+                throw new Error(`Request failed (${response.status}): ${errorMessage}`);
+        }
+    }
+    
+    // Parse response with error handling
+    try {
         return await response.json();
-    } catch (error) {
-        console.error('API fetch error:', error);
-        throw error;
+    } catch (parseError) {
+        console.warn('Failed to parse JSON response, returning text', parseError);
+        const text = await response.text();
+        return text ? { data: text } : {};
     }
 }
 
-// Show error message
-function showError(message) {
-    const container = document.getElementById('error-container');
-    container.innerHTML = `<div class="error">⚠️ ${message}</div>`;
+// Enhanced error display system
+function showError(message, context = '', duration = 10000) {
+    console.error('Error:', message, context);
+    
+    // Update connection status if it's a network error
+    if (message.includes('Network') || message.includes('fetch')) {
+        updateConnectionStatus(false);
+    }
+    
+    // Create error notification
+    const errorId = Date.now().toString();
+    const errorHTML = `
+        <div id="error-${errorId}" class="error-notification error" onclick="dismissError('${errorId}')">
+            <div class="error-content">
+                <div class="error-icon">⚠️</div>
+                <div class="error-message">
+                    <strong>Error</strong>
+                    <p>${message}</p>
+                    ${context ? `<small>${context}</small>` : ''}
+                </div>
+                <div class="error-dismiss">✕</div>
+            </div>
+        </div>
+    `;
+    
+    // Add to error container
+    const container = document.getElementById('error-container') || createErrorContainer();
+    container.insertAdjacentHTML('beforeend', errorHTML);
+    
+    // Auto-dismiss after duration
+    if (duration > 0) {
+        setTimeout(() => dismissError(errorId), duration);
+    }
+}
+
+// Create error container if it doesn't exist
+function createErrorContainer() {
+    let container = document.getElementById('error-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'error-container';
+        container.className = 'error-container';
+        document.body.appendChild(container);
+    }
+    return container;
+}
+
+// Dismiss specific error
+function dismissError(errorId) {
+    const errorElement = document.getElementById(`error-${errorId}`);
+    if (errorElement) {
+        errorElement.style.animation = 'slideOut 0.3s ease-in';
+        setTimeout(() => {
+            if (errorElement.parentNode) {
+                errorElement.parentNode.removeChild(errorElement);
+            }
+        }, 300);
+    }
+}
+
+// Enhanced connection status monitoring
+let connectionMonitor = {
+    isOnline: navigator.onLine,
+    lastHeartbeat: Date.now(),
+    heartbeatInterval: 30000, // 30 seconds
+    retryAttempts: 0,
+    maxRetries: 3
+};
+
+// Update connection status UI
+function updateConnectionStatus(isConnected, details = '') {
+    const statusElement = document.getElementById('status');
+    if (!statusElement) return;
+    
+    connectionMonitor.isOnline = isConnected;
+    
+    if (isConnected) {
+        statusElement.textContent = details || 'Connected';
+        statusElement.className = 'connected';
+        connectionMonitor.retryAttempts = 0;
+    } else {
+        statusElement.textContent = 'Connection Lost';
+        statusElement.className = 'disconnected';
+    }
+}
+
+// Heartbeat to monitor server connection
+async function heartbeat() {
+    try {
+        const response = await fetch(API_BASE + '/api/stats', {
+            method: 'GET',
+            timeout: 5000
+        });
+        
+        if (response.ok) {
+            connectionMonitor.lastHeartbeat = Date.now();
+            updateConnectionStatus(true);
+            connectionMonitor.retryAttempts = 0;
+        } else {
+            throw new Error(`Heartbeat failed: ${response.status}`);
+        }
+    } catch (error) {
+        console.warn('Heartbeat failed:', error);
+        connectionMonitor.retryAttempts++;
+        
+        if (connectionMonitor.retryAttempts >= connectionMonitor.maxRetries) {
+            updateConnectionStatus(false);
+        }
+    }
+}
+
+// Start connection monitoring
+function startConnectionMonitoring() {
+    // Initial heartbeat
+    heartbeat();
+    
+    // Regular heartbeat
+    setInterval(heartbeat, connectionMonitor.heartbeatInterval);
+    
+    // Listen for online/offline events
+    window.addEventListener('online', () => {
+        updateConnectionStatus(true, 'Back Online');
+        heartbeat(); // Immediate heartbeat when coming back online
+    });
+    
+    window.addEventListener('offline', () => {
+        updateConnectionStatus(false, 'Offline');
+    });
 }
 
 // Tab switching with lazy loading
@@ -3083,23 +3274,48 @@ function clearAlbumSearch() {
     loadAlbums();
 }
 
-// Save Album Search (placeholder for future implementation)
+// Enhanced Save Album Search with better UX
 function saveAlbumSearch() {
     if (Object.keys(currentSearchFilters).length === 0) {
-        alert('No active filters to save');
+        showToast('No active filters to save', 'warning');
         return;
     }
     
-    const searchName = prompt('Enter a name for this search:');
-    if (searchName) {
-        // Save to localStorage for demo purposes
+    const searchName = prompt('Enter a name for this search preset:');
+    if (!searchName) return;
+    
+    if (searchName.trim() === '') {
+        showToast('Please enter a valid name', 'error');
+        return;
+    }
+    
+    try {
+        // Save to localStorage with enhanced metadata
         const savedSearches = JSON.parse(localStorage.getItem('savedAlbumSearches') || '{}');
+        
+        // Check if name already exists
+        if (savedSearches[searchName]) {
+            if (!confirm(`A preset named "${searchName}" already exists. Overwrite it?`)) {
+                return;
+            }
+        }
+        
         savedSearches[searchName] = {
-            filters: currentSearchFilters,
-            created: new Date().toISOString()
+            filters: { ...currentSearchFilters },
+            created: new Date().toISOString(),
+            lastUsed: new Date().toISOString(),
+            useCount: savedSearches[searchName]?.useCount || 0
         };
+        
         localStorage.setItem('savedAlbumSearches', JSON.stringify(savedSearches));
-        alert(`Search "${searchName}" saved successfully!`);
+        showToast(`Search preset "${searchName}" saved successfully!`, 'success');
+        
+        // Track in search history
+        addToSearchHistory(currentSearchFilters, allAlbumsData.length);
+        
+    } catch (error) {
+        console.error('Error saving search preset:', error);
+        showToast('Failed to save search preset', 'error');
     }
 }
 
@@ -3154,6 +3370,376 @@ function removeFilter(filterKey) {
     // Re-perform search
     performAlbumSearch();
 }
+
+// ========== SEARCH PRESETS & HISTORY FUNCTIONS ==========
+
+// Show Search Presets Modal
+function showSearchPresets() {
+    const modal = document.getElementById('search-presets-modal');
+    const list = document.getElementById('search-presets-list');
+    
+    // Load saved presets
+    try {
+        const savedSearches = JSON.parse(localStorage.getItem('savedAlbumSearches') || '{}');
+        const presetKeys = Object.keys(savedSearches);
+        
+        if (presetKeys.length === 0) {
+            list.innerHTML = '<div class="no-presets">🔍 No saved search presets yet.<br>Create a search and click "💾 Save Search" to save it as a preset.</div>';
+        } else {
+            list.innerHTML = presetKeys
+                .sort((a, b) => new Date(savedSearches[b].lastUsed || savedSearches[b].created) - new Date(savedSearches[a].lastUsed || savedSearches[a].created))
+                .map(name => {
+                    const preset = savedSearches[name];
+                    const filterTags = Object.entries(preset.filters)
+                        .map(([key, value]) => `<span class="preset-filter-tag">${key}: ${value}</span>`)
+                        .join(' ');
+                    
+                    return `
+                        <div class="preset-item">
+                            <div class="preset-header">
+                                <div class="preset-name">${escapeHtml(name)}</div>
+                                <div class="preset-date">${formatRelativeTime(preset.created)}</div>
+                            </div>
+                            <div class="preset-filters">${filterTags}</div>
+                            <div class="preset-actions">
+                                <button class="preset-btn load" onclick="loadSearchPreset('${escapeHtml(name)}')">📁 Load</button>
+                                <button class="preset-btn delete" onclick="deleteSearchPreset('${escapeHtml(name)}')">🗑️ Delete</button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+        }
+        
+        modal.style.display = 'flex';
+    } catch (error) {
+        console.error('Error loading search presets:', error);
+        showToast('Failed to load search presets', 'error');
+    }
+}
+
+// Close Search Presets Modal
+function closeSearchPresets() {
+    document.getElementById('search-presets-modal').style.display = 'none';
+}
+
+// Load Search Preset
+function loadSearchPreset(name) {
+    try {
+        const savedSearches = JSON.parse(localStorage.getItem('savedAlbumSearches') || '{}');
+        const preset = savedSearches[name];
+        
+        if (!preset) {
+            showToast('Preset not found', 'error');
+            return;
+        }
+        
+        // Update use count and last used
+        preset.useCount = (preset.useCount || 0) + 1;
+        preset.lastUsed = new Date().toISOString();
+        localStorage.setItem('savedAlbumSearches', JSON.stringify(savedSearches));
+        
+        // Load filters into form
+        document.getElementById('search-album-title').value = preset.filters.album || '';
+        document.getElementById('search-artist-name').value = preset.filters.artist || '';
+        document.getElementById('search-label-name').value = preset.filters.label || '';
+        document.getElementById('search-year-from').value = preset.filters.yearFrom || '';
+        document.getElementById('search-year-to').value = preset.filters.yearTo || '';
+        document.getElementById('search-quality').value = preset.filters.quality || '';
+        document.getElementById('search-org-mode').value = preset.filters.orgMode || '';
+        
+        closeSearchPresets();
+        
+        // Perform search
+        performAlbumSearch();
+        
+        showToast(`Loaded preset: ${name}`, 'success');
+        
+    } catch (error) {
+        console.error('Error loading search preset:', error);
+        showToast('Failed to load search preset', 'error');
+    }
+}
+
+// Delete Search Preset
+function deleteSearchPreset(name) {
+    if (!confirm(`Are you sure you want to delete the preset "${name}"?`)) {
+        return;
+    }
+    
+    try {
+        const savedSearches = JSON.parse(localStorage.getItem('savedAlbumSearches') || '{}');
+        delete savedSearches[name];
+        localStorage.setItem('savedAlbumSearches', JSON.stringify(savedSearches));
+        
+        showToast(`Deleted preset: ${name}`, 'success');
+        
+        // Refresh the presets list
+        showSearchPresets();
+        
+    } catch (error) {
+        console.error('Error deleting search preset:', error);
+        showToast('Failed to delete search preset', 'error');
+    }
+}
+
+// Clear All Presets
+function clearAllPresets() {
+    const savedSearches = JSON.parse(localStorage.getItem('savedAlbumSearches') || '{}');
+    const count = Object.keys(savedSearches).length;
+    
+    if (count === 0) {
+        showToast('No presets to clear', 'info');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to delete all ${count} saved presets? This cannot be undone.`)) {
+        return;
+    }
+    
+    localStorage.removeItem('savedAlbumSearches');
+    showToast(`Cleared ${count} presets`, 'success');
+    showSearchPresets();
+}
+
+// Export Presets
+function exportPresets() {
+    try {
+        const savedSearches = JSON.parse(localStorage.getItem('savedAlbumSearches') || '{}');
+        
+        if (Object.keys(savedSearches).length === 0) {
+            showToast('No presets to export', 'info');
+            return;
+        }
+        
+        const data = JSON.stringify(savedSearches, null, 2);
+        const blob = new Blob([data], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `ordr-fm-search-presets-${new Date().toISOString().split('T')[0]}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        
+        showToast('Presets exported successfully', 'success');
+        
+    } catch (error) {
+        console.error('Error exporting presets:', error);
+        showToast('Failed to export presets', 'error');
+    }
+}
+
+// Import Presets
+function importPresets() {
+    const input = document.getElementById('import-presets');
+    const file = input.files[0];
+    
+    if (!file) return;
+    
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const importedData = JSON.parse(e.target.result);
+            const existing = JSON.parse(localStorage.getItem('savedAlbumSearches') || '{}');
+            
+            let importCount = 0;
+            let overwriteCount = 0;
+            
+            Object.entries(importedData).forEach(([name, preset]) => {
+                if (existing[name]) {
+                    overwriteCount++;
+                } else {
+                    importCount++;
+                }
+                existing[name] = preset;
+            });
+            
+            localStorage.setItem('savedAlbumSearches', JSON.stringify(existing));
+            
+            const message = `Imported ${importCount} new presets` + 
+                           (overwriteCount > 0 ? `, overwrote ${overwriteCount} existing` : '');
+            
+            showToast(message, 'success');
+            showSearchPresets();
+            
+        } catch (error) {
+            console.error('Error importing presets:', error);
+            showToast('Invalid preset file format', 'error');
+        }
+    };
+    reader.readAsText(file);
+    
+    // Clear input
+    input.value = '';
+}
+
+// ========== SEARCH HISTORY FUNCTIONS ==========
+
+// Add to Search History
+function addToSearchHistory(filters, resultCount) {
+    try {
+        const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+        
+        const entry = {
+            filters: { ...filters },
+            resultCount,
+            timestamp: new Date().toISOString(),
+            id: Date.now().toString()
+        };
+        
+        // Add to beginning, limit to 50 entries
+        history.unshift(entry);
+        history.splice(50);
+        
+        localStorage.setItem('searchHistory', JSON.stringify(history));
+    } catch (error) {
+        console.error('Error saving search history:', error);
+    }
+}
+
+// Show Search History Modal
+function showSearchHistory() {
+    const modal = document.getElementById('search-history-modal');
+    const list = document.getElementById('search-history-list');
+    
+    try {
+        const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+        
+        if (history.length === 0) {
+            list.innerHTML = '<div class="no-history">🕐 No search history yet.<br>Your recent searches will appear here.</div>';
+        } else {
+            list.innerHTML = history.map(entry => {
+                const filterTags = Object.entries(entry.filters)
+                    .map(([key, value]) => `<span class="history-filter-tag">${key}: ${value}</span>`)
+                    .join(' ');
+                
+                const query = Object.values(entry.filters).join(' ');
+                
+                return `
+                    <div class="history-item">
+                        <div class="history-header">
+                            <div class="history-query">${escapeHtml(query) || 'Complex search'}</div>
+                            <div class="history-date">${formatRelativeTime(entry.timestamp)}</div>
+                        </div>
+                        <div class="history-results">${filterTags}</div>
+                        <div class="history-results">Found ${entry.resultCount} results</div>
+                        <div class="history-actions">
+                            <button class="history-btn load" onclick="loadSearchFromHistory('${entry.id}')">🔄 Repeat</button>
+                            <button class="history-btn delete" onclick="deleteSearchFromHistory('${entry.id}')">🗑️ Remove</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        modal.style.display = 'flex';
+    } catch (error) {
+        console.error('Error loading search history:', error);
+        showToast('Failed to load search history', 'error');
+    }
+}
+
+// Close Search History Modal
+function closeSearchHistory() {
+    document.getElementById('search-history-modal').style.display = 'none';
+}
+
+// Load Search from History
+function loadSearchFromHistory(entryId) {
+    try {
+        const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+        const entry = history.find(h => h.id === entryId);
+        
+        if (!entry) {
+            showToast('History entry not found', 'error');
+            return;
+        }
+        
+        // Load filters into form
+        document.getElementById('search-album-title').value = entry.filters.album || '';
+        document.getElementById('search-artist-name').value = entry.filters.artist || '';
+        document.getElementById('search-label-name').value = entry.filters.label || '';
+        document.getElementById('search-year-from').value = entry.filters.yearFrom || '';
+        document.getElementById('search-year-to').value = entry.filters.yearTo || '';
+        document.getElementById('search-quality').value = entry.filters.quality || '';
+        document.getElementById('search-org-mode').value = entry.filters.orgMode || '';
+        
+        closeSearchHistory();
+        
+        // Perform search
+        performAlbumSearch();
+        
+        showToast('Repeated search from history', 'success');
+        
+    } catch (error) {
+        console.error('Error loading search from history:', error);
+        showToast('Failed to load search from history', 'error');
+    }
+}
+
+// Delete Search from History
+function deleteSearchFromHistory(entryId) {
+    try {
+        let history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+        history = history.filter(h => h.id !== entryId);
+        localStorage.setItem('searchHistory', JSON.stringify(history));
+        
+        showToast('Removed from history', 'success');
+        showSearchHistory();
+        
+    } catch (error) {
+        console.error('Error deleting search from history:', error);
+        showToast('Failed to remove from history', 'error');
+    }
+}
+
+// Clear Search History
+function clearSearchHistory() {
+    const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+    
+    if (history.length === 0) {
+        showToast('No history to clear', 'info');
+        return;
+    }
+    
+    if (!confirm(`Are you sure you want to clear all ${history.length} search history entries?`)) {
+        return;
+    }
+    
+    localStorage.removeItem('searchHistory');
+    showToast('Search history cleared', 'success');
+    showSearchHistory();
+}
+
+// Format Relative Time
+function formatRelativeTime(timestamp) {
+    const now = new Date();
+    const date = new Date(timestamp);
+    const diff = now - date;
+    
+    const seconds = Math.floor(diff / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) return `${days}d ago`;
+    if (hours > 0) return `${hours}h ago`;
+    if (minutes > 0) return `${minutes}m ago`;
+    return 'Just now';
+}
+
+// Enhance performAlbumSearch to track history
+const originalPerformAlbumSearch = performAlbumSearch;
+performAlbumSearch = async function() {
+    await originalPerformAlbumSearch();
+    
+    // Track in search history if we have filters
+    if (Object.keys(currentSearchFilters).length > 0) {
+        addToSearchHistory(currentSearchFilters, allAlbumsData.length);
+    }
+};
 
 // Sort Album Results
 function sortAlbumResults() {
@@ -3268,6 +3854,7 @@ function updateAlbumsTable() {
             <td>
                 <button class="action-btn secondary" onclick="event.stopPropagation(); viewAlbumDetails('${album.id || ''}')">📋 Details</button>
                 <button class="action-btn secondary" onclick="event.stopPropagation(); editAlbumMetadata('${album.id || ''}')">✏️ Edit</button>
+                <button class="action-btn secondary" onclick="event.stopPropagation(); openAudioPlayer('${album.id || ''}')">🎵 Play</button>
             </td>
         </tr>
     `).join('');
@@ -3324,8 +3911,193 @@ function viewAlbumDetails(albumId) {
 }
 
 // Edit Album Metadata - opens metadata editing interface
+// Edit album metadata function
 function editAlbumMetadata(albumId) {
     openMetadataEditor(albumId);
+}
+
+// Open metadata editor modal
+async function openMetadataEditor(albumId) {
+    try {
+        // Fetch album details
+        const albumData = await fetchAPI(`/api/albums/${albumId}`);
+        
+        // Create modal HTML
+        const modalHTML = `
+            <div id="metadata-editor-modal" class="modal-overlay" onclick="closeMetadataEditor(event)">
+                <div class="modal-content metadata-editor" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h2>Edit Album Metadata</h2>
+                        <button class="close-btn" onclick="closeMetadataEditor()">&times;</button>
+                    </div>
+                    
+                    <div class="modal-body">
+                        <form id="metadata-form" onsubmit="saveMetadata(event, ${albumId})">
+                            <div class="form-group">
+                                <label for="album-artist">Artist *</label>
+                                <input type="text" id="album-artist" name="album_artist" 
+                                       value="${albumData.album.album_artist || ''}" required>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="album-title">Album Title *</label>
+                                <input type="text" id="album-title" name="album_title" 
+                                       value="${albumData.album.album_title || ''}" required>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="album-year">Year</label>
+                                    <input type="number" id="album-year" name="album_year" 
+                                           value="${albumData.album.album_year || ''}" min="1900" max="2030">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="album-genre">Genre</label>
+                                    <input type="text" id="album-genre" name="genre" 
+                                           value="${albumData.album.genre || ''}">
+                                </div>
+                            </div>
+                            
+                            <div class="form-row">
+                                <div class="form-group">
+                                    <label for="album-label">Label</label>
+                                    <input type="text" id="album-label" name="label" 
+                                           value="${albumData.album.label || ''}">
+                                </div>
+                                
+                                <div class="form-group">
+                                    <label for="catalog-number">Catalog Number</label>
+                                    <input type="text" id="catalog-number" name="catalog_number" 
+                                           value="${albumData.album.catalog_number || ''}">
+                                </div>
+                            </div>
+                            
+                            ${albumData.tracks && albumData.tracks.length > 0 ? `
+                                <div class="tracks-section">
+                                    <h3>Tracks</h3>
+                                    <div id="tracks-list">
+                                        ${albumData.tracks.map(track => `
+                                            <div class="track-row" data-track-id="${track.id}">
+                                                <div class="track-number">
+                                                    <input type="number" value="${track.track_number || ''}" 
+                                                           onchange="updateTrackField(${track.id}, 'track_number', this.value)"
+                                                           min="1" max="99" style="width: 60px;">
+                                                </div>
+                                                <div class="track-title">
+                                                    <input type="text" value="${track.title || ''}" 
+                                                           onchange="updateTrackField(${track.id}, 'title', this.value)"
+                                                           placeholder="Track title">
+                                                </div>
+                                                <div class="track-artist">
+                                                    <input type="text" value="${track.artist || ''}" 
+                                                           onchange="updateTrackField(${track.id}, 'artist', this.value)"
+                                                           placeholder="Artist (optional)">
+                                                </div>
+                                            </div>
+                                        `).join('')}
+                                    </div>
+                                </div>
+                            ` : ''}
+                            
+                            <div class="form-actions">
+                                <button type="button" class="btn secondary" onclick="closeMetadataEditor()">Cancel</button>
+                                <button type="submit" class="btn primary">Save Changes</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Add modal to page
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        
+        // Show modal with animation
+        requestAnimationFrame(() => {
+            document.getElementById('metadata-editor-modal').classList.add('show');
+        });
+        
+    } catch (error) {
+        showError('Failed to load album metadata: ' + error.message);
+    }
+}
+
+// Close metadata editor
+function closeMetadataEditor(event) {
+    if (event && event.target !== event.currentTarget) return;
+    
+    const modal = document.getElementById('metadata-editor-modal');
+    if (modal) {
+        modal.classList.remove('show');
+        setTimeout(() => {
+            modal.remove();
+        }, 300);
+    }
+}
+
+// Save metadata changes
+async function saveMetadata(event, albumId) {
+    event.preventDefault();
+    
+    const form = event.target;
+    const formData = new FormData(form);
+    const data = Object.fromEntries(formData.entries());
+    
+    // Convert year to number if provided
+    if (data.album_year) {
+        data.album_year = parseInt(data.album_year);
+    }
+    
+    try {
+        showToast('Saving changes...', 'info');
+        
+        // Update album metadata
+        await fetchAPI(`/api/albums/${albumId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+        });
+        
+        showToast('Metadata updated successfully!', 'success');
+        closeMetadataEditor();
+        
+        // Refresh the albums display
+        await loadAlbums();
+        
+    } catch (error) {
+        showError('Failed to save metadata: ' + error.message);
+    }
+}
+
+// Update individual track field
+async function updateTrackField(trackId, field, value) {
+    try {
+        const data = { [field]: value };
+        
+        await fetchAPI(`/api/tracks/${trackId}`, {
+            method: 'PUT',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(data)
+        });
+        
+        // Visual feedback
+        const trackRow = document.querySelector(`[data-track-id="${trackId}"]`);
+        if (trackRow) {
+            trackRow.style.backgroundColor = '#10b98120';
+            setTimeout(() => {
+                trackRow.style.backgroundColor = '';
+            }, 1000);
+        }
+        
+    } catch (error) {
+        console.error('Failed to update track:', error);
+        showToast('Failed to update track', 'error');
+    }
 }
 
 // Mobile Gestures & Touch Enhancement System
@@ -5856,6 +6628,275 @@ document.addEventListener('DOMContentLoaded', () => {
     initAudioPlayer();
     addAccessibilityFeatures();
 });
+
+// Close audio player
+function closeAudioPlayer() {
+    const player = document.getElementById('audio-player');
+    if (player) {
+        player.classList.remove('show');
+        
+        // Stop current audio
+        if (audioPlayer.audio) {
+            audioPlayer.audio.pause();
+            audioPlayer.audio.currentTime = 0;
+        }
+    }
+}
+
+// Play track from album (integration function)
+async function playTrack(albumId, trackId, trackData) {
+    try {
+        // Show and prepare player
+        const player = document.getElementById('audio-player');
+        const trackTitle = document.getElementById('player-track-title');
+        const trackArtist = document.getElementById('player-track-artist');
+        
+        if (trackTitle && trackArtist) {
+            trackTitle.textContent = trackData.title || `Track ${trackData.track_number || '?'}`;
+            trackArtist.textContent = trackData.artist || trackData.album_artist || 'Unknown Artist';
+        }
+        
+        // Load audio
+        const audioUrl = `/api/audio/${albumId}/${trackId}`;
+        loadAndPlayAudio(audioUrl);
+        
+        // Show player
+        if (player) {
+            player.classList.add('show');
+        }
+        
+        showToast(`Playing: ${trackData.title || 'Track ' + (trackData.track_number || '?')}`, 'info');
+        
+    } catch (error) {
+        console.error('Error playing track:', error);
+        showError('Failed to play track: ' + error.message);
+    }
+}
+
+// Open audio player for an album
+async function openAudioPlayer(albumId) {
+    try {
+        // Fetch album and track data
+        const albumData = await fetchAPI(`/api/albums/${albumId}`);
+        
+        if (!albumData.tracks || albumData.tracks.length === 0) {
+            showToast('No tracks found for this album', 'info');
+            return;
+        }
+        
+        // Play first track
+        const firstTrack = albumData.tracks[0];
+        await playTrack(albumId, firstTrack.id, {
+            title: firstTrack.title,
+            artist: firstTrack.artist || albumData.album.album_artist,
+            album_artist: albumData.album.album_artist,
+            track_number: firstTrack.track_number
+        });
+        
+    } catch (error) {
+        console.error('Error opening audio player:', error);
+        showError('Failed to open audio player: ' + error.message);
+    }
+}
+
+// Add play buttons to track rows (if tracks exist in metadata editor)
+function addPlayButtons() {
+    const trackRows = document.querySelectorAll('.track-row');
+    trackRows.forEach(row => {
+        const trackId = row.dataset.trackId;
+        if (trackId && !row.querySelector('.play-track-btn')) {
+            const playBtn = document.createElement('button');
+            playBtn.className = 'play-track-btn';
+            playBtn.innerHTML = '▶️';
+            playBtn.style.cssText = 'background: none; border: none; cursor: pointer; font-size: 14px; padding: 4px;';
+            playBtn.onclick = (e) => {
+                e.stopPropagation();
+                // This would need album context - for now just show a message
+                showToast('Audio playback requires real audio files in the database', 'info');
+            };
+            row.insertBefore(playBtn, row.firstChild);
+        }
+    });
+}
+
+// === BACKUP MANAGEMENT FUNCTIONS ===
+
+// Refresh backup status
+async function refreshBackupStatus() {
+    try {
+        const status = await fetchAPI('/api/backup/status');
+        updateBackupUI(status);
+    } catch (error) {
+        console.error('Error fetching backup status:', error);
+        showError('Failed to fetch backup status: ' + error.message);
+    }
+}
+
+// Update backup UI with status data
+function updateBackupUI(status) {
+    const statusElement = document.getElementById('backup-status');
+    const statusText = document.getElementById('backup-status-text');
+    const spinner = document.querySelector('.spinner');
+    const startBtn = document.getElementById('start-backup-btn');
+    const backupInfo = document.getElementById('backup-info');
+    const backupDetails = document.getElementById('backup-details');
+    
+    // Update status indicator
+    statusElement.className = 'backup-status';
+    
+    if (status.isRunning) {
+        statusElement.classList.add('running');
+        statusText.textContent = `Backup is running (PID: ${status.currentPid})`;
+        spinner.style.display = 'block';
+        startBtn.disabled = true;
+        startBtn.textContent = '⏳ Backup Running';
+    } else {
+        spinner.style.display = 'none';
+        startBtn.disabled = false;
+        startBtn.textContent = '🚀 Start Backup';
+        
+        if (status.lastBackup) {
+            statusElement.classList.add('success');
+            statusText.textContent = `Last backup: ${new Date(status.lastBackup.modified).toLocaleString()}`;
+            
+            // Show backup details
+            backupInfo.style.display = 'block';
+            backupDetails.innerHTML = `
+                <div class="detail-row">
+                    <span class="detail-label">File:</span>
+                    <span class="detail-value">${status.lastBackup.filename}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Size:</span>
+                    <span class="detail-value">${formatBytes(status.lastBackup.size)}</span>
+                </div>
+                <div class="detail-row">
+                    <span class="detail-label">Modified:</span>
+                    <span class="detail-value">${new Date(status.lastBackup.modified).toLocaleString()}</span>
+                </div>
+            `;
+        } else {
+            statusText.textContent = 'No previous backups found';
+        }
+    }
+}
+
+// Start backup process
+async function startBackup() {
+    try {
+        showToast('Starting backup...', 'info');
+        
+        const response = await fetchAPI('/api/backup/start', {
+            method: 'POST'
+        });
+        
+        showToast(response.message, 'success');
+        
+        // Refresh status after a delay
+        setTimeout(refreshBackupStatus, 2000);
+        
+    } catch (error) {
+        console.error('Error starting backup:', error);
+        showError('Failed to start backup: ' + error.message);
+    }
+}
+
+// View backup logs
+async function viewBackupLogs() {
+    try {
+        const status = await fetchAPI('/api/backup/status');
+        const logsContainer = document.getElementById('backup-logs');
+        const logsList = document.getElementById('backup-log-list');
+        
+        if (!status.recentLogs || status.recentLogs.length === 0) {
+            showToast('No backup logs found', 'info');
+            return;
+        }
+        
+        // Show logs section
+        logsContainer.style.display = 'block';
+        
+        // Populate logs list
+        logsList.innerHTML = status.recentLogs.map(log => `
+            <div class="log-item" onclick="viewLogContent('${log.filename}')">
+                <div>
+                    <div class="log-filename">${log.filename}</div>
+                    <div class="log-date">${new Date(log.modified).toLocaleString()}</div>
+                </div>
+                <div class="log-size">${formatBytes(log.size)}</div>
+            </div>
+        `).join('');
+        
+    } catch (error) {
+        console.error('Error fetching backup logs:', error);
+        showError('Failed to fetch backup logs: ' + error.message);
+    }
+}
+
+// View log content
+async function viewLogContent(filename) {
+    try {
+        const logData = await fetchAPI(`/api/backup/logs/${filename}`);
+        
+        // Create modal to show log content
+        const modalHTML = `
+            <div class="modal-overlay" onclick="closeLogModal(event)">
+                <div class="modal-content log-viewer" onclick="event.stopPropagation()">
+                    <div class="modal-header">
+                        <h2>Backup Log: ${filename}</h2>
+                        <button class="close-btn" onclick="closeLogModal()">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        ${logData.isPartial ? '<p><strong>Note:</strong> Showing last 500 lines</p>' : ''}
+                        <pre class="log-content">${logData.content}</pre>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Add modal to page
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+        
+        // Show modal
+        requestAnimationFrame(() => {
+            document.querySelector('.modal-overlay').classList.add('show');
+        });
+        
+    } catch (error) {
+        console.error('Error fetching log content:', error);
+        showError('Failed to fetch log content: ' + error.message);
+    }
+}
+
+// Close log modal
+function closeLogModal(event) {
+    if (event && event.target !== event.currentTarget) return;
+    
+    const modal = document.querySelector('.modal-overlay');
+    if (modal) {
+        modal.classList.remove('show');
+        setTimeout(() => {
+            modal.remove();
+        }, 300);
+    }
+}
+
+// Format bytes helper function
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Auto-refresh backup status when on actions tab
+setInterval(() => {
+    const activeTab = document.querySelector('.nav-item.active');
+    if (activeTab && activeTab.textContent.includes('Actions')) {
+        refreshBackupStatus();
+    }
+}, 30000); // Refresh every 30 seconds
 
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', init);

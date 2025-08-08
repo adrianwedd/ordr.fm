@@ -6,10 +6,12 @@ source "$SCRIPT_DIR/security_patch.sh" || { echo "ERROR: Failed to load security
 # Source Google Drive backup functions
 if [[ -f "$SCRIPT_DIR/gdrive_backup.sh" ]]; then
     source "$SCRIPT_DIR/gdrive_backup.sh"
+fi
 
 # Source optimized alias resolution
 if [[ -f "$SCRIPT_DIR/alias_optimization.sh" ]]; then
     source "$SCRIPT_DIR/alias_optimization.sh"
+fi
 
 # Source alias validation
 if [[ -f "$SCRIPT_DIR/alias_validation.sh" ]]; then
@@ -36,22 +38,32 @@ if [[ -f "$SCRIPT_DIR/lib/duplicate_detection.sh" ]]; then
 else
     echo "WARNING: Duplicate detection module not found at $SCRIPT_DIR/lib/duplicate_detection.sh" >&2
 fi
+
+# Initialize alias system 
+init_alias_system() {
     # Parse alias groups once at startup for performance
-    parse_alias_groups_once
+    if command -v parse_alias_groups_once >/dev/null 2>&1; then
+        parse_alias_groups_once
+    fi
+    
     # Validate alias configuration
     if [[ "$GROUP_ARTIST_ALIASES" == "1" ]] && [[ -n "$ARTIST_ALIAS_GROUPS" ]]; then
-        if ! validate_artist_aliases "$ARTIST_ALIAS_GROUPS" "0" > /dev/null 2>&1; then
-            Warning "Artist alias configuration has errors. Run: ./alias_validation.sh validate"
-            if [[ "$STRICT_MODE" == "1" ]]; then
-                Error "Exiting due to invalid alias configuration (strict mode)"
-                exit 1
+        if command -v validate_artist_aliases >/dev/null 2>&1; then
+            if ! validate_artist_aliases "$ARTIST_ALIAS_GROUPS" "0" > /dev/null 2>&1; then
+                echo "WARNING: Artist alias configuration has errors. Run: ./alias_validation.sh validate" >&2
+                if [[ "$STRICT_MODE" == "1" ]]; then
+                    echo "ERROR: Exiting due to invalid alias configuration (strict mode)" >&2
+                    exit 1
+                fi
             fi
         fi
     fi
-    [[ "$VERBOSE" == "1" ]] && show_alias_cache_stats
-fi
-    [[ "$ENABLE_GDRIVE_BACKUP" == "1" ]] && check_rclone && Info "Google Drive backup integration loaded"
-fi
+    
+    # Show alias cache stats in verbose mode
+    if [[ "$VERBOSE" == "1" ]] && command -v show_alias_cache_stats >/dev/null 2>&1; then
+        show_alias_cache_stats
+    fi
+}
 
 set -e
 
@@ -2848,18 +2860,34 @@ parse_arguments() {
     while [[ "$#" -gt 0 ]]; do
         case "$1" in
             -s|--source)
+                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
+                    echo "ERROR: --source requires a directory path" >&2
+                    exit 1
+                fi
                 SOURCE_DIR="$2"
                 shift 2
                 ;;
             -d|--destination)
+                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
+                    echo "ERROR: --destination requires a directory path" >&2
+                    exit 1
+                fi
                 DEST_DIR="$2"
                 shift 2
                 ;;
             -u|--unsorted)
+                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
+                    echo "ERROR: --unsorted requires a directory path" >&2
+                    exit 1
+                fi
                 UNSORTED_DIR_BASE="$2"
                 shift 2
                 ;;
             -l|--log-file)
+                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
+                    echo "ERROR: --log-file requires a file path" >&2
+                    exit 1
+                fi
                 LOG_FILE="$2"
                 shift 2
                 ;;
@@ -2882,14 +2910,26 @@ parse_arguments() {
                 shift
                 ;;
             --since)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --since requires a date (YYYY-MM-DD)" >&2
+                    exit 1
+                fi
                 SINCE_DATE="$2"
                 shift 2
                 ;;
             --state-db)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --state-db requires a database file path" >&2
+                    exit 1
+                fi
                 STATE_DB="$2"
                 shift 2
                 ;;
             --force-reprocess)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --force-reprocess requires a directory path" >&2
+                    exit 1
+                fi
                 FORCE_REPROCESS_DIR="$2"
                 shift 2
                 ;;
@@ -2898,6 +2938,14 @@ parse_arguments() {
                 shift
                 ;;
             --parallel-workers)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --parallel-workers requires a number (1-16)" >&2
+                    exit 1
+                fi
+                if ! [[ "$2" =~ ^[0-9]+$ ]] || [[ "$2" -lt 1 ]] || [[ "$2" -gt 16 ]]; then
+                    echo "ERROR: --parallel-workers must be a number between 1 and 16" >&2
+                    exit 1
+                fi
                 PARALLEL_WORKERS="$2"
                 shift 2
                 ;;
@@ -2910,6 +2958,10 @@ parse_arguments() {
                 shift
                 ;;
             --duplicates-db)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --duplicates-db requires a database file path" >&2
+                    exit 1
+                fi
                 DUPLICATES_DB="$2"
                 shift 2
                 ;;
@@ -2975,28 +3027,61 @@ parse_arguments() {
                 shift
                 ;;
             --discogs-token)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --discogs-token requires a Discogs API token" >&2
+                    exit 1
+                fi
                 DISCOGS_USER_TOKEN="$2"
                 DISCOGS_ENABLED=1
                 shift 2
                 ;;
             --discogs-key)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --discogs-key requires a Discogs consumer key" >&2
+                    exit 1
+                fi
                 DISCOGS_CONSUMER_KEY="$2"
                 DISCOGS_ENABLED=1
                 shift 2
                 ;;
             --discogs-secret)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --discogs-secret requires a Discogs consumer secret" >&2
+                    exit 1
+                fi
                 DISCOGS_CONSUMER_SECRET="$2"
                 shift 2
                 ;;
             --discogs-cache-dir)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --discogs-cache-dir requires a directory path" >&2
+                    exit 1
+                fi
                 DISCOGS_CACHE_DIR="$2"
                 shift 2
                 ;;
             --discogs-confidence)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --discogs-confidence requires a number (0.0-1.0)" >&2
+                    exit 1
+                fi
+                # Validate confidence threshold is a valid number between 0 and 1
+                if ! [[ "$2" =~ ^[0-1](\.[0-9]+)?$ ]]; then
+                    echo "ERROR: --discogs-confidence must be a number between 0.0 and 1.0" >&2
+                    exit 1
+                fi
                 DISCOGS_CONFIDENCE_THRESHOLD="$2"
                 shift 2
                 ;;
             --organization-mode)
+                if [[ -z "$2" ]]; then
+                    echo "ERROR: --organization-mode requires a mode (artist, label, hybrid)" >&2
+                    exit 1
+                fi
+                if [[ "$2" != "artist" && "$2" != "label" && "$2" != "hybrid" ]]; then
+                    echo "ERROR: --organization-mode must be 'artist', 'label', or 'hybrid'" >&2
+                    exit 1
+                fi
                 ORGANIZATION_MODE="$2"
                 shift 2
                 ;;
@@ -3039,13 +3124,12 @@ parse_arguments() {
                 exit 0
                 ;;
             --undo)
-                if [[ -n "$2" ]]; then
-                    undo_move_operation "$2"
-                else
-                    echo "Error: --undo requires an operation ID"
-                    echo "Use --list-operations to see available operations"
+                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
+                    echo "ERROR: --undo requires an operation ID" >&2
+                    echo "Use --list-operations to see available operations" >&2
                     exit 1
                 fi
+                undo_move_operation "$2"
                 exit $?
                 ;;
             --undo-last)
@@ -3190,6 +3274,9 @@ main() {
 
     # Initialize log file (clear previous content for new run)
     > "$LOG_FILE"
+    
+    # Initialize alias system after configuration is loaded
+    init_alias_system
     log $LOG_INFO "--- ordr.fm Script Started ---"
     log $LOG_INFO "Configuration:"
     log $LOG_INFO "  Source Directory: $SOURCE_DIR"

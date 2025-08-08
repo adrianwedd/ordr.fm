@@ -10,6 +10,54 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
+// Performance monitoring and caching
+const cache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const CACHE_MAX_SIZE = 1000;
+
+// Cache helper functions
+function getCacheKey(query, params) {
+    return `${query}|${JSON.stringify(params || [])}`;
+}
+
+function setCache(key, data) {
+    if (cache.size >= CACHE_MAX_SIZE) {
+        // Remove oldest entries
+        const firstKey = cache.keys().next().value;
+        cache.delete(firstKey);
+    }
+    
+    cache.set(key, {
+        data,
+        timestamp: Date.now()
+    });
+}
+
+function getCache(key) {
+    const cached = cache.get(key);
+    if (!cached) return null;
+    
+    if (Date.now() - cached.timestamp > CACHE_TTL) {
+        cache.delete(key);
+        return null;
+    }
+    
+    return cached.data;
+}
+
+function clearCache(pattern = null) {
+    if (!pattern) {
+        cache.clear();
+        return;
+    }
+    
+    for (const key of cache.keys()) {
+        if (key.includes(pattern)) {
+            cache.delete(key);
+        }
+    }
+}
+
 // Production optimizations
 if (NODE_ENV === 'production') {
     app.set('trust proxy', 1); // Trust reverse proxy
@@ -226,68 +274,101 @@ function getDb() {
 // API Routes
 
 // Get overall statistics
+// Optimized stats endpoint with caching
 app.get('/api/stats', (req, res) => {
-    const db = getDb();
-    const stats = {};
+    const cacheKey = 'stats:all';
+    const cached = getCache(cacheKey);
     
-    // Get album count
-    db.get('SELECT COUNT(*) as count FROM albums', (err, row) => {
+    if (cached) {
+        return res.json(cached);
+    }
+    
+    const db = getDb();
+    
+    // Use a single optimized query instead of multiple nested queries
+    const query = `
+        SELECT 
+            (SELECT COUNT(*) FROM albums) as totalAlbums,
+            (SELECT COUNT(*) FROM tracks) as totalTracks,
+            (SELECT COUNT(DISTINCT album_artist) FROM albums WHERE album_artist IS NOT NULL) as totalArtists,
+            (SELECT COUNT(DISTINCT label) FROM albums WHERE label IS NOT NULL) as totalLabels
+    `;
+    
+    db.get(query, (err, mainStats) => {
         if (err) {
-            console.error('Error getting album count:', err);
+            console.error('Error getting stats:', err);
+            db.close();
             return res.status(500).json({ error: 'Database error' });
         }
-        stats.totalAlbums = row ? row.count : 0;
         
-        // Get track count
-        db.get('SELECT COUNT(*) as count FROM tracks', (err, row) => {
-            stats.totalTracks = row ? row.count : 0;
+        // Get quality distribution
+        db.all('SELECT quality_type as quality, COUNT(*) as count FROM albums GROUP BY quality_type', (err, qualityRows) => {
+            if (err) {
+                console.error('Error getting quality distribution:', err);
+                db.close();
+                return res.status(500).json({ error: 'Database error' });
+            }
             
-            // Get artist count (unique)
-            db.get('SELECT COUNT(DISTINCT artist) as count FROM albums WHERE artist IS NOT NULL', (err, row) => {
-                stats.totalArtists = row ? row.count : 0;
+            // Get organization mode distribution
+            db.all('SELECT organization_mode, COUNT(*) as count FROM albums GROUP BY organization_mode', (err, modeRows) => {
+                db.close();
                 
-                // Get label count
-                db.get('SELECT COUNT(DISTINCT label) as count FROM albums WHERE label IS NOT NULL', (err, row) => {
-                    stats.totalLabels = row ? row.count : 0;
-                    
-                    // Get quality distribution
-                    db.all('SELECT quality, COUNT(*) as count FROM albums GROUP BY quality', (err, rows) => {
-                        stats.qualityDistribution = {};
-                        if (rows) {
-                            rows.forEach(row => {
-                                stats.qualityDistribution[row.quality || 'Unknown'] = row.count;
-                            });
-                        }
-                        
-                        // Get organization mode distribution
-                        db.all('SELECT organization_mode, COUNT(*) as count FROM albums GROUP BY organization_mode', (err, rows) => {
-                            stats.organizationModes = {};
-                            if (rows) {
-                                rows.forEach(row => {
-                                    stats.organizationModes[row.organization_mode || 'artist'] = row.count;
-                                });
-                            }
-                            
-                            db.close();
-                            res.json(stats);
-                        });
+                if (err) {
+                    console.error('Error getting organization modes:', err);
+                    return res.status(500).json({ error: 'Database error' });
+                }
+                
+                // Build response object
+                const stats = {
+                    totalAlbums: mainStats?.totalAlbums || 0,
+                    totalTracks: mainStats?.totalTracks || 0,
+                    totalArtists: mainStats?.totalArtists || 0,
+                    totalLabels: mainStats?.totalLabels || 0,
+                    qualityDistribution: {},
+                    organizationModes: {}
+                };
+                
+                // Process quality distribution
+                if (qualityRows) {
+                    qualityRows.forEach(row => {
+                        stats.qualityDistribution[row.quality || 'Unknown'] = row.count;
                     });
-                });
+                }
+                
+                // Process organization modes
+                if (modeRows) {
+                    modeRows.forEach(row => {
+                        stats.organizationModes[row.organization_mode || 'artist'] = row.count;
+                    });
+                }
+                
+                // Cache the results
+                setCache(cacheKey, stats);
+                
+                res.json(stats);
             });
         });
     });
 });
 
-// Get albums with filtering
+// Get albums with filtering (optimized with caching)
 app.get('/api/albums', (req, res) => {
-    const db = getDb();
     const { limit = 100, offset = 0, artist, label, quality, mode } = req.query;
     
+    // Create cache key based on query parameters
+    const cacheKey = getCacheKey('albums', { limit, offset, artist, label, quality, mode });
+    const cached = getCache(cacheKey);
+    
+    if (cached) {
+        return res.json(cached);
+    }
+    
+    const db = getDb();
     let query = 'SELECT * FROM albums WHERE 1=1';
     const params = [];
     
     if (artist) {
-        query += ' AND artist LIKE ?';
+        query += ' AND album_artist LIKE ?';
         params.push(`%${artist}%`);
     }
     if (label) {
@@ -295,7 +376,7 @@ app.get('/api/albums', (req, res) => {
         params.push(`%${label}%`);
     }
     if (quality) {
-        query += ' AND quality = ?';
+        query += ' AND quality_type = ?';
         params.push(quality);
     }
     if (mode) {
@@ -307,19 +388,34 @@ app.get('/api/albums', (req, res) => {
     params.push(parseInt(limit), parseInt(offset));
     
     db.all(query, params, (err, rows) => {
+        db.close();
+        
         if (err) {
             console.error('Error fetching albums:', err);
-            db.close();
             return res.status(500).json({ error: 'Database error' });
         }
         
-        db.close();
-        res.json(rows || []);
+        const result = rows || [];
+        
+        // Cache the results (shorter TTL for paginated results)
+        if (!offset || offset === 0) {
+            setCache(cacheKey, result);
+        }
+        
+        res.json(result);
     });
 });
 
 // Get artist data including aliases
+// Get all artists (optimized with caching)
 app.get('/api/artists', (req, res) => {
+    const cacheKey = 'artists:all';
+    const cached = getCache(cacheKey);
+    
+    if (cached) {
+        return res.json(cached);
+    }
+    
     const db = getDb();
     
     // Get all artists with their release counts
@@ -345,16 +441,33 @@ app.get('/api/artists', (req, res) => {
         db.all('SELECT * FROM artist_aliases', (err, aliases) => {
             db.close();
             
-            res.json({
+            if (err) {
+                console.error('Error fetching artist aliases:', err);
+                return res.status(500).json({ error: 'Database error' });
+            }
+            
+            const result = {
                 artists: artists || [],
                 aliases: aliases || []
-            });
+            };
+            
+            // Cache the results
+            setCache(cacheKey, result);
+            
+            res.json(result);
         });
     });
 });
 
-// Get label statistics
+// Get label statistics (optimized with caching)
 app.get('/api/labels', (req, res) => {
+    const cacheKey = 'labels:all';
+    const cached = getCache(cacheKey);
+    
+    if (cached) {
+        return res.json(cached);
+    }
+    
     const db = getDb();
     
     const query = `
@@ -378,7 +491,12 @@ app.get('/api/labels', (req, res) => {
             return res.status(500).json({ error: 'Database error' });
         }
         
-        res.json(rows || []);
+        const result = rows || [];
+        
+        // Cache the results
+        setCache(cacheKey, result);
+        
+        res.json(result);
     });
 });
 
@@ -446,6 +564,385 @@ app.get('/api/version', (req, res) => {
         uptime: process.uptime(),
         timestamp: new Date().toISOString()
     });
+});
+
+// Metadata editing endpoints
+// Get single album details for editing
+app.get('/api/albums/:id', (req, res) => {
+    const db = getDb();
+    const albumId = parseInt(req.params.id);
+    
+    if (isNaN(albumId)) {
+        return res.status(400).json({ error: 'Invalid album ID' });
+    }
+    
+    db.get('SELECT * FROM albums WHERE id = ?', [albumId], (err, row) => {
+        if (err) {
+            console.error('Error fetching album:', err);
+            db.close();
+            return res.status(500).json({ error: 'Database error' });
+        }
+        
+        if (!row) {
+            db.close();
+            return res.status(404).json({ error: 'Album not found' });
+        }
+        
+        // Also get tracks for this album
+        db.all('SELECT * FROM tracks WHERE album_id = ? ORDER BY disc_number, track_number', [albumId], (trackErr, tracks) => {
+            db.close();
+            
+            if (trackErr) {
+                console.error('Error fetching tracks:', trackErr);
+                return res.status(500).json({ error: 'Database error' });
+            }
+            
+            res.json({ 
+                album: row, 
+                tracks: tracks || [] 
+            });
+        });
+    });
+});
+
+// Update album metadata
+app.put('/api/albums/:id', (req, res) => {
+    const db = getDb();
+    const albumId = parseInt(req.params.id);
+    const { album_artist, album_title, album_year, label, catalog_number, genre } = req.body;
+    
+    if (isNaN(albumId)) {
+        return res.status(400).json({ error: 'Invalid album ID' });
+    }
+    
+    // Validate required fields
+    if (!album_artist || !album_title) {
+        return res.status(400).json({ error: 'Album artist and title are required' });
+    }
+    
+    const query = `
+        UPDATE albums 
+        SET album_artist = ?, album_title = ?, album_year = ?, 
+            label = ?, catalog_number = ?, genre = ?
+        WHERE id = ?
+    `;
+    
+    db.run(query, [album_artist, album_title, album_year || null, label || null, 
+                   catalog_number || null, genre || null, albumId], function(err) {
+        if (err) {
+            console.error('Error updating album:', err);
+            db.close();
+            return res.status(500).json({ error: 'Database error' });
+        }
+        
+        if (this.changes === 0) {
+            db.close();
+            return res.status(404).json({ error: 'Album not found' });
+        }
+        
+        // Get the updated album data
+        db.get('SELECT * FROM albums WHERE id = ?', [albumId], (fetchErr, row) => {
+            db.close();
+            
+            if (fetchErr) {
+                console.error('Error fetching updated album:', fetchErr);
+                return res.status(500).json({ error: 'Database error' });
+            }
+            
+            // Clear relevant caches when album data changes
+            clearCache('stats');
+            clearCache('albums');
+            clearCache('artists');
+            clearCache('labels');
+            
+            res.json(row);
+        });
+    });
+});
+
+// Update track metadata
+app.put('/api/tracks/:id', (req, res) => {
+    const db = getDb();
+    const trackId = parseInt(req.params.id);
+    const { title, artist, track_number, disc_number } = req.body;
+    
+    if (isNaN(trackId)) {
+        return res.status(400).json({ error: 'Invalid track ID' });
+    }
+    
+    const query = `
+        UPDATE tracks 
+        SET title = ?, artist = ?, track_number = ?, disc_number = ?
+        WHERE id = ?
+    `;
+    
+    db.run(query, [title || null, artist || null, track_number || null, 
+                   disc_number || null, trackId], function(err) {
+        if (err) {
+            console.error('Error updating track:', err);
+            db.close();
+            return res.status(500).json({ error: 'Database error' });
+        }
+        
+        if (this.changes === 0) {
+            db.close();
+            return res.status(404).json({ error: 'Track not found' });
+        }
+        
+        // Get the updated track data
+        db.get('SELECT * FROM tracks WHERE id = ?', [trackId], (fetchErr, row) => {
+            db.close();
+            
+            if (fetchErr) {
+                console.error('Error fetching updated track:', fetchErr);
+                return res.status(500).json({ error: 'Database error' });
+            }
+            
+            res.json(row);
+        });
+    });
+});
+
+// Audio playback endpoints
+// Serve audio files (with range support for streaming)
+app.get('/api/audio/:albumId/:trackId', (req, res) => {
+    const db = getDb();
+    const albumId = parseInt(req.params.albumId);
+    const trackId = parseInt(req.params.trackId);
+    
+    if (isNaN(albumId) || isNaN(trackId)) {
+        return res.status(400).json({ error: 'Invalid album or track ID' });
+    }
+    
+    // Get track file path
+    db.get(`
+        SELECT t.file_path, a.directory_path 
+        FROM tracks t 
+        JOIN albums a ON t.album_id = a.id 
+        WHERE t.id = ? AND a.id = ?
+    `, [trackId, albumId], (err, row) => {
+        db.close();
+        
+        if (err) {
+            console.error('Error fetching track:', err);
+            return res.status(500).json({ error: 'Database error' });
+        }
+        
+        if (!row) {
+            return res.status(404).json({ error: 'Track not found' });
+        }
+        
+        const filePath = row.file_path;
+        
+        // Check if file exists
+        const fs = require('fs');
+        if (!fs.existsSync(filePath)) {
+            return res.status(404).json({ error: 'Audio file not found on disk' });
+        }
+        
+        const stat = fs.statSync(filePath);
+        const fileSize = stat.size;
+        const range = req.headers.range;
+        
+        // Set content type based on file extension
+        const path = require('path');
+        const ext = path.extname(filePath).toLowerCase();
+        const contentTypes = {
+            '.mp3': 'audio/mpeg',
+            '.m4a': 'audio/mp4',
+            '.aac': 'audio/aac',
+            '.flac': 'audio/flac',
+            '.wav': 'audio/wav',
+            '.ogg': 'audio/ogg'
+        };
+        const contentType = contentTypes[ext] || 'audio/mpeg';
+        
+        if (range) {
+            // Handle range requests for streaming
+            const parts = range.replace(/bytes=/, "").split("-");
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+            const chunksize = (end - start) + 1;
+            const file = fs.createReadStream(filePath, { start, end });
+            const head = {
+                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+                'Accept-Ranges': 'bytes',
+                'Content-Length': chunksize,
+                'Content-Type': contentType,
+            };
+            res.writeHead(206, head);
+            file.pipe(res);
+        } else {
+            // Send entire file
+            const head = {
+                'Content-Length': fileSize,
+                'Content-Type': contentType,
+            };
+            res.writeHead(200, head);
+            fs.createReadStream(filePath).pipe(res);
+        }
+    });
+});
+
+// Get waveform data for a track (placeholder - would need audio analysis)
+app.get('/api/audio/:albumId/:trackId/waveform', (req, res) => {
+    // For now, return mock waveform data
+    // In production, this would analyze the audio file and return actual waveform data
+    const mockWaveform = Array.from({ length: 200 }, (_, i) => Math.sin(i / 10) * 0.5 + Math.random() * 0.5);
+    
+    res.json({
+        duration: 240, // 4 minutes in seconds
+        sampleRate: 44100,
+        waveform: mockWaveform
+    });
+});
+
+// Backup management endpoints
+// Get backup status and recent logs
+app.get('/api/backup/status', (req, res) => {
+    const fs = require('fs');
+    const path = require('path');
+    
+    try {
+        // Check for running backup process
+        const lockFile = '/tmp/ordr_fm_backup_gdrive.lock';
+        const pidFile = '/tmp/ordr_fm_backup_gdrive.pid';
+        
+        let isRunning = false;
+        let currentPid = null;
+        
+        if (fs.existsSync(lockFile) && fs.existsSync(pidFile)) {
+            const pid = fs.readFileSync(pidFile, 'utf8').trim();
+            try {
+                process.kill(pid, 0); // Test if process is alive
+                isRunning = true;
+                currentPid = pid;
+            } catch (e) {
+                // Process is dead, cleanup stale files
+                try {
+                    fs.unlinkSync(lockFile);
+                    fs.unlinkSync(pidFile);
+                } catch (cleanupErr) {
+                    console.warn('Failed to cleanup stale lock files:', cleanupErr);
+                }
+            }
+        }
+        
+        // Get recent backup logs
+        const backupLogPattern = /^backup_gdrive_\d{8}_\d{6}\.log$/;
+        const logFiles = fs.readdirSync('../')
+            .filter(file => backupLogPattern.test(file))
+            .map(file => {
+                const stat = fs.statSync(path.join('..', file));
+                return {
+                    filename: file,
+                    modified: stat.mtime,
+                    size: stat.size
+                };
+            })
+            .sort((a, b) => b.modified - a.modified)
+            .slice(0, 10);
+        
+        // Get last backup info if available
+        let lastBackupInfo = null;
+        if (logFiles.length > 0) {
+            const lastLogPath = path.join('..', logFiles[0].filename);
+            try {
+                const lastLogLines = fs.readFileSync(lastLogPath, 'utf8').split('\n').slice(-20);
+                lastBackupInfo = {
+                    filename: logFiles[0].filename,
+                    modified: logFiles[0].modified,
+                    size: logFiles[0].size,
+                    recentLines: lastLogLines.filter(line => line.trim())
+                };
+            } catch (logErr) {
+                console.warn('Failed to read last backup log:', logErr);
+            }
+        }
+        
+        res.json({
+            isRunning,
+            currentPid,
+            recentLogs: logFiles,
+            lastBackup: lastBackupInfo
+        });
+        
+    } catch (error) {
+        console.error('Error getting backup status:', error);
+        res.status(500).json({ error: 'Failed to get backup status' });
+    }
+});
+
+// Start backup process
+app.post('/api/backup/start', (req, res) => {
+    const { spawn } = require('child_process');
+    const path = require('path');
+    
+    try {
+        // Check if backup is already running
+        const fs = require('fs');
+        const lockFile = '/tmp/ordr_fm_backup_gdrive.lock';
+        
+        if (fs.existsSync(lockFile)) {
+            return res.status(409).json({ error: 'Backup already running' });
+        }
+        
+        // Start backup process
+        const backupScript = path.join('..', 'backup_to_gdrive.sh');
+        const backupProcess = spawn('bash', [backupScript], {
+            detached: true,
+            stdio: 'ignore'
+        });
+        
+        backupProcess.unref(); // Allow parent process to exit
+        
+        res.json({ 
+            message: 'Backup started successfully',
+            pid: backupProcess.pid
+        });
+        
+    } catch (error) {
+        console.error('Error starting backup:', error);
+        res.status(500).json({ error: 'Failed to start backup: ' + error.message });
+    }
+});
+
+// Get backup log content
+app.get('/api/backup/logs/:filename', (req, res) => {
+    const fs = require('fs');
+    const path = require('path');
+    
+    const filename = req.params.filename;
+    
+    // Validate filename for security
+    if (!/^backup_gdrive_\d{8}_\d{6}\.log$/.test(filename)) {
+        return res.status(400).json({ error: 'Invalid log filename' });
+    }
+    
+    try {
+        const logPath = path.join('..', filename);
+        
+        if (!fs.existsSync(logPath)) {
+            return res.status(404).json({ error: 'Log file not found' });
+        }
+        
+        const content = fs.readFileSync(logPath, 'utf8');
+        const lines = content.split('\n');
+        
+        // Get last 500 lines to avoid overwhelming the browser
+        const recentLines = lines.slice(-500);
+        
+        res.json({
+            filename,
+            totalLines: lines.length,
+            content: recentLines.join('\n'),
+            isPartial: lines.length > 500
+        });
+        
+    } catch (error) {
+        console.error('Error reading backup log:', error);
+        res.status(500).json({ error: 'Failed to read backup log' });
+    }
 });
 
 // Discogs enrichment endpoints
@@ -2642,6 +3139,12 @@ app.post('/api/metadata/save', (req, res) => {
                                             return res.status(500).json({ error: 'Failed to save changes' });
                                         }
                                         
+                                        // Clear relevant caches after metadata update
+                                        clearCache('stats');
+                                        clearCache('albums');
+                                        clearCache('artists');
+                                        clearCache('labels');
+                                        
                                         // Broadcast metadata update
                                         broadcast({
                                             type: 'metadata_updated',
@@ -2688,6 +3191,12 @@ app.post('/api/metadata/save', (req, res) => {
                                 console.error('Commit error:', commitErr);
                                 return res.status(500).json({ error: 'Failed to save changes' });
                             }
+                            
+                            // Clear relevant caches after album metadata update
+                            clearCache('stats');
+                            clearCache('albums');
+                            clearCache('artists');
+                            clearCache('labels');
                             
                             broadcast({
                                 type: 'metadata_updated',
