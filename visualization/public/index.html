@@ -807,6 +807,15 @@
             background: #5a67d8;
         }
         
+        .audio-control-btn.loading {
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+        }
+        
         .audio-progress-container {
             flex: 1;
             display: flex;
@@ -3003,6 +3012,45 @@
                 <div class="audio-progress-bar" id="audio-progress-bar" onclick="seekToPosition(event)">
                     <div class="audio-progress-fill" id="audio-progress-fill"></div>
                     <div class="audio-progress-handle" id="audio-progress-handle"></div>
+                </div>
+            </div>
+            
+            <!-- Waveform Visualization -->
+            <div class="audio-waveform" id="audio-waveform">
+                <div class="audio-waveform-bars">
+                    <!-- Generate 32 bars for visualization -->
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
+                    <div class="audio-waveform-bar"></div>
                 </div>
             </div>
             

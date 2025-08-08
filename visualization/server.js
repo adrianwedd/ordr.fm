@@ -1523,12 +1523,18 @@ app.post('/api/subscribe', (req, res) => {
 app.get('/api/search/tracks', (req, res) => {
     const { q: query } = req.query;
     
-    if (!query || query.trim().length < 2) {
+    // Input validation and sanitization
+    if (!query || typeof query !== 'string' || query.trim().length < 2) {
+        return res.json({ tracks: [] });
+    }
+    
+    const sanitizedQuery = query.trim().substring(0, 100); // Limit length
+    if (!sanitizedQuery || sanitizedQuery.length < 2) {
         return res.json({ tracks: [] });
     }
     
     const db = getDb();
-    const searchTerm = `%${query.trim()}%`;
+    const searchTerm = `%${sanitizedQuery}%`;
     
     // Search in tracks table with album and artist info
     const sql = `
@@ -1590,13 +1596,25 @@ app.get('/api/search/tracks', (req, res) => {
     });
 });
 
-// Stream audio file
+// Stream audio file with enhanced security
 app.get('/api/audio/stream/:trackId', (req, res) => {
     const { trackId } = req.params;
+    
+    // Validate track ID
+    if (!trackId || typeof trackId !== 'string') {
+        return res.status(400).json({ error: 'Invalid track ID' });
+    }
+    
+    // Sanitize track ID (should be numeric or alphanumeric)
+    const sanitizedTrackId = trackId.replace(/[^a-zA-Z0-9\-_]/g, '');
+    if (!sanitizedTrackId || sanitizedTrackId !== trackId) {
+        return res.status(400).json({ error: 'Invalid track ID format' });
+    }
+    
     const db = getDb();
     
     // Get track file path
-    db.get('SELECT file_path, title, artist FROM tracks WHERE id = ?', [trackId], (err, track) => {
+    db.get('SELECT file_path, title, artist FROM tracks WHERE id = ?', [sanitizedTrackId], (err, track) => {
         if (err) {
             console.error('Error getting track:', err);
             return res.status(500).json({ error: 'Database error' });

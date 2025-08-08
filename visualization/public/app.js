@@ -4685,18 +4685,29 @@ function closeMetadataPreview() {
 // Audio Player Global State
 let audioPlayer = {
     audio: null,
+    audioSource: null, // Web Audio API source
     playlist: [],
     currentTrack: -1,
     isPlaying: false,
+    isLoading: false,
     volume: 1.0,
     isMuted: false,
     isRepeat: false,
     isShuffle: false,
     originalPlaylist: [],
+    loadingTimeout: null,
+    retryCount: 0,
+    maxRetries: 3,
     equalizer: {
         context: null,
         filters: [],
-        gains: [0, 0, 0, 0, 0, 0, 0, 0] // 8-band equalizer
+        gains: [0, 0, 0, 0, 0, 0, 0, 0], // 8-band equalizer
+        enabled: true
+    },
+    visualization: {
+        analyser: null,
+        dataArray: null,
+        animationFrame: null
     }
 };
 
@@ -4845,74 +4856,310 @@ async function loadAndPlayCurrentTrack() {
     const track = audioPlayer.playlist[audioPlayer.currentTrack];
     if (!track) return;
     
+    // Validate track data
+    if (!track.id || !track.title) {
+        showError('Invalid track data');
+        return;
+    }
+    
     try {
-        // Stop current audio if playing
-        if (audioPlayer.audio) {
-            audioPlayer.audio.pause();
-            audioPlayer.audio.currentTime = 0;
-        }
+        // Set loading state
+        audioPlayer.isLoading = true;
+        audioPlayer.retryCount = 0;
+        updateLoadingState(true);
         
-        // Create new audio element
+        // Cleanup previous audio
+        cleanupCurrentAudio();
+        
+        // Create new audio element with enhanced error handling
         audioPlayer.audio = new Audio();
-        audioPlayer.audio.volume = audioPlayer.volume;
+        audioPlayer.audio.preload = 'none';
+        audioPlayer.audio.volume = audioPlayer.isMuted ? 0 : audioPlayer.volume;
+        audioPlayer.audio.crossOrigin = 'anonymous';
         
-        // Connect to equalizer if available
-        if (audioPlayer.equalizer.context && audioPlayer.equalizer.filters.length > 0) {
-            const source = audioPlayer.equalizer.context.createMediaElementSource(audioPlayer.audio);
-            source.connect(audioPlayer.equalizer.filters[0]);
-        }
+        // Setup Web Audio API connection
+        await setupWebAudioConnection();
         
-        // Setup event listeners
+        // Setup event listeners first
         setupAudioEventListeners();
         
-        // Load track
-        audioPlayer.audio.src = `/api/audio/stream/${track.id}`;
-        
-        // Update UI
+        // Update UI immediately
         updateTrackInfo(track);
         updatePlaylistDisplay();
         
-        // Attempt to play
-        const playPromise = audioPlayer.audio.play();
-        if (playPromise) {
-            playPromise.then(() => {
-                audioPlayer.isPlaying = true;
-                updatePlayButton();
-            }).catch(error => {
-                console.error('Playback failed:', error);
-                showError('Playback failed. Audio file may be inaccessible.');
-            });
-        }
+        // Set loading timeout
+        audioPlayer.loadingTimeout = setTimeout(() => {
+            if (audioPlayer.isLoading) {
+                handleLoadingTimeout();
+            }
+        }, 10000); // 10 second timeout
+        
+        // Load track with validation
+        const streamUrl = `/api/audio/stream/${encodeURIComponent(track.id)}`;
+        audioPlayer.audio.src = streamUrl;
+        
+        // Preload the audio
+        audioPlayer.audio.load();
+        
+        console.log(`Loading track: ${track.title} by ${track.artist}`);
         
     } catch (error) {
         console.error('Failed to load track:', error);
-        showError('Failed to load audio file');
+        handleLoadError(error);
     }
 }
 
-// Setup Audio Event Listeners
+// Cleanup current audio resources
+function cleanupCurrentAudio() {
+    if (audioPlayer.audio) {
+        // Remove all event listeners
+        const events = ['loadstart', 'loadeddata', 'loadedmetadata', 'canplay', 'canplaythrough', 
+                       'timeupdate', 'ended', 'error', 'abort', 'emptied', 'stalled'];
+        events.forEach(event => {
+            audioPlayer.audio.removeEventListener(event, () => {});
+        });
+        
+        audioPlayer.audio.pause();
+        audioPlayer.audio.src = '';
+        audioPlayer.audio.load(); // This releases memory
+        audioPlayer.audio = null;
+    }
+    
+    // Cleanup Web Audio API source
+    if (audioPlayer.audioSource) {
+        try {
+            audioPlayer.audioSource.disconnect();
+        } catch (e) {
+            console.warn('AudioSource already disconnected');
+        }
+        audioPlayer.audioSource = null;
+    }
+    
+    // Clear timeouts
+    if (audioPlayer.loadingTimeout) {
+        clearTimeout(audioPlayer.loadingTimeout);
+        audioPlayer.loadingTimeout = null;
+    }
+    
+    // Stop visualization animation
+    if (audioPlayer.visualization.animationFrame) {
+        cancelAnimationFrame(audioPlayer.visualization.animationFrame);
+        audioPlayer.visualization.animationFrame = null;
+    }
+}
+
+// Setup Web Audio API connection with error handling
+async function setupWebAudioConnection() {
+    if (!audioPlayer.equalizer.context || !audioPlayer.equalizer.filters.length || !audioPlayer.audio) {
+        return;
+    }
+    
+    try {
+        // Resume audio context if suspended
+        if (audioPlayer.equalizer.context.state === 'suspended') {
+            await audioPlayer.equalizer.context.resume();
+        }
+        
+        // Create media element source only once per audio element
+        audioPlayer.audioSource = audioPlayer.equalizer.context.createMediaElementSource(audioPlayer.audio);
+        
+        // Create analyzer for visualization
+        audioPlayer.visualization.analyser = audioPlayer.equalizer.context.createAnalyser();
+        audioPlayer.visualization.analyser.fftSize = 256;
+        audioPlayer.visualization.dataArray = new Uint8Array(audioPlayer.visualization.analyser.frequencyBinCount);
+        
+        // Connect audio graph: source -> equalizer -> analyser -> destination
+        if (audioPlayer.equalizer.enabled && audioPlayer.equalizer.filters.length > 0) {
+            audioPlayer.audioSource.connect(audioPlayer.equalizer.filters[0]);
+            audioPlayer.equalizer.filters[audioPlayer.equalizer.filters.length - 1].connect(audioPlayer.visualization.analyser);
+        } else {
+            audioPlayer.audioSource.connect(audioPlayer.visualization.analyser);
+        }
+        
+        audioPlayer.visualization.analyser.connect(audioPlayer.equalizer.context.destination);
+        
+        console.log('Web Audio API connected successfully');
+        
+    } catch (error) {
+        console.warn('Web Audio API connection failed:', error);
+        // Continue without Web Audio API features
+    }
+}
+
+// Handle loading timeout
+function handleLoadingTimeout() {
+    console.warn('Audio loading timeout');
+    audioPlayer.isLoading = false;
+    updateLoadingState(false);
+    
+    if (audioPlayer.retryCount < audioPlayer.maxRetries) {
+        audioPlayer.retryCount++;
+        showNotification(`Loading failed, retrying... (${audioPlayer.retryCount}/${audioPlayer.maxRetries})`);
+        setTimeout(() => loadAndPlayCurrentTrack(), 1000);
+    } else {
+        showError('Failed to load audio file after multiple attempts');
+        // Try to skip to next track
+        if (audioPlayer.currentTrack < audioPlayer.playlist.length - 1) {
+            showNotification('Skipping to next track...');
+            setTimeout(() => nextTrack(), 1000);
+        }
+    }
+}
+
+// Handle loading errors
+function handleLoadError(error) {
+    console.error('Audio loading error:', error);
+    audioPlayer.isLoading = false;
+    updateLoadingState(false);
+    
+    const errorMessage = error.message || 'Unknown error occurred';
+    
+    if (audioPlayer.retryCount < audioPlayer.maxRetries) {
+        audioPlayer.retryCount++;
+        showNotification(`Loading error, retrying... (${audioPlayer.retryCount}/${audioPlayer.maxRetries})`);
+        setTimeout(() => loadAndPlayCurrentTrack(), 2000);
+    } else {
+        showError(`Failed to load audio: ${errorMessage}`);
+        // Auto-skip to next track on persistent error
+        if (audioPlayer.currentTrack < audioPlayer.playlist.length - 1) {
+            showNotification('Skipping to next track...');
+            setTimeout(() => nextTrack(), 1500);
+        }
+    }
+}
+
+// Setup Audio Event Listeners with comprehensive error handling
 function setupAudioEventListeners() {
     const audio = audioPlayer.audio;
+    if (!audio) return;
+    
+    // Loading events
+    audio.addEventListener('loadstart', () => {
+        console.log('Audio loading started');
+        audioPlayer.isLoading = true;
+        updateLoadingState(true);
+    });
+    
+    audio.addEventListener('loadeddata', () => {
+        console.log('Audio data loaded');
+        audioPlayer.isLoading = false;
+        updateLoadingState(false);
+        
+        if (audioPlayer.loadingTimeout) {
+            clearTimeout(audioPlayer.loadingTimeout);
+            audioPlayer.loadingTimeout = null;
+        }
+    });
     
     audio.addEventListener('loadedmetadata', () => {
+        console.log('Audio metadata loaded');
         updateDuration();
-    });
-    
-    audio.addEventListener('timeupdate', () => {
-        updateProgress();
-    });
-    
-    audio.addEventListener('ended', () => {
-        handleTrackEnd();
-    });
-    
-    audio.addEventListener('error', (error) => {
-        console.error('Audio error:', error);
-        showError('Audio playback error');
+        audioPlayer.retryCount = 0; // Reset retry count on success
     });
     
     audio.addEventListener('canplay', () => {
-        updateDuration();
+        console.log('Audio can start playing');
+        audioPlayer.isLoading = false;
+        updateLoadingState(false);
+        
+        // Auto-play if this was triggered by user interaction
+        if (audioPlayer.isPlaying || (audioPlayer.retryCount === 0 && audioPlayer.currentTrack >= 0)) {
+            playCurrentTrack();
+        }
+    });
+    
+    audio.addEventListener('canplaythrough', () => {
+        console.log('Audio can play through without buffering');
+        startVisualization();
+    });
+    
+    // Playback events
+    audio.addEventListener('play', () => {
+        audioPlayer.isPlaying = true;
+        updatePlayButton();
+        startVisualization();
+        broadcastPlaybackState('playing');
+    });
+    
+    audio.addEventListener('pause', () => {
+        audioPlayer.isPlaying = false;
+        updatePlayButton();
+        stopVisualization();
+        broadcastPlaybackState('paused');
+    });
+    
+    audio.addEventListener('timeupdate', throttle(() => {
+        updateProgress();
+    }, 100)); // Throttle to every 100ms for performance
+    
+    audio.addEventListener('ended', () => {
+        audioPlayer.isPlaying = false;
+        updatePlayButton();
+        stopVisualization();
+        handleTrackEnd();
+        broadcastPlaybackState('ended');
+    });
+    
+    // Error handling
+    audio.addEventListener('error', (event) => {
+        const error = event.target.error;
+        let errorMessage = 'Audio playback error';
+        
+        if (error) {
+            switch (error.code) {
+                case error.MEDIA_ERR_ABORTED:
+                    errorMessage = 'Audio playback was aborted';
+                    break;
+                case error.MEDIA_ERR_NETWORK:
+                    errorMessage = 'Network error occurred while loading audio';
+                    break;
+                case error.MEDIA_ERR_DECODE:
+                    errorMessage = 'Audio format not supported or corrupted';
+                    break;
+                case error.MEDIA_ERR_SRC_NOT_SUPPORTED:
+                    errorMessage = 'Audio source not supported';
+                    break;
+                default:
+                    errorMessage = `Audio error: ${error.message || 'Unknown error'}`;
+            }
+        }
+        
+        console.error('Audio error:', errorMessage, error);
+        handleLoadError(new Error(errorMessage));
+    });
+    
+    // Network events
+    audio.addEventListener('waiting', () => {
+        console.log('Audio waiting for data');
+        updateLoadingState(true);
+        showNotification('Buffering...', 1000);
+    });
+    
+    audio.addEventListener('stalled', () => {
+        console.warn('Audio download stalled');
+        showNotification('Connection slow, buffering...', 2000);
+    });
+    
+    audio.addEventListener('suspend', () => {
+        console.log('Audio loading suspended');
+    });
+    
+    audio.addEventListener('abort', () => {
+        console.log('Audio loading aborted');
+        audioPlayer.isLoading = false;
+        updateLoadingState(false);
+    });
+    
+    audio.addEventListener('emptied', () => {
+        console.log('Audio emptied');
+        audioPlayer.isLoading = false;
+        updateLoadingState(false);
+    });
+    
+    // Volume change
+    audio.addEventListener('volumechange', () => {
+        updateVolumeDisplay();
+        updateMuteButton();
     });
 }
 
@@ -5317,9 +5564,297 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+// =============================================================================
+// AUDIO PLAYER UTILITY FUNCTIONS
+// =============================================================================
+
+// Play current track (used by event listeners)
+async function playCurrentTrack() {
+    if (!audioPlayer.audio) return;
+    
+    try {
+        // Resume audio context for user-initiated playback
+        if (audioPlayer.equalizer.context && audioPlayer.equalizer.context.state === 'suspended') {
+            await audioPlayer.equalizer.context.resume();
+        }
+        
+        const playPromise = audioPlayer.audio.play();
+        if (playPromise) {
+            await playPromise;
+            audioPlayer.isPlaying = true;
+            updatePlayButton();
+            showNotification(`Now playing: ${audioPlayer.playlist[audioPlayer.currentTrack]?.title}`, 2000);
+        }
+    } catch (error) {
+        console.error('Playback failed:', error);
+        
+        // Handle common playback issues
+        if (error.name === 'NotAllowedError') {
+            showError('Playback blocked. Please interact with the page first.');
+        } else if (error.name === 'NotSupportedError') {
+            showError('Audio format not supported by this browser.');
+        } else {
+            showError('Playback failed. Trying next track...');
+            if (audioPlayer.currentTrack < audioPlayer.playlist.length - 1) {
+                setTimeout(() => nextTrack(), 1000);
+            }
+        }
+    }
+}
+
+// Update loading state in UI
+function updateLoadingState(isLoading) {
+    const playButton = document.getElementById('audio-play-pause');
+    const trackTitle = document.getElementById('audio-track-title');
+    
+    if (isLoading) {
+        playButton.textContent = '⏳';
+        playButton.style.opacity = '0.6';
+        trackTitle.style.opacity = '0.7';
+        
+        // Add loading spinner to play button
+        playButton.classList.add('loading');
+    } else {
+        playButton.style.opacity = '1';
+        trackTitle.style.opacity = '1';
+        playButton.classList.remove('loading');
+        updatePlayButton(); // Restore correct button state
+    }
+}
+
+// Start audio visualization
+function startVisualization() {
+    if (!audioPlayer.visualization.analyser || !audioPlayer.visualization.dataArray) {
+        return;
+    }
+    
+    function updateVisualization() {
+        if (!audioPlayer.isPlaying || !audioPlayer.visualization.analyser) {
+            return;
+        }
+        
+        audioPlayer.visualization.analyser.getByteFrequencyData(audioPlayer.visualization.dataArray);
+        
+        // Update waveform bars if they exist
+        const waveformBars = document.querySelectorAll('.audio-waveform-bar');
+        if (waveformBars.length > 0) {
+            const dataLength = audioPlayer.visualization.dataArray.length;
+            const barCount = Math.min(waveformBars.length, 64); // Limit bars
+            
+            for (let i = 0; i < barCount; i++) {
+                const dataIndex = Math.floor((i / barCount) * dataLength);
+                const value = audioPlayer.visualization.dataArray[dataIndex];
+                const percentage = (value / 255) * 100;
+                
+                const bar = waveformBars[i];
+                if (bar) {
+                    bar.style.height = `${Math.max(2, percentage)}%`;
+                    bar.classList.toggle('active', value > 30);
+                }
+            }
+        }
+        
+        audioPlayer.visualization.animationFrame = requestAnimationFrame(updateVisualization);
+    }
+    
+    updateVisualization();
+}
+
+// Stop audio visualization
+function stopVisualization() {
+    if (audioPlayer.visualization.animationFrame) {
+        cancelAnimationFrame(audioPlayer.visualization.animationFrame);
+        audioPlayer.visualization.animationFrame = null;
+    }
+    
+    // Reset waveform bars
+    const waveformBars = document.querySelectorAll('.audio-waveform-bar');
+    waveformBars.forEach(bar => {
+        bar.style.height = '2px';
+        bar.classList.remove('active');
+    });
+}
+
+// Broadcast playback state (for potential external integrations)
+function broadcastPlaybackState(state) {
+    if (ws && ws.readyState === WebSocket.OPEN) {
+        const track = audioPlayer.playlist[audioPlayer.currentTrack];
+        ws.send(JSON.stringify({
+            type: 'audio_playback_state',
+            data: {
+                state,
+                track: track ? {
+                    title: track.title,
+                    artist: track.artist,
+                    album: track.album
+                } : null,
+                timestamp: Date.now()
+            }
+        }));
+    }
+}
+
+// Throttle function for performance optimization
+function throttle(func, limit) {
+    let inThrottle;
+    return function() {
+        const args = arguments;
+        const context = this;
+        if (!inThrottle) {
+            func.apply(context, args);
+            inThrottle = true;
+            setTimeout(() => inThrottle = false, limit);
+        }
+    }
+}
+
+// Enhanced notification function with duration
+function showNotification(message, duration = 3000) {
+    // Create notification element if it doesn't exist
+    let notification = document.getElementById('audio-notification');
+    if (!notification) {
+        notification = document.createElement('div');
+        notification.id = 'audio-notification';
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: var(--bg-card);
+            color: var(--text-primary);
+            padding: 12px 16px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+            box-shadow: 0 4px 12px var(--shadow);
+            z-index: 10000;
+            transform: translateX(100%);
+            transition: transform 0.3s ease;
+            max-width: 300px;
+            font-size: 14px;
+        `;
+        document.body.appendChild(notification);
+    }
+    
+    // Clear any existing timeout
+    if (notification.timeout) {
+        clearTimeout(notification.timeout);
+    }
+    
+    // Update content and show
+    notification.textContent = message;
+    notification.style.transform = 'translateX(0)';
+    
+    // Auto-hide after duration
+    notification.timeout = setTimeout(() => {
+        notification.style.transform = 'translateX(100%)';
+    }, duration);
+}
+
+// Enhanced error display
+function showError(message, duration = 5000) {
+    console.error('Audio Player Error:', message);
+    
+    // Use existing error display mechanism or create enhanced one
+    if (typeof window.showError === 'function') {
+        window.showError(message);
+    } else {
+        showNotification(`❌ ${message}`, duration);
+    }
+}
+
+// Add accessibility features
+function addAccessibilityFeatures() {
+    const audioPlayer = document.getElementById('audio-player-container');
+    if (!audioPlayer) return;
+    
+    // Add ARIA labels
+    const playButton = document.getElementById('audio-play-pause');
+    const prevButton = document.getElementById('audio-prev');
+    const nextButton = document.getElementById('audio-next');
+    const muteButton = document.getElementById('audio-mute');
+    const progressBar = document.getElementById('audio-progress-bar');
+    const volumeBar = document.getElementById('audio-volume-bar');
+    
+    if (playButton) {
+        playButton.setAttribute('aria-label', 'Play/Pause');
+        playButton.setAttribute('role', 'button');
+    }
+    
+    if (prevButton) {
+        prevButton.setAttribute('aria-label', 'Previous track');
+        prevButton.setAttribute('role', 'button');
+    }
+    
+    if (nextButton) {
+        nextButton.setAttribute('aria-label', 'Next track');
+        nextButton.setAttribute('role', 'button');
+    }
+    
+    if (muteButton) {
+        muteButton.setAttribute('aria-label', 'Mute/Unmute');
+        muteButton.setAttribute('role', 'button');
+    }
+    
+    if (progressBar) {
+        progressBar.setAttribute('aria-label', 'Track progress');
+        progressBar.setAttribute('role', 'slider');
+        progressBar.setAttribute('aria-valuemin', '0');
+        progressBar.setAttribute('aria-valuemax', '100');
+    }
+    
+    if (volumeBar) {
+        volumeBar.setAttribute('aria-label', 'Volume control');
+        volumeBar.setAttribute('role', 'slider');
+        volumeBar.setAttribute('aria-valuemin', '0');
+        volumeBar.setAttribute('aria-valuemax', '100');
+    }
+    
+    // Add keyboard navigation
+    audioPlayer.addEventListener('keydown', (event) => {
+        switch (event.key) {
+            case 'Enter':
+            case ' ':
+                if (event.target.role === 'button') {
+                    event.preventDefault();
+                    event.target.click();
+                }
+                break;
+            case 'ArrowLeft':
+                if (event.target === progressBar) {
+                    event.preventDefault();
+                    seekRelative(-5); // Seek back 5 seconds
+                }
+                break;
+            case 'ArrowRight':
+                if (event.target === progressBar) {
+                    event.preventDefault();
+                    seekRelative(5); // Seek forward 5 seconds
+                }
+                break;
+        }
+    });
+}
+
+// Seek relative to current position
+function seekRelative(seconds) {
+    if (!audioPlayer.audio) return;
+    
+    const newTime = Math.max(0, Math.min(audioPlayer.audio.duration, audioPlayer.audio.currentTime + seconds));
+    audioPlayer.audio.currentTime = newTime;
+}
+
+// Cleanup on page unload
+window.addEventListener('beforeunload', () => {
+    cleanupCurrentAudio();
+    
+    if (audioPlayer.equalizer.context) {
+        audioPlayer.equalizer.context.close();
+    }
+});
+
 // Initialize audio player when app starts
 document.addEventListener('DOMContentLoaded', () => {
     initAudioPlayer();
+    addAccessibilityFeatures();
 });
 
 // Initialize app when DOM is loaded
