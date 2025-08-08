@@ -697,6 +697,597 @@
         .meta-tag {
             background: rgba(102, 126, 234, 0.1);
             color: #667eea;
+        }
+        
+        /* Audio Player Styles */
+        .audio-player-container {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-card);
+            border-top: 1px solid var(--border-color);
+            padding: 16px;
+            z-index: 1000;
+            backdrop-filter: blur(10px);
+            transition: transform 0.3s ease;
+            transform: translateY(100%);
+        }
+        
+        .audio-player-container.active {
+            transform: translateY(0);
+        }
+        
+        .audio-player {
+            max-width: 1200px;
+            margin: 0 auto;
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+        
+        .audio-track-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 250px;
+        }
+        
+        .audio-track-artwork {
+            width: 48px;
+            height: 48px;
+            background: var(--bg-accent);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 20px;
+            color: var(--text-secondary);
+        }
+        
+        .audio-track-details {
+            flex: 1;
+        }
+        
+        .audio-track-title {
+            font-weight: bold;
+            color: var(--text-primary);
+            font-size: 14px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+        }
+        
+        .audio-track-artist {
+            color: var(--text-secondary);
+            font-size: 12px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            max-width: 200px;
+        }
+        
+        .audio-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .audio-control-btn {
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            font-size: 18px;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+        
+        .audio-control-btn:hover {
+            background: var(--bg-accent);
+            color: #667eea;
+        }
+        
+        .audio-control-btn.play {
+            background: #667eea;
+            color: white;
+            width: 48px;
+            height: 48px;
+            font-size: 20px;
+        }
+        
+        .audio-control-btn.play:hover {
+            background: #5a67d8;
+        }
+        
+        .audio-progress-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .audio-progress-info {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        
+        .audio-progress-bar {
+            position: relative;
+            height: 6px;
+            background: var(--bg-accent);
+            border-radius: 3px;
+            cursor: pointer;
+            overflow: hidden;
+        }
+        
+        .audio-progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            border-radius: 3px;
+            width: 0%;
+            transition: width 0.1s ease;
+        }
+        
+        .audio-progress-handle {
+            position: absolute;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            width: 14px;
+            height: 14px;
+            background: white;
+            border-radius: 50%;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+            cursor: pointer;
+        }
+        
+        .audio-progress-bar:hover .audio-progress-handle {
+            opacity: 1;
+        }
+        
+        .audio-volume-container {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .audio-volume-bar {
+            width: 80px;
+            height: 4px;
+            background: var(--bg-accent);
+            border-radius: 2px;
+            cursor: pointer;
+            position: relative;
+        }
+        
+        .audio-volume-fill {
+            height: 100%;
+            background: #667eea;
+            border-radius: 2px;
+            width: 100%;
+            transition: width 0.1s ease;
+        }
+        
+        .audio-extra-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .audio-playlist-toggle {
+            background: none;
+            border: none;
+            color: var(--text-primary);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        
+        .audio-playlist-toggle:hover {
+            background: var(--bg-accent);
+        }
+        
+        .audio-waveform {
+            flex: 1;
+            height: 32px;
+            margin: 0 16px;
+            position: relative;
+            background: var(--bg-accent);
+            border-radius: 16px;
+            overflow: hidden;
+            cursor: pointer;
+        }
+        
+        .audio-waveform-bars {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            gap: 1px;
+            padding: 6px;
+        }
+        
+        .audio-waveform-bar {
+            flex: 1;
+            background: var(--text-secondary);
+            border-radius: 2px;
+            max-width: 3px;
+            opacity: 0.3;
+            transition: all 0.1s ease;
+        }
+        
+        .audio-waveform-bar.active {
+            background: #667eea;
+            opacity: 1;
+        }
+        
+        .audio-equalizer-container {
+            position: absolute;
+            bottom: 100%;
+            right: 0;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            width: 300px;
+            transform: translateY(-8px);
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s ease;
+            z-index: 1001;
+        }
+        
+        .audio-equalizer-container.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+        
+        .audio-equalizer-bands {
+            display: flex;
+            gap: 12px;
+            justify-content: space-between;
+            margin-top: 12px;
+        }
+        
+        .audio-equalizer-band {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .audio-equalizer-slider {
+            writing-mode: bt-lr;
+            -webkit-appearance: slider-vertical;
+            width: 20px;
+            height: 100px;
+            background: var(--bg-accent);
+            outline: none;
+        }
+        
+        .audio-equalizer-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-align: center;
+        }
+        
+        .audio-playlist-panel {
+            position: absolute;
+            top: 0;
+            right: 0;
+            width: 320px;
+            height: 400px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            transform: translateY(-100%);
+            opacity: 0;
+            pointer-events: none;
+            transition: all 0.3s ease;
+            z-index: 1002;
+            overflow: hidden;
+        }
+        
+        .audio-playlist-panel.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+        
+        .audio-playlist-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .audio-playlist-title {
+            font-weight: bold;
+            color: var(--text-primary);
+        }
+        
+        .audio-playlist-clear {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        
+        .audio-playlist-clear:hover {
+            background: var(--error-color);
+            color: white;
+        }
+        
+        .audio-playlist-items {
+            overflow-y: auto;
+            height: calc(100% - 60px);
+            padding: 8px;
+        }
+        
+        .audio-playlist-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .audio-playlist-item:hover {
+            background: var(--bg-accent);
+        }
+        
+        .audio-playlist-item.current {
+            background: rgba(102, 126, 234, 0.2);
+            border: 1px solid #667eea;
+        }
+        
+        .audio-playlist-item-index {
+            font-size: 12px;
+            color: var(--text-secondary);
+            width: 20px;
+            text-align: center;
+        }
+        
+        .audio-playlist-item-info {
+            flex: 1;
+        }
+        
+        .audio-playlist-item-title {
+            font-size: 13px;
+            color: var(--text-primary);
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .audio-playlist-item-artist {
+            font-size: 11px;
+            color: var(--text-secondary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .audio-playlist-item-duration {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        
+        /* Audio Player Tab Styles */
+        .audio-library {
+            margin-top: 16px;
+        }
+        
+        .track-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-accent);
+            padding: 8px;
+        }
+        
+        .track-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px;
+            background: var(--bg-card);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
+        }
+        
+        .track-item:hover {
+            background: var(--bg-secondary);
+            border-color: var(--border-color);
+        }
+        
+        .track-item-artwork {
+            width: 40px;
+            height: 40px;
+            background: var(--bg-accent);
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: var(--text-secondary);
+        }
+        
+        .track-item-info {
+            flex: 1;
+        }
+        
+        .track-item-title {
+            font-weight: 500;
+            color: var(--text-primary);
+            font-size: 14px;
+            margin-bottom: 2px;
+        }
+        
+        .track-item-details {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        
+        .track-item-actions {
+            display: flex;
+            gap: 8px;
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+        
+        .track-item:hover .track-item-actions {
+            opacity: 1;
+        }
+        
+        .track-action-btn {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 14px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+        
+        .track-action-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+        
+        .playlist-controls {
+            display: flex;
+            gap: 8px;
+            margin: 16px 0;
+        }
+        
+        .playlist-display {
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-accent);
+            max-height: 300px;
+            overflow-y: auto;
+            padding: 8px;
+        }
+        
+        .playlist-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 8px;
+            background: var(--bg-card);
+            border-radius: 6px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        
+        .playlist-item:hover {
+            background: var(--bg-secondary);
+        }
+        
+        .playlist-item.current {
+            background: rgba(102, 126, 234, 0.2);
+            border: 1px solid #667eea;
+        }
+        
+        .playlist-item-index {
+            font-size: 12px;
+            color: var(--text-secondary);
+            width: 24px;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        .playlist-item-info {
+            flex: 1;
+        }
+        
+        .playlist-item-title {
+            font-weight: 500;
+            color: var(--text-primary);
+            font-size: 13px;
+        }
+        
+        .playlist-item-artist {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        
+        .playlist-item-duration {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        
+        .empty-playlist {
+            text-align: center;
+            padding: 32px;
+            color: var(--text-secondary);
+            font-style: italic;
+        }
+
+        /* Responsive audio player */
+        @media (max-width: 768px) {
+            .audio-player {
+                flex-direction: column;
+                gap: 12px;
+            }
+            
+            .audio-track-info {
+                min-width: auto;
+                width: 100%;
+            }
+            
+            .audio-progress-container {
+                order: -1;
+            }
+            
+            .audio-waveform {
+                margin: 0;
+                height: 24px;
+            }
+            
+            .audio-playlist-panel {
+                width: 100%;
+                right: 0;
+                left: 0;
+            }
+            
+            .audio-equalizer-container {
+                width: 100%;
+                right: 0;
+                left: 0;
+            }
+        }
             padding: 3px 8px;
             border-radius: 12px;
             font-size: 11px;
@@ -1438,6 +2029,7 @@
             <button class="tab" onclick="showTab('timeline')">Timeline</button>
             <button class="tab" onclick="showTab('moves')">Move History</button>
             <button class="tab" onclick="showTab('config')">Configuration</button>
+            <button class="tab" onclick="showTab('player')">Audio Player</button>
         </div>
         
         <!-- Overview Tab -->
@@ -2341,6 +2933,148 @@
                             <input type="text" id="PATTERN_REMIX" class="search-input" placeholder="{quality}/Remixes/{original_artist}/{remixer}/{title}">
                         </div>
                     </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Audio Player Tab -->
+        <div id="player" class="tab-content">
+            <div class="dashboard">
+                <div class="card">
+                    <h2>🎵 Audio Player</h2>
+                    <p>Play music directly from your collection with full playlist and equalizer support.</p>
+                    
+                    <div class="section" style="margin-top: 24px;">
+                        <h3>📂 Browse Tracks</h3>
+                        <div class="search-container">
+                            <input type="text" id="track-search" class="search-input" placeholder="Search for tracks, albums, or artists...">
+                            <button onclick="searchTracks()" class="action-btn primary">🔍 Search</button>
+                        </div>
+                        
+                        <div class="audio-library">
+                            <div id="track-results" class="track-list">
+                                <div class="loading">Load tracks by searching above...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="section" style="margin-top: 24px;">
+                        <h3>🎧 Current Playlist</h3>
+                        <div class="playlist-controls">
+                            <button onclick="clearPlaylist()" class="action-btn secondary">🗑️ Clear Playlist</button>
+                            <button onclick="shufflePlaylist()" class="action-btn">🔀 Shuffle</button>
+                            <button onclick="savePlaylist()" class="action-btn success">💾 Save Playlist</button>
+                        </div>
+                        
+                        <div id="current-playlist" class="playlist-display">
+                            <div class="empty-playlist">No tracks in playlist. Search and add tracks above.</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Fixed Audio Player Component -->
+    <div id="audio-player-container" class="audio-player-container">
+        <div class="audio-player">
+            <!-- Track Info -->
+            <div class="audio-track-info">
+                <div class="audio-track-artwork" id="audio-artwork">🎵</div>
+                <div class="audio-track-details">
+                    <div class="audio-track-title" id="audio-track-title">No track selected</div>
+                    <div class="audio-track-artist" id="audio-track-artist">Select a track to begin</div>
+                </div>
+            </div>
+            
+            <!-- Main Controls -->
+            <div class="audio-controls">
+                <button class="audio-control-btn" id="audio-prev" onclick="previousTrack()">⏮️</button>
+                <button class="audio-control-btn play" id="audio-play-pause" onclick="togglePlayPause()">▶️</button>
+                <button class="audio-control-btn" id="audio-next" onclick="nextTrack()">⏭️</button>
+            </div>
+            
+            <!-- Progress and Waveform -->
+            <div class="audio-progress-container">
+                <div class="audio-progress-info">
+                    <span id="audio-current-time">0:00</span>
+                    <span id="audio-duration">0:00</span>
+                </div>
+                <div class="audio-progress-bar" id="audio-progress-bar" onclick="seekToPosition(event)">
+                    <div class="audio-progress-fill" id="audio-progress-fill"></div>
+                    <div class="audio-progress-handle" id="audio-progress-handle"></div>
+                </div>
+            </div>
+            
+            <!-- Volume and Extra Controls -->
+            <div class="audio-volume-container">
+                <button class="audio-control-btn" id="audio-mute" onclick="toggleMute()">🔊</button>
+                <div class="audio-volume-bar" id="audio-volume-bar" onclick="setVolume(event)">
+                    <div class="audio-volume-fill" id="audio-volume-fill"></div>
+                </div>
+            </div>
+            
+            <!-- Extra Controls -->
+            <div class="audio-extra-controls">
+                <button class="audio-control-btn" id="audio-repeat" onclick="toggleRepeat()" title="Repeat">🔁</button>
+                <button class="audio-control-btn" id="audio-shuffle" onclick="toggleShuffle()" title="Shuffle">🔀</button>
+                <button class="audio-control-btn" id="audio-equalizer" onclick="toggleEqualizer()" title="Equalizer">🎛️</button>
+                <button class="audio-playlist-toggle" id="audio-playlist-toggle" onclick="togglePlaylistPanel()" title="Playlist">📋</button>
+            </div>
+        </div>
+        
+        <!-- Equalizer Panel -->
+        <div class="audio-equalizer-container" id="audio-equalizer-panel">
+            <h4>🎛️ Audio Equalizer</h4>
+            <div class="audio-equalizer-bands">
+                <div class="audio-equalizer-band">
+                    <input type="range" class="audio-equalizer-slider" id="eq-60" min="-12" max="12" value="0" step="1" orient="vertical">
+                    <div class="audio-equalizer-label">60 Hz</div>
+                </div>
+                <div class="audio-equalizer-band">
+                    <input type="range" class="audio-equalizer-slider" id="eq-170" min="-12" max="12" value="0" step="1" orient="vertical">
+                    <div class="audio-equalizer-label">170 Hz</div>
+                </div>
+                <div class="audio-equalizer-band">
+                    <input type="range" class="audio-equalizer-slider" id="eq-350" min="-12" max="12" value="0" step="1" orient="vertical">
+                    <div class="audio-equalizer-label">350 Hz</div>
+                </div>
+                <div class="audio-equalizer-band">
+                    <input type="range" class="audio-equalizer-slider" id="eq-1k" min="-12" max="12" value="0" step="1" orient="vertical">
+                    <div class="audio-equalizer-label">1 kHz</div>
+                </div>
+                <div class="audio-equalizer-band">
+                    <input type="range" class="audio-equalizer-slider" id="eq-3k" min="-12" max="12" value="0" step="1" orient="vertical">
+                    <div class="audio-equalizer-label">3 kHz</div>
+                </div>
+                <div class="audio-equalizer-band">
+                    <input type="range" class="audio-equalizer-slider" id="eq-6k" min="-12" max="12" value="0" step="1" orient="vertical">
+                    <div class="audio-equalizer-label">6 kHz</div>
+                </div>
+                <div class="audio-equalizer-band">
+                    <input type="range" class="audio-equalizer-slider" id="eq-12k" min="-12" max="12" value="0" step="1" orient="vertical">
+                    <div class="audio-equalizer-label">12 kHz</div>
+                </div>
+                <div class="audio-equalizer-band">
+                    <input type="range" class="audio-equalizer-slider" id="eq-14k" min="-12" max="12" value="0" step="1" orient="vertical">
+                    <div class="audio-equalizer-label">14 kHz</div>
+                </div>
+            </div>
+            <div style="margin-top: 16px;">
+                <button onclick="resetEqualizer()" class="action-btn secondary">🔄 Reset</button>
+                <button onclick="saveEqualizerPreset()" class="action-btn primary">💾 Save Preset</button>
+            </div>
+        </div>
+        
+        <!-- Playlist Panel -->
+        <div class="audio-playlist-panel" id="audio-playlist-panel">
+            <div class="audio-playlist-header">
+                <div class="audio-playlist-title">Current Playlist</div>
+                <button class="audio-playlist-clear" onclick="clearPlaylist()">Clear All</button>
+            </div>
+            <div class="audio-playlist-items" id="audio-playlist-items">
+                <div class="empty-playlist" style="text-align: center; padding: 32px; color: var(--text-secondary);">
+                    No tracks in playlist
                 </div>
             </div>
         </div>

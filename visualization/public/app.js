@@ -4678,5 +4678,649 @@ function closeMetadataPreview() {
     modal.style.display = 'none';
 }
 
+// =============================================================================
+// AUDIO PLAYER SYSTEM
+// =============================================================================
+
+// Audio Player Global State
+let audioPlayer = {
+    audio: null,
+    playlist: [],
+    currentTrack: -1,
+    isPlaying: false,
+    volume: 1.0,
+    isMuted: false,
+    isRepeat: false,
+    isShuffle: false,
+    originalPlaylist: [],
+    equalizer: {
+        context: null,
+        filters: [],
+        gains: [0, 0, 0, 0, 0, 0, 0, 0] // 8-band equalizer
+    }
+};
+
+// Initialize Audio Player
+function initAudioPlayer() {
+    try {
+        // Create audio context for advanced features
+        if (window.AudioContext || window.webkitAudioContext) {
+            audioPlayer.equalizer.context = new (window.AudioContext || window.webkitAudioContext)();
+            initEqualizer();
+        }
+        
+        // Initialize keyboard shortcuts
+        initAudioKeyboardShortcuts();
+        
+        console.log('Audio player initialized successfully');
+    } catch (error) {
+        console.error('Failed to initialize audio player:', error);
+    }
+}
+
+// Initialize Equalizer
+function initEqualizer() {
+    const context = audioPlayer.equalizer.context;
+    const frequencies = [60, 170, 350, 1000, 3000, 6000, 12000, 14000];
+    
+    audioPlayer.equalizer.filters = frequencies.map(freq => {
+        const filter = context.createBiquadFilter();
+        filter.type = 'peaking';
+        filter.frequency.value = freq;
+        filter.Q.value = 1;
+        filter.gain.value = 0;
+        return filter;
+    });
+    
+    // Connect filters in series
+    for (let i = 0; i < audioPlayer.equalizer.filters.length - 1; i++) {
+        audioPlayer.equalizer.filters[i].connect(audioPlayer.equalizer.filters[i + 1]);
+    }
+    
+    // Connect to destination
+    audioPlayer.equalizer.filters[audioPlayer.equalizer.filters.length - 1].connect(context.destination);
+    
+    // Setup equalizer controls
+    setupEqualizerControls();
+}
+
+// Setup Equalizer Controls
+function setupEqualizerControls() {
+    const sliders = document.querySelectorAll('.audio-equalizer-slider');
+    sliders.forEach((slider, index) => {
+        slider.addEventListener('input', (e) => {
+            const gain = parseFloat(e.target.value);
+            if (audioPlayer.equalizer.filters[index]) {
+                audioPlayer.equalizer.filters[index].gain.value = gain;
+                audioPlayer.equalizer.gains[index] = gain;
+            }
+        });
+    });
+}
+
+// Search Tracks
+async function searchTracks() {
+    const searchTerm = document.getElementById('track-search').value.trim();
+    if (!searchTerm) return;
+    
+    try {
+        const response = await fetchAPI(`/api/search/tracks?q=${encodeURIComponent(searchTerm)}`);
+        displayTrackResults(response.tracks || []);
+    } catch (error) {
+        console.error('Search failed:', error);
+        showError('Failed to search tracks');
+    }
+}
+
+// Display Track Search Results
+function displayTrackResults(tracks) {
+    const container = document.getElementById('track-results');
+    
+    if (!tracks || tracks.length === 0) {
+        container.innerHTML = '<div class="loading">No tracks found. Try a different search term.</div>';
+        return;
+    }
+    
+    container.innerHTML = tracks.map((track, index) => `
+        <div class="track-item" data-track-id="${track.id}">
+            <div class="track-item-artwork">🎵</div>
+            <div class="track-item-info">
+                <div class="track-item-title">${escapeHtml(track.title || 'Unknown Title')}</div>
+                <div class="track-item-details">
+                    ${escapeHtml(track.artist || 'Unknown Artist')} • 
+                    ${escapeHtml(track.album || 'Unknown Album')} • 
+                    ${formatDuration(track.duration || 0)}
+                </div>
+            </div>
+            <div class="track-item-actions">
+                <button class="track-action-btn" onclick="playTrack(${index}, ${JSON.stringify(track).replace(/"/g, '&quot;')})" title="Play Now">▶️</button>
+                <button class="track-action-btn" onclick="addToPlaylist(${JSON.stringify(track).replace(/"/g, '&quot;')})" title="Add to Playlist">➕</button>
+                <button class="track-action-btn" onclick="playNext(${JSON.stringify(track).replace(/"/g, '&quot;')})" title="Play Next">⏭️</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Play Track
+function playTrack(index, track) {
+    // If this is from search results, create a temporary playlist
+    if (typeof track === 'object') {
+        audioPlayer.playlist = [track];
+        audioPlayer.currentTrack = 0;
+        audioPlayer.originalPlaylist = [...audioPlayer.playlist];
+    } else {
+        // Playing from existing playlist
+        audioPlayer.currentTrack = index;
+    }
+    
+    loadAndPlayCurrentTrack();
+    showAudioPlayer();
+}
+
+// Add Track to Playlist
+function addToPlaylist(track) {
+    audioPlayer.playlist.push(track);
+    if (audioPlayer.originalPlaylist.length === 0) {
+        audioPlayer.originalPlaylist = [...audioPlayer.playlist];
+    } else {
+        audioPlayer.originalPlaylist.push(track);
+    }
+    
+    updatePlaylistDisplay();
+    showNotification(`Added "${track.title}" to playlist`);
+}
+
+// Play Track Next
+function playNext(track) {
+    const nextIndex = audioPlayer.currentTrack + 1;
+    audioPlayer.playlist.splice(nextIndex, 0, track);
+    audioPlayer.originalPlaylist.splice(nextIndex, 0, track);
+    
+    updatePlaylistDisplay();
+    showNotification(`"${track.title}" will play next`);
+}
+
+// Load and Play Current Track
+async function loadAndPlayCurrentTrack() {
+    const track = audioPlayer.playlist[audioPlayer.currentTrack];
+    if (!track) return;
+    
+    try {
+        // Stop current audio if playing
+        if (audioPlayer.audio) {
+            audioPlayer.audio.pause();
+            audioPlayer.audio.currentTime = 0;
+        }
+        
+        // Create new audio element
+        audioPlayer.audio = new Audio();
+        audioPlayer.audio.volume = audioPlayer.volume;
+        
+        // Connect to equalizer if available
+        if (audioPlayer.equalizer.context && audioPlayer.equalizer.filters.length > 0) {
+            const source = audioPlayer.equalizer.context.createMediaElementSource(audioPlayer.audio);
+            source.connect(audioPlayer.equalizer.filters[0]);
+        }
+        
+        // Setup event listeners
+        setupAudioEventListeners();
+        
+        // Load track
+        audioPlayer.audio.src = `/api/audio/stream/${track.id}`;
+        
+        // Update UI
+        updateTrackInfo(track);
+        updatePlaylistDisplay();
+        
+        // Attempt to play
+        const playPromise = audioPlayer.audio.play();
+        if (playPromise) {
+            playPromise.then(() => {
+                audioPlayer.isPlaying = true;
+                updatePlayButton();
+            }).catch(error => {
+                console.error('Playback failed:', error);
+                showError('Playback failed. Audio file may be inaccessible.');
+            });
+        }
+        
+    } catch (error) {
+        console.error('Failed to load track:', error);
+        showError('Failed to load audio file');
+    }
+}
+
+// Setup Audio Event Listeners
+function setupAudioEventListeners() {
+    const audio = audioPlayer.audio;
+    
+    audio.addEventListener('loadedmetadata', () => {
+        updateDuration();
+    });
+    
+    audio.addEventListener('timeupdate', () => {
+        updateProgress();
+    });
+    
+    audio.addEventListener('ended', () => {
+        handleTrackEnd();
+    });
+    
+    audio.addEventListener('error', (error) => {
+        console.error('Audio error:', error);
+        showError('Audio playback error');
+    });
+    
+    audio.addEventListener('canplay', () => {
+        updateDuration();
+    });
+}
+
+// Handle Track End
+function handleTrackEnd() {
+    if (audioPlayer.isRepeat) {
+        audioPlayer.audio.currentTime = 0;
+        audioPlayer.audio.play();
+        return;
+    }
+    
+    if (audioPlayer.currentTrack < audioPlayer.playlist.length - 1) {
+        nextTrack();
+    } else {
+        // End of playlist
+        audioPlayer.isPlaying = false;
+        updatePlayButton();
+        showNotification('Playlist finished');
+    }
+}
+
+// Audio Control Functions
+function togglePlayPause() {
+    if (!audioPlayer.audio) return;
+    
+    if (audioPlayer.isPlaying) {
+        audioPlayer.audio.pause();
+        audioPlayer.isPlaying = false;
+    } else {
+        audioPlayer.audio.play().then(() => {
+            audioPlayer.isPlaying = true;
+        }).catch(error => {
+            console.error('Play failed:', error);
+        });
+    }
+    
+    updatePlayButton();
+}
+
+function previousTrack() {
+    if (audioPlayer.currentTrack > 0) {
+        audioPlayer.currentTrack--;
+        loadAndPlayCurrentTrack();
+    }
+}
+
+function nextTrack() {
+    if (audioPlayer.currentTrack < audioPlayer.playlist.length - 1) {
+        audioPlayer.currentTrack++;
+        loadAndPlayCurrentTrack();
+    }
+}
+
+function seekToPosition(event) {
+    if (!audioPlayer.audio) return;
+    
+    const progressBar = event.currentTarget;
+    const rect = progressBar.getBoundingClientRect();
+    const percent = (event.clientX - rect.left) / rect.width;
+    const newTime = percent * audioPlayer.audio.duration;
+    
+    audioPlayer.audio.currentTime = newTime;
+}
+
+function setVolume(event) {
+    const volumeBar = event.currentTarget;
+    const rect = volumeBar.getBoundingClientRect();
+    const percent = (event.clientX - rect.left) / rect.width;
+    
+    audioPlayer.volume = Math.max(0, Math.min(1, percent));
+    if (audioPlayer.audio) {
+        audioPlayer.audio.volume = audioPlayer.volume;
+    }
+    
+    updateVolumeDisplay();
+}
+
+function toggleMute() {
+    if (!audioPlayer.audio) return;
+    
+    audioPlayer.isMuted = !audioPlayer.isMuted;
+    audioPlayer.audio.muted = audioPlayer.isMuted;
+    
+    updateMuteButton();
+}
+
+function toggleRepeat() {
+    audioPlayer.isRepeat = !audioPlayer.isRepeat;
+    updateRepeatButton();
+    showNotification(`Repeat ${audioPlayer.isRepeat ? 'enabled' : 'disabled'}`);
+}
+
+function toggleShuffle() {
+    audioPlayer.isShuffle = !audioPlayer.isShuffle;
+    
+    if (audioPlayer.isShuffle) {
+        // Shuffle playlist (keep current track first)
+        const currentTrack = audioPlayer.playlist[audioPlayer.currentTrack];
+        const otherTracks = audioPlayer.playlist.filter((_, index) => index !== audioPlayer.currentTrack);
+        const shuffledTracks = shuffleArray(otherTracks);
+        audioPlayer.playlist = [currentTrack, ...shuffledTracks];
+        audioPlayer.currentTrack = 0;
+    } else {
+        // Restore original order
+        const currentTrack = audioPlayer.playlist[audioPlayer.currentTrack];
+        audioPlayer.playlist = [...audioPlayer.originalPlaylist];
+        audioPlayer.currentTrack = audioPlayer.playlist.findIndex(track => 
+            track.id === currentTrack.id
+        );
+        if (audioPlayer.currentTrack === -1) audioPlayer.currentTrack = 0;
+    }
+    
+    updateShuffleButton();
+    updatePlaylistDisplay();
+    showNotification(`Shuffle ${audioPlayer.isShuffle ? 'enabled' : 'disabled'}`);
+}
+
+// UI Update Functions
+function updateTrackInfo(track) {
+    document.getElementById('audio-track-title').textContent = track.title || 'Unknown Title';
+    document.getElementById('audio-track-artist').textContent = track.artist || 'Unknown Artist';
+    document.getElementById('audio-artwork').textContent = track.title ? track.title[0].toUpperCase() : '🎵';
+}
+
+function updatePlayButton() {
+    const button = document.getElementById('audio-play-pause');
+    button.textContent = audioPlayer.isPlaying ? '⏸️' : '▶️';
+}
+
+function updateProgress() {
+    if (!audioPlayer.audio) return;
+    
+    const current = audioPlayer.audio.currentTime;
+    const duration = audioPlayer.audio.duration;
+    
+    if (duration > 0) {
+        const percent = (current / duration) * 100;
+        document.getElementById('audio-progress-fill').style.width = `${percent}%`;
+        document.getElementById('audio-progress-handle').style.left = `${percent}%`;
+    }
+    
+    document.getElementById('audio-current-time').textContent = formatTime(current);
+}
+
+function updateDuration() {
+    if (!audioPlayer.audio) return;
+    
+    const duration = audioPlayer.audio.duration;
+    document.getElementById('audio-duration').textContent = formatTime(duration);
+}
+
+function updateVolumeDisplay() {
+    const percent = audioPlayer.volume * 100;
+    document.getElementById('audio-volume-fill').style.width = `${percent}%`;
+}
+
+function updateMuteButton() {
+    const button = document.getElementById('audio-mute');
+    button.textContent = audioPlayer.isMuted ? '🔇' : '🔊';
+}
+
+function updateRepeatButton() {
+    const button = document.getElementById('audio-repeat');
+    button.style.color = audioPlayer.isRepeat ? '#667eea' : 'var(--text-primary)';
+}
+
+function updateShuffleButton() {
+    const button = document.getElementById('audio-shuffle');
+    button.style.color = audioPlayer.isShuffle ? '#667eea' : 'var(--text-primary)';
+}
+
+// Playlist Management
+function updatePlaylistDisplay() {
+    const container = document.getElementById('audio-playlist-items');
+    const tabContainer = document.getElementById('current-playlist');
+    
+    if (audioPlayer.playlist.length === 0) {
+        const emptyMessage = '<div class="empty-playlist">No tracks in playlist</div>';
+        container.innerHTML = emptyMessage;
+        if (tabContainer) tabContainer.innerHTML = '<div class="empty-playlist">No tracks in playlist. Search and add tracks above.</div>';
+        return;
+    }
+    
+    const playlistHTML = audioPlayer.playlist.map((track, index) => `
+        <div class="audio-playlist-item ${index === audioPlayer.currentTrack ? 'current' : ''}" 
+             onclick="playTrack(${index})">
+            <div class="audio-playlist-item-index">${index + 1}</div>
+            <div class="audio-playlist-item-info">
+                <div class="audio-playlist-item-title">${escapeHtml(track.title || 'Unknown Title')}</div>
+                <div class="audio-playlist-item-artist">${escapeHtml(track.artist || 'Unknown Artist')}</div>
+            </div>
+            <div class="audio-playlist-item-duration">${formatDuration(track.duration || 0)}</div>
+        </div>
+    `).join('');
+    
+    container.innerHTML = playlistHTML;
+    
+    // Update tab playlist display
+    if (tabContainer) {
+        const tabPlaylistHTML = audioPlayer.playlist.map((track, index) => `
+            <div class="playlist-item ${index === audioPlayer.currentTrack ? 'current' : ''}">
+                <div class="playlist-item-index">${index + 1}</div>
+                <div class="playlist-item-info">
+                    <div class="playlist-item-title">${escapeHtml(track.title || 'Unknown Title')}</div>
+                    <div class="playlist-item-artist">${escapeHtml(track.artist || 'Unknown Artist')} • ${escapeHtml(track.album || 'Unknown Album')}</div>
+                </div>
+                <div class="playlist-item-duration">${formatDuration(track.duration || 0)}</div>
+            </div>
+        `).join('');
+        tabContainer.innerHTML = tabPlaylistHTML;
+    }
+}
+
+function clearPlaylist() {
+    audioPlayer.playlist = [];
+    audioPlayer.originalPlaylist = [];
+    audioPlayer.currentTrack = -1;
+    
+    if (audioPlayer.audio) {
+        audioPlayer.audio.pause();
+        audioPlayer.audio = null;
+    }
+    
+    audioPlayer.isPlaying = false;
+    hideAudioPlayer();
+    updatePlaylistDisplay();
+    updatePlayButton();
+    
+    showNotification('Playlist cleared');
+}
+
+function shufflePlaylist() {
+    if (audioPlayer.playlist.length <= 1) return;
+    
+    const currentTrack = audioPlayer.playlist[audioPlayer.currentTrack];
+    const otherTracks = audioPlayer.playlist.filter((_, index) => index !== audioPlayer.currentTrack);
+    const shuffledTracks = shuffleArray(otherTracks);
+    
+    audioPlayer.playlist = [currentTrack, ...shuffledTracks];
+    audioPlayer.currentTrack = 0;
+    
+    updatePlaylistDisplay();
+    showNotification('Playlist shuffled');
+}
+
+function savePlaylist() {
+    if (audioPlayer.playlist.length === 0) {
+        showError('No tracks in playlist to save');
+        return;
+    }
+    
+    const playlistName = prompt('Enter playlist name:');
+    if (!playlistName) return;
+    
+    // TODO: Implement playlist saving to backend
+    showNotification(`Playlist "${playlistName}" saved (feature coming soon)`);
+}
+
+// Panel Toggle Functions
+function toggleEqualizer() {
+    const panel = document.getElementById('audio-equalizer-panel');
+    panel.classList.toggle('active');
+}
+
+function togglePlaylistPanel() {
+    const panel = document.getElementById('audio-playlist-panel');
+    panel.classList.toggle('active');
+}
+
+// Equalizer Functions
+function resetEqualizer() {
+    const sliders = document.querySelectorAll('.audio-equalizer-slider');
+    sliders.forEach((slider, index) => {
+        slider.value = '0';
+        if (audioPlayer.equalizer.filters[index]) {
+            audioPlayer.equalizer.filters[index].gain.value = 0;
+            audioPlayer.equalizer.gains[index] = 0;
+        }
+    });
+    
+    showNotification('Equalizer reset to flat response');
+}
+
+function saveEqualizerPreset() {
+    const presetName = prompt('Enter preset name:');
+    if (!presetName) return;
+    
+    // TODO: Implement equalizer preset saving
+    showNotification(`Equalizer preset "${presetName}" saved (feature coming soon)`);
+}
+
+// Audio Player Display Functions
+function showAudioPlayer() {
+    const container = document.getElementById('audio-player-container');
+    container.classList.add('active');
+    
+    // Add padding to body to prevent content overlap
+    document.body.style.paddingBottom = '120px';
+}
+
+function hideAudioPlayer() {
+    const container = document.getElementById('audio-player-container');
+    container.classList.remove('active');
+    
+    // Remove padding
+    document.body.style.paddingBottom = '0';
+    
+    // Hide panels
+    document.getElementById('audio-equalizer-panel').classList.remove('active');
+    document.getElementById('audio-playlist-panel').classList.remove('active');
+}
+
+// Keyboard Shortcuts
+function initAudioKeyboardShortcuts() {
+    document.addEventListener('keydown', (event) => {
+        // Only handle shortcuts if no input is focused
+        if (document.activeElement.tagName === 'INPUT' || document.activeElement.tagName === 'TEXTAREA') {
+            return;
+        }
+        
+        switch (event.code) {
+            case 'Space':
+                event.preventDefault();
+                togglePlayPause();
+                break;
+            case 'ArrowLeft':
+                if (event.ctrlKey) {
+                    event.preventDefault();
+                    previousTrack();
+                }
+                break;
+            case 'ArrowRight':
+                if (event.ctrlKey) {
+                    event.preventDefault();
+                    nextTrack();
+                }
+                break;
+            case 'ArrowUp':
+                if (event.ctrlKey) {
+                    event.preventDefault();
+                    audioPlayer.volume = Math.min(1, audioPlayer.volume + 0.1);
+                    if (audioPlayer.audio) audioPlayer.audio.volume = audioPlayer.volume;
+                    updateVolumeDisplay();
+                }
+                break;
+            case 'ArrowDown':
+                if (event.ctrlKey) {
+                    event.preventDefault();
+                    audioPlayer.volume = Math.max(0, audioPlayer.volume - 0.1);
+                    if (audioPlayer.audio) audioPlayer.audio.volume = audioPlayer.volume;
+                    updateVolumeDisplay();
+                }
+                break;
+            case 'KeyM':
+                if (event.ctrlKey) {
+                    event.preventDefault();
+                    toggleMute();
+                }
+                break;
+            case 'KeyR':
+                if (event.ctrlKey) {
+                    event.preventDefault();
+                    toggleRepeat();
+                }
+                break;
+            case 'KeyS':
+                if (event.ctrlKey && event.shiftKey) {
+                    event.preventDefault();
+                    toggleShuffle();
+                }
+                break;
+        }
+    });
+}
+
+// Utility Functions
+function shuffleArray(array) {
+    const shuffled = [...array];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled;
+}
+
+function formatTime(seconds) {
+    if (isNaN(seconds) || seconds < 0) return '0:00';
+    
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+function formatDuration(seconds) {
+    if (!seconds || seconds <= 0) return '0:00';
+    return formatTime(seconds);
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Initialize audio player when app starts
+document.addEventListener('DOMContentLoaded', () => {
+    initAudioPlayer();
+});
+
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', init);

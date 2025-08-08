@@ -1515,6 +1515,259 @@ app.post('/api/subscribe', (req, res) => {
     // });
 });
 
+// =============================================================================
+// AUDIO PLAYER API ENDPOINTS
+// =============================================================================
+
+// Search tracks for audio player
+app.get('/api/search/tracks', (req, res) => {
+    const { q: query } = req.query;
+    
+    if (!query || query.trim().length < 2) {
+        return res.json({ tracks: [] });
+    }
+    
+    const db = getDb();
+    const searchTerm = `%${query.trim()}%`;
+    
+    // Search in tracks table with album and artist info
+    const sql = `
+        SELECT 
+            t.id,
+            t.title,
+            t.artist,
+            t.album_artist,
+            t.duration,
+            t.file_path,
+            t.quality,
+            a.title as album_title,
+            a.artist as album_artist_name,
+            a.year,
+            a.label
+        FROM tracks t
+        LEFT JOIN albums a ON t.album_id = a.id
+        WHERE 
+            t.title LIKE ? OR 
+            t.artist LIKE ? OR 
+            t.album_artist LIKE ? OR 
+            a.title LIKE ? OR 
+            a.artist LIKE ?
+        ORDER BY 
+            CASE 
+                WHEN t.title LIKE ? THEN 1
+                WHEN t.artist LIKE ? THEN 2
+                WHEN a.title LIKE ? THEN 3
+                ELSE 4
+            END,
+            t.title
+        LIMIT 50
+    `;
+    
+    const params = [
+        searchTerm, searchTerm, searchTerm, searchTerm, searchTerm, // WHERE conditions
+        searchTerm, searchTerm, searchTerm // ORDER BY conditions
+    ];
+    
+    db.all(sql, params, (err, rows) => {
+        if (err) {
+            console.error('Error searching tracks:', err);
+            return res.status(500).json({ error: 'Search failed' });
+        }
+        
+        const tracks = rows.map(row => ({
+            id: row.id,
+            title: row.title,
+            artist: row.artist || row.album_artist_name || 'Unknown Artist',
+            album: row.album_title || 'Unknown Album',
+            duration: row.duration,
+            year: row.year,
+            quality: row.quality,
+            label: row.label,
+            file_path: row.file_path
+        }));
+        
+        res.json({ tracks });
+    });
+});
+
+// Stream audio file
+app.get('/api/audio/stream/:trackId', (req, res) => {
+    const { trackId } = req.params;
+    const db = getDb();
+    
+    // Get track file path
+    db.get('SELECT file_path, title, artist FROM tracks WHERE id = ?', [trackId], (err, track) => {
+        if (err) {
+            console.error('Error getting track:', err);
+            return res.status(500).json({ error: 'Database error' });
+        }
+        
+        if (!track) {
+            return res.status(404).json({ error: 'Track not found' });
+        }
+        
+        const filePath = track.file_path;
+        
+        // Check if file exists
+        if (!fs.existsSync(filePath)) {
+            console.error('Audio file not found:', filePath);
+            return res.status(404).json({ error: 'Audio file not found' });
+        }
+        
+        // Get file stats
+        const stat = fs.statSync(filePath);
+        const fileSize = stat.size;
+        const range = req.headers.range;
+        
+        if (range) {
+            // Handle range requests for seeking
+            const parts = range.replace(/bytes=/, "").split("-");
+            const start = parseInt(parts[0], 10);
+            const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+            const chunksize = (end - start) + 1;
+            
+            const stream = fs.createReadStream(filePath, { start, end });
+            
+            res.writeHead(206, {
+                'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+                'Accept-Ranges': 'bytes',
+                'Content-Length': chunksize,
+                'Content-Type': getAudioContentType(filePath),
+                'Cache-Control': 'public, max-age=31536000', // 1 year cache
+                'Access-Control-Allow-Origin': '*'
+            });
+            
+            stream.pipe(res);
+        } else {
+            // Stream entire file
+            res.writeHead(200, {
+                'Content-Length': fileSize,
+                'Content-Type': getAudioContentType(filePath),
+                'Accept-Ranges': 'bytes',
+                'Cache-Control': 'public, max-age=31536000', // 1 year cache
+                'Access-Control-Allow-Origin': '*'
+            });
+            
+            fs.createReadStream(filePath).pipe(res);
+        }
+    });
+});
+
+// Get track metadata for audio player
+app.get('/api/tracks/:trackId/metadata', (req, res) => {
+    const { trackId } = req.params;
+    const db = getDb();
+    
+    const sql = `
+        SELECT 
+            t.*,
+            a.title as album_title,
+            a.artist as album_artist,
+            a.year,
+            a.label,
+            a.catalog_number,
+            a.genre
+        FROM tracks t
+        LEFT JOIN albums a ON t.album_id = a.id
+        WHERE t.id = ?
+    `;
+    
+    db.get(sql, [trackId], (err, track) => {
+        if (err) {
+            console.error('Error getting track metadata:', err);
+            return res.status(500).json({ error: 'Database error' });
+        }
+        
+        if (!track) {
+            return res.status(404).json({ error: 'Track not found' });
+        }
+        
+        res.json({
+            id: track.id,
+            title: track.title,
+            artist: track.artist || track.album_artist || 'Unknown Artist',
+            album: track.album_title || 'Unknown Album',
+            albumArtist: track.album_artist,
+            year: track.year,
+            genre: track.genre,
+            label: track.label,
+            catalogNumber: track.catalog_number,
+            duration: track.duration,
+            quality: track.quality,
+            trackNumber: track.track_number,
+            discNumber: track.disc_number,
+            filePath: track.file_path
+        });
+    });
+});
+
+// Get album tracks for playlist building
+app.get('/api/albums/:albumId/tracks', (req, res) => {
+    const { albumId } = req.params;
+    const db = getDb();
+    
+    const sql = `
+        SELECT 
+            t.*,
+            a.title as album_title,
+            a.artist as album_artist,
+            a.year,
+            a.label
+        FROM tracks t
+        LEFT JOIN albums a ON t.album_id = a.id
+        WHERE t.album_id = ?
+        ORDER BY 
+            COALESCE(t.disc_number, 1), 
+            COALESCE(t.track_number, 999), 
+            t.title
+    `;
+    
+    db.all(sql, [albumId], (err, tracks) => {
+        if (err) {
+            console.error('Error getting album tracks:', err);
+            return res.status(500).json({ error: 'Database error' });
+        }
+        
+        const formattedTracks = tracks.map(track => ({
+            id: track.id,
+            title: track.title,
+            artist: track.artist || track.album_artist || 'Unknown Artist',
+            album: track.album_title || 'Unknown Album',
+            duration: track.duration,
+            year: track.year,
+            quality: track.quality,
+            trackNumber: track.track_number,
+            discNumber: track.disc_number,
+            label: track.label,
+            filePath: track.file_path
+        }));
+        
+        res.json({ tracks: formattedTracks });
+    });
+});
+
+// Helper function to determine audio content type
+function getAudioContentType(filePath) {
+    const ext = path.extname(filePath).toLowerCase();
+    switch (ext) {
+        case '.mp3':
+            return 'audio/mpeg';
+        case '.flac':
+            return 'audio/flac';
+        case '.wav':
+            return 'audio/wav';
+        case '.m4a':
+        case '.aac':
+            return 'audio/aac';
+        case '.ogg':
+            return 'audio/ogg';
+        case '.wma':
+            return 'audio/x-ms-wma';
+        default:
+            return 'application/octet-stream';
+    }
+}
+
 // Start server with WebSocket support
 server.listen(PORT, '0.0.0.0', () => {
     // Get local IP address for network access
