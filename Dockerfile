@@ -5,8 +5,8 @@
 FROM node:18-alpine AS node-builder
 
 # Install Node.js dependencies
-WORKDIR /app/server
-COPY server/package*.json ./
+WORKDIR /app/visualization
+COPY visualization/package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
 # Build stage with all system dependencies
@@ -41,7 +41,7 @@ RUN chown -R ordr:ordr /app
 COPY --chown=ordr:ordr . /app/
 
 # Copy Node.js application and dependencies
-COPY --from=node-builder --chown=ordr:ordr /app/server/node_modules /app/server/node_modules
+COPY --from=node-builder --chown=ordr:ordr /app/visualization/node_modules /app/visualization/node_modules
 
 # Create directories for data and configuration
 RUN mkdir -p /app/data/music /app/data/organized /app/data/unsorted /app/config /app/logs /app/cache && \
