@@ -154,13 +154,15 @@ if [[ -f "$LOCAL_CONFIG_FILE" ]]; then
     echo "Debug: First 100 chars of ARTIST_ALIAS_GROUPS: ${ARTIST_ALIAS_GROUPS:0:100}..." >&2
 fi
 
-# Define log levels
-readonly LOG_QUIET=0
-readonly LOG_INFO=1
-readonly LOG_DEBUG=2
-readonly LOG_WARNING=3
-readonly LOG_ERROR=4
-readonly LOG_FATAL=5
+# Define log levels (consistent with lib/common.sh)
+if [[ -z "${LOG_ERROR:-}" ]]; then
+    readonly LOG_QUIET=0
+    readonly LOG_ERROR=0
+    readonly LOG_WARNING=1
+    readonly LOG_INFO=2
+    readonly LOG_DEBUG=3
+    readonly LOG_FATAL=5
+fi
 
 # --- Helper Functions ---
 # Log function
