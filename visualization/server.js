@@ -2328,23 +2328,36 @@ app.post('/api/actions/process', (req, res) => {
         return res.status(400).json({ error: 'Source directory is required' });
     }
     
-    // Build command arguments
-    let command = `cd .. && ./ordr.fm.sh --source "${sourceDirectory}"`;
+    // 🔒 Security: Validate source directory to prevent command injection
+    if (!/^[a-zA-Z0-9\s\/\.\-\_]+$/.test(sourceDirectory)) {
+        return res.status(400).json({ 
+            error: 'Invalid characters in source directory. Only alphanumeric characters, spaces, forward slashes, dots, hyphens, and underscores are allowed.' 
+        });
+    }
+    
+    // Additional security: Check if path exists and is a directory
+    if (!fs.existsSync(sourceDirectory) || !fs.statSync(sourceDirectory).isDirectory()) {
+        return res.status(400).json({ error: 'Source directory does not exist or is not a directory' });
+    }
+    
+    // Build command arguments securely using array-based spawn
+    const args = ['../ordr.fm.sh', '--source', sourceDirectory];
     if (!dryRun) {
-        command += ' --move';
+        args.push('--move');
     }
     if (enableDiscogs) {
-        command += ' --discogs';
+        args.push('--discogs');
     }
     if (electronicMode) {
-        command += ' --enable-electronic';
+        args.push('--enable-electronic');
     }
     
-    console.log('Starting processing with command:', command);
+    console.log('Starting processing with args:', args);
     
-    // Execute the command asynchronously
+    // Execute the command securely without shell interpolation
     const { spawn } = require('child_process');
-    const process = spawn('bash', ['-c', command], {
+    const process = spawn('bash', args, {
+        cwd: '..',  // Change working directory to parent
         stdio: ['pipe', 'pipe', 'pipe']
     });
     

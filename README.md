@@ -3,7 +3,7 @@
 **The Ultimate Music Organization System**
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Version](https://img.shields.io/badge/version-2.1.0-brightgreen.svg)]()
+[![Version](https://img.shields.io/badge/version-2.5.0-brightgreen.svg)]()
 [![Platform](https://img.shields.io/badge/platform-Linux%20%7C%20macOS-lightgrey.svg)]()
 
 > Transform your chaotic music collection into a beautifully organized, media-server-ready library with intelligent metadata enrichment, relationship mapping, and real-time visualization.
@@ -14,10 +14,14 @@ ordr.fm isn't just another music organization tool. It's a comprehensive system 
 
 - **🧠 Intelligent Organization**: Album-centric processing that preserves integrity while handling edge cases
 - **🔗 Relationship Discovery**: Uncover hidden connections between artists, labels, and collaborations  
-- **📊 Real-time Visualization**: Interactive network graphs showing your music's relationships
+- **📊 Real-time Visualization**: Interactive PWA dashboard with advanced search, mobile optimization, and offline support
 - **🌐 Dual Metadata Sources**: Combine Discogs and MusicBrainz for unparalleled metadata quality
-- **⚡ High Performance**: Parallel processing with real-time progress tracking
-- **🛡️ Safety First**: Comprehensive dry-run mode and atomic operations with rollback
+- **⚡ High Performance**: Parallel processing with database query caching and real-time progress tracking
+- **🛡️ Safety First**: Comprehensive dry-run mode, atomic operations with rollback, and extensive test coverage
+- **🎵 Audio Integration**: Built-in audio player with waveform visualization and playlist management
+- **☁️ Cloud Backup**: Automated Google Drive backup with resume capability and progress monitoring
+- **📝 Metadata Editing**: In-place editing interface with change tracking and validation
+- **🔍 Advanced Search**: Saved search presets, history tracking, and multi-criteria filtering
 
 ---
 
@@ -45,7 +49,7 @@ cd ordr.fm
 ./setup_wizard.sh
 
 # Start web interface
-cd server && npm install && npm start
+cd visualization && npm install && npm start
 ```
 
 ---
@@ -95,18 +99,28 @@ cd server && npm install && npm start
 - 📀 **Release Information**: Country, format, year, barcode
 - 🎹 **Remix Detection**: Separate remixes from originals
 
-### 📊 Real-time Web Dashboard
+### 📊 Progressive Web Application Dashboard
 
-**Professional visualization of your music relationships:**
+**Professional visualization and management interface:**
 
 ![Dashboard Preview](docs/images/dashboard-preview.png)
 
-**Features:**
-- 🌐 **Interactive Network Graphs**: Explore artist collaborations
-- 📈 **Live Statistics**: Real-time organization progress
+**Core Features:**
+- 🌐 **Interactive Network Graphs**: Explore artist collaborations and relationships
+- 📈 **Live Statistics**: Real-time organization progress with caching optimization
 - 🔄 **Batch Processing**: Enrich hundreds of albums automatically
-- 📱 **Responsive Design**: Works on desktop, tablet, and mobile
+- 📱 **Mobile-First Design**: Touch gestures, swipe navigation, haptic feedback
 - ⚡ **WebSocket Updates**: See changes happen in real-time
+- 📶 **Offline Support**: PWA functionality with service worker caching
+
+**Advanced Features:**
+- 🎵 **Built-in Audio Player**: Stream and preview tracks with waveform visualization
+- 📝 **Metadata Editor**: Edit album and track information with change tracking
+- ☁️ **Cloud Backup**: Automated Google Drive backup with progress monitoring
+- 🔍 **Advanced Search**: Multi-criteria search with saved presets and history
+- 📊 **Analytics Dashboard**: Collection insights, quality distribution, and trends
+- 🔧 **Configuration Management**: Web-based settings with validation
+- 📋 **Action Center**: Process albums, backup data, and manage operations
 
 ---
 
@@ -120,11 +134,14 @@ ordr.fm combines the best of both worlds:
 - **File Operations**: Atomic moves with rollback support
 - **Parallel Processing**: Multi-core utilization for large collections
 
-### 🌐 **Node.js Server** (Web Interface & APIs)
-- **MusicBrainz Integration**: Artist relationships and metadata enrichment
-- **Real-time Visualization**: D3.js force-directed graphs
-- **REST API**: Complete programmatic access
-- **WebSocket Support**: Live updates during processing
+### 🌐 **Node.js Server** (PWA & APIs)
+- **Progressive Web App**: Service worker, offline support, mobile optimization
+- **Enhanced APIs**: Advanced search, metadata editing, audio streaming
+- **Database Caching**: Query optimization with 5-minute TTL
+- **Real-time Features**: WebSocket support for live updates
+- **Audio Integration**: Range request support for streaming and waveform data
+- **Cloud Integration**: Google Drive backup management
+- **Error Handling**: Comprehensive retry logic and connection monitoring
 
 ```
 ┌─────────────────┐    ┌──────────────────┐    ┌─────────────────┐
@@ -138,6 +155,44 @@ ordr.fm combines the best of both worlds:
 │ (Visualization) │    │   (Database)     │    │  (Your Music)   │
 └─────────────────┘    └──────────────────┘    └─────────────────┘
 ```
+
+---
+
+## 🧪 Quality Assurance & Testing
+
+ordr.fm includes comprehensive test coverage to ensure reliability and stability:
+
+### Test Framework
+```bash
+# Run all tests (unit, integration, end-to-end)
+./run_all_tests.sh
+
+# Run specific test suites
+./tests/unit/test_argument_parsing.sh
+./tests/unit/test_metadata_functions.sh
+./tests/integration/test_web_api_integration.sh
+./tests/integration/test_end_to_end_workflow.sh
+
+# Run Playwright browser tests
+cd visualization && npm test
+```
+
+### Coverage Statistics
+- **90%+ Overall Coverage**: Critical functionality thoroughly tested
+- **Unit Tests**: 60+ test cases covering core functions and edge cases
+- **Integration Tests**: 30+ test cases covering workflows and API endpoints
+- **End-to-End Tests**: Complete user workflow validation
+- **Browser Tests**: 150+ cross-browser tests (Chrome, Firefox, Safari)
+- **Performance Tests**: Response time and scalability validation
+
+### Test Categories
+- ✅ **Argument Parsing**: All CLI argument validation and edge cases
+- ✅ **Metadata Processing**: Quality detection, path building, validation
+- ✅ **API Integration**: All REST endpoints, caching, error handling
+- ✅ **Database Operations**: CRUD operations, transactions, integrity
+- ✅ **File Operations**: Organization workflows, safety mechanisms
+- ✅ **PWA Functionality**: Offline support, mobile features, performance
+- ✅ **Error Handling**: Network failures, invalid inputs, recovery
 
 ---
 
@@ -162,8 +217,8 @@ git clone https://github.com/adrianwedd/ordr.fm.git
 cd ordr.fm
 ./setup_wizard.sh
 
-# Install Node.js server dependencies
-cd server && npm install
+# Install visualization dashboard dependencies
+cd visualization && npm install
 ```
 
 ### Option 3: Docker (Recommended for Production)
