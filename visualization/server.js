@@ -12,7 +12,18 @@ const databaseService = require('./src/services/database');
 const webSocketService = require('./src/websocket');
 
 // Import middleware
-const { configureSecurityHeaders, generalApiLimiter, errorHandler, requestLogger } = require('./src/middleware/security');
+const { 
+    configureSecurityHeaders, 
+    configureCors,
+    generalApiLimiter,
+    authApiLimiter,
+    searchApiLimiter,
+    exportApiLimiter,
+    errorHandler, 
+    requestLogger,
+    suspiciousActivityDetector,
+    validateSecurityConfig
+} = require('./src/middleware/security');
 const { authenticateToken, requireRole } = require('./src/middleware/auth');
 
 // Import controllers
@@ -28,13 +39,27 @@ const systemController = require('./src/controllers/system');
 const app = express();
 const server = http.createServer(app);
 
-// Configure security headers
+// Validate security configuration on startup
+const securityValidation = validateSecurityConfig();
+if (!securityValidation.valid) {
+    console.warn('⚠️ Security configuration validation failed:', securityValidation.issues);
+    if (config.isProduction()) {
+        console.error('❌ Security issues detected in production - exiting');
+        process.exit(1);
+    }
+}
+
+// Configure security headers and CORS
 app.use(configureSecurityHeaders());
+app.use(configureCors());
 
 // Basic middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
+
+// Suspicious activity monitoring
+app.use(suspiciousActivityDetector);
 
 // Request logging in development
 if (config.isDevelopment()) {
@@ -125,9 +150,9 @@ app.get('/api/health', (req, res) => {
     });
 });
 
-// Authentication routes
-app.post('/api/auth/login', authController.login.bind(authController));
-app.post('/api/auth/logout', authenticateToken, authController.logout.bind(authController));
+// Authentication routes (with stricter rate limiting)
+app.post('/api/auth/login', authApiLimiter, authController.login.bind(authController));
+app.post('/api/auth/logout', authApiLimiter, authenticateToken, authController.logout.bind(authController));
 app.get('/api/auth/profile', authenticateToken, authController.getProfile.bind(authController));
 
 // User management routes (admin only)
@@ -143,15 +168,15 @@ app.put('/api/albums/:id', authenticateToken, albumsController.updateAlbum.bind(
 app.get('/api/stats', albumsController.getStats.bind(albumsController));
 app.get('/api/artists', albumsController.getArtists.bind(albumsController));
 
-// Search routes
-app.get('/api/search/fuzzy', searchController.fuzzySearch.bind(searchController));
-app.get('/api/search/suggestions', searchController.getSuggestions.bind(searchController));
+// Search routes (with search-specific rate limiting)
+app.get('/api/search/fuzzy', searchApiLimiter, searchController.fuzzySearch.bind(searchController));
+app.get('/api/search/suggestions', searchApiLimiter, searchController.getSuggestions.bind(searchController));
 app.get('/api/search/popular', searchController.getPopularSearches.bind(searchController));
 app.get('/api/search/analytics', authenticateToken, requireRole('admin'), searchController.getAnalytics.bind(searchController));
-app.get('/api/search/advanced', searchController.advancedSearch.bind(searchController));
+app.get('/api/search/advanced', searchApiLimiter, searchController.advancedSearch.bind(searchController));
 app.get('/api/search/facets', searchController.getFacets.bind(searchController));
-app.get('/api/search/albums', searchController.searchAlbums.bind(searchController));
-app.get('/api/search/tracks', searchController.searchTracks.bind(searchController));
+app.get('/api/search/albums', searchApiLimiter, searchController.searchAlbums.bind(searchController));
+app.get('/api/search/tracks', searchApiLimiter, searchController.searchTracks.bind(searchController));
 
 // Track routes
 app.put('/api/tracks/:id', authenticateToken, tracksController.updateTrack.bind(tracksController));
@@ -182,7 +207,7 @@ app.get('/api/system/status', processingController.getSystemStatus.bind(processi
 app.get('/api/system/activity', systemController.getActivity.bind(systemController));
 app.get('/api/config', systemController.getConfig.bind(systemController));
 app.post('/api/config', authenticateToken, requireRole('admin'), systemController.updateConfig.bind(systemController));
-app.get('/api/export', authenticateToken, systemController.exportCollection.bind(systemController));
+app.get('/api/export', exportApiLimiter, authenticateToken, systemController.exportCollection.bind(systemController));
 app.get('/api/insights', systemController.getInsights.bind(systemController));
 app.get('/api/performance', systemController.getPerformance.bind(systemController));
 

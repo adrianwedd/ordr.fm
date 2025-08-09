@@ -1,43 +1,24 @@
-// Security middleware configuration
+// Centralized security middleware configuration
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
-const { RATE_LIMIT_WINDOW_MS, RATE_LIMIT_MAX, isProduction } = require('../config');
+const config = require('../config');
+const { getSecurityConfig, getMiddlewareConfig, validateSecurityConfig } = require('../config/security');
 
 /**
- * Configure Helmet security headers
+ * Configure Helmet security headers with centralized configuration
  */
 function configureSecurityHeaders() {
-    const helmetConfig = {
-        contentSecurityPolicy: {
-            directives: {
-                defaultSrc: ["'self'"],
-                styleSrc: [
-                    "'self'",
-                    "'unsafe-inline'",
-                    "https://cdnjs.cloudflare.com",
-                    "https://cdn.jsdelivr.net"
-                ],
-                scriptSrc: [
-                    "'self'",
-                    "'unsafe-inline'",
-                    "https://cdnjs.cloudflare.com",
-                    "https://cdn.jsdelivr.net"
-                ],
-                imgSrc: ["'self'", "data:", "https:"],
-                connectSrc: ["'self'", "ws:", "wss:"],
-                fontSrc: ["'self'", "https:", "data:"],
-                objectSrc: ["'none'"],
-                mediaSrc: ["'self'"],
-                frameSrc: ["'none'"]
-            }
-        },
-        crossOriginEmbedderPolicy: false,
-        crossOriginOpenerPolicy: false,
-        originAgentCluster: false
-    };
+    // Validate security configuration on startup
+    const validation = validateSecurityConfig();
+    if (!validation.valid) {
+        console.warn('⚠️ Security configuration issues found:', validation.issues);
+    }
 
+    // Get helmet configuration from centralized security config
+    const helmetConfig = getMiddlewareConfig('helmet');
+    
     // Development-specific adjustments
-    if (!isProduction()) {
+    if (config.isDevelopment()) {
         helmetConfig.contentSecurityPolicy.directives.upgradeInsecureRequests = null;
         helmetConfig.hsts = false; // Disable HSTS for local HTTP development
     }
@@ -46,46 +27,62 @@ function configureSecurityHeaders() {
 }
 
 /**
- * General API rate limiter
+ * General API rate limiter with centralized configuration
  */
+const rateLimitConfig = getSecurityConfig('rateLimit');
 const generalApiLimiter = rateLimit({
-    windowMs: RATE_LIMIT_WINDOW_MS,
-    max: RATE_LIMIT_MAX,
+    windowMs: rateLimitConfig.general.windowMs,
+    max: rateLimitConfig.general.max,
     message: {
-        error: 'Too many requests from this IP, please try again later.',
-        retryAfter: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)
+        error: rateLimitConfig.general.message,
+        retryAfter: Math.ceil(rateLimitConfig.general.windowMs / 1000)
     },
-    standardHeaders: true,
-    legacyHeaders: false,
+    standardHeaders: rateLimitConfig.general.standardHeaders,
+    legacyHeaders: rateLimitConfig.general.legacyHeaders,
     skip: (req) => {
         // Skip rate limiting for health checks in development
-        return !isProduction() && req.path === '/api/health';
+        return config.isDevelopment() && req.path === '/api/health';
     }
 });
 
 /**
- * Strict rate limiter for resource-intensive endpoints
+ * Authentication rate limiter (stricter)
  */
-const strictApiLimiter = rateLimit({
-    windowMs: RATE_LIMIT_WINDOW_MS,
-    max: 50, // Much lower limit for intensive operations
+const authApiLimiter = rateLimit({
+    windowMs: rateLimitConfig.auth.windowMs,
+    max: rateLimitConfig.auth.max,
     message: {
-        error: 'Too many resource-intensive requests. Please wait before trying again.',
-        retryAfter: Math.ceil(RATE_LIMIT_WINDOW_MS / 1000)
+        error: rateLimitConfig.auth.message,
+        retryAfter: Math.ceil(rateLimitConfig.auth.windowMs / 1000)
+    },
+    standardHeaders: true,
+    legacyHeaders: false,
+    skipSuccessfulRequests: rateLimitConfig.auth.skipSuccessfulRequests
+});
+
+/**
+ * Search rate limiter
+ */
+const searchApiLimiter = rateLimit({
+    windowMs: rateLimitConfig.search.windowMs,
+    max: rateLimitConfig.search.max,
+    message: {
+        error: rateLimitConfig.search.message,
+        retryAfter: Math.ceil(rateLimitConfig.search.windowMs / 1000)
     },
     standardHeaders: true,
     legacyHeaders: false
 });
 
 /**
- * Lenient rate limiter for health checks
+ * Export/backup rate limiter (very strict)
  */
-const healthCheckLimiter = rateLimit({
-    windowMs: 60 * 1000, // 1 minute
-    max: 30, // 30 requests per minute for health checks
+const exportApiLimiter = rateLimit({
+    windowMs: rateLimitConfig.export.windowMs,
+    max: rateLimitConfig.export.max,
     message: {
-        error: 'Health check rate limit exceeded.',
-        retryAfter: 60
+        error: rateLimitConfig.export.message,
+        retryAfter: Math.ceil(rateLimitConfig.export.windowMs / 1000)
     },
     standardHeaders: true,
     legacyHeaders: false
@@ -113,13 +110,28 @@ function requestLogger(req, res, next) {
 }
 
 /**
- * Error handling middleware
+ * Enhanced error handling middleware with security logging
  */
 function errorHandler(err, req, res, next) {
-    console.error('Error occurred:', err);
+    const securityConfig = getSecurityConfig('security');
+    
+    // Log security events if enabled
+    if (securityConfig.logSecurityEvents) {
+        console.error(`[SECURITY] Error occurred: ${err.message}`, {
+            timestamp: new Date().toISOString(),
+            method: req.method,
+            url: req.url,
+            ip: req.ip,
+            userAgent: req.get('User-Agent'),
+            error: err.message,
+            stack: config.isDevelopment() ? err.stack : undefined
+        });
+    } else {
+        console.error('Error occurred:', err);
+    }
     
     // Don't leak error details in production
-    if (isProduction()) {
+    if (config.isProduction()) {
         res.status(500).json({
             error: 'Internal server error'
         });
@@ -131,11 +143,50 @@ function errorHandler(err, req, res, next) {
     }
 }
 
+/**
+ * Suspicious activity detection middleware
+ */
+function suspiciousActivityDetector(req, res, next) {
+    const securityConfig = getSecurityConfig('security');
+    const { body, query, params } = req;
+    const userContent = JSON.stringify({ body, query, params });
+    
+    // Check for suspicious patterns
+    for (const pattern of securityConfig.monitorPatterns) {
+        if (pattern.test(userContent)) {
+            console.warn(`[SECURITY] Suspicious activity detected from ${req.ip}`, {
+                timestamp: new Date().toISOString(),
+                method: req.method,
+                url: req.url,
+                pattern: pattern.source,
+                userAgent: req.get('User-Agent')
+            });
+            
+            // Log but don't block - just monitor
+            break;
+        }
+    }
+    
+    next();
+}
+
+/**
+ * CORS configuration middleware
+ */
+function configureCors() {
+    const corsConfig = getMiddlewareConfig('cors');
+    return require('cors')(corsConfig);
+}
+
 module.exports = {
     configureSecurityHeaders,
+    configureCors,
     generalApiLimiter,
-    strictApiLimiter,
-    healthCheckLimiter,
+    authApiLimiter,
+    searchApiLimiter,
+    exportApiLimiter,
     requestLogger,
-    errorHandler
+    errorHandler,
+    suspiciousActivityDetector,
+    validateSecurityConfig
 };

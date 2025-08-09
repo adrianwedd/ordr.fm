@@ -1,37 +1,53 @@
-// Authentication utilities
+// Authentication utilities with centralized security configuration
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
-const { JWT_SECRET, JWT_EXPIRES_IN, BCRYPT_ROUNDS } = require('../config');
+const config = require('../config');
+const { getSecurityConfig } = require('../config/security');
 
 /**
- * Generate JWT token for user
+ * Generate JWT token for user with centralized configuration
  * @param {Object} payload - User data to encode
  * @returns {string} JWT token
  */
 function generateToken(payload) {
-    return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+    const jwtConfig = getSecurityConfig('jwt');
+    return jwt.sign(payload, jwtConfig.secret, {
+        expiresIn: jwtConfig.expiresIn,
+        algorithm: jwtConfig.algorithm,
+        issuer: jwtConfig.issuer,
+        audience: jwtConfig.audience
+    });
 }
 
 /**
- * Verify JWT token
+ * Verify JWT token with centralized configuration
  * @param {string} token - JWT token to verify
  * @returns {Object|null} Decoded payload or null if invalid
  */
 function verifyToken(token) {
     try {
-        return jwt.verify(token, JWT_SECRET);
+        const jwtConfig = getSecurityConfig('jwt');
+        return jwt.verify(token, jwtConfig.secret, {
+            algorithms: [jwtConfig.algorithm],
+            issuer: jwtConfig.issuer,
+            audience: jwtConfig.audience,
+            clockTolerance: jwtConfig.clockTolerance,
+            ignoreExpiration: jwtConfig.ignoreExpiration,
+            ignoreNotBefore: jwtConfig.ignoreNotBefore
+        });
     } catch (error) {
         return null;
     }
 }
 
 /**
- * Hash password using bcrypt
+ * Hash password using bcrypt with centralized configuration
  * @param {string} password - Plain text password
  * @returns {Promise<string>} Hashed password
  */
 async function hashPassword(password) {
-    return await bcrypt.hash(password, BCRYPT_ROUNDS);
+    const passwordConfig = getSecurityConfig('password');
+    return await bcrypt.hash(password, passwordConfig.saltRounds);
 }
 
 /**
@@ -57,17 +73,79 @@ function extractToken(authHeader) {
 }
 
 /**
- * Generate secure random password
+ * Validate password strength against security requirements
+ * @param {string} password - Password to validate
+ * @returns {Object} Validation result with isValid and issues
+ */
+function validatePasswordStrength(password) {
+    const passwordConfig = getSecurityConfig('password');
+    const issues = [];
+    
+    if (password.length < passwordConfig.minLength) {
+        issues.push(`Password must be at least ${passwordConfig.minLength} characters long`);
+    }
+    
+    if (passwordConfig.requireUppercase && !/[A-Z]/.test(password)) {
+        issues.push('Password must contain at least one uppercase letter');
+    }
+    
+    if (passwordConfig.requireLowercase && !/[a-z]/.test(password)) {
+        issues.push('Password must contain at least one lowercase letter');
+    }
+    
+    if (passwordConfig.requireNumbers && !/\d/.test(password)) {
+        issues.push('Password must contain at least one number');
+    }
+    
+    if (passwordConfig.requireSpecialChars && !/[^a-zA-Z0-9]/.test(password)) {
+        issues.push('Password must contain at least one special character');
+    }
+    
+    // Test against strong password regex if provided
+    if (passwordConfig.strongPasswordRegex && !passwordConfig.strongPasswordRegex.test(password)) {
+        issues.push('Password does not meet complexity requirements');
+    }
+    
+    return {
+        isValid: issues.length === 0,
+        issues
+    };
+}
+
+/**
+ * Generate secure random password meeting security requirements
  * @param {number} length - Password length (default: 12)
  * @returns {string} Random password
  */
 function generateRandomPassword(length = 12) {
-    const charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+    const passwordConfig = getSecurityConfig('password');
+    length = Math.max(length, passwordConfig.minLength);
+    
+    let charset = '';
+    if (passwordConfig.requireLowercase) charset += 'abcdefghijklmnopqrstuvwxyz';
+    if (passwordConfig.requireUppercase) charset += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+    if (passwordConfig.requireNumbers) charset += '0123456789';
+    if (passwordConfig.requireSpecialChars) charset += '!@#$%^&*';
+    
+    if (!charset) {
+        charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
+    }
+    
     let password = '';
-    for (let i = 0; i < length; i++) {
+    
+    // Ensure required character types are included
+    if (passwordConfig.requireLowercase) password += 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)];
+    if (passwordConfig.requireUppercase) password += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
+    if (passwordConfig.requireNumbers) password += '0123456789'[Math.floor(Math.random() * 10)];
+    if (passwordConfig.requireSpecialChars) password += '!@#$%^&*'[Math.floor(Math.random() * 8)];
+    
+    // Fill remaining length
+    for (let i = password.length; i < length; i++) {
         password += charset.charAt(Math.floor(Math.random() * charset.length));
     }
-    return password;
+    
+    // Shuffle the password
+    return password.split('').sort(() => 0.5 - Math.random()).join('');
 }
 
 module.exports = {
@@ -76,5 +154,6 @@ module.exports = {
     hashPassword,
     verifyPassword,
     extractToken,
+    validatePasswordStrength,
     generateRandomPassword
 };
