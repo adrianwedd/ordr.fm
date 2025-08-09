@@ -262,13 +262,158 @@ app.use('/api/', (req, res, next) => {
     return limiter(req, res, next);
 });
 
-// Database connection helper
-function getDb() {
+// Connection pooling for better concurrent performance
+class DatabasePool {
+    constructor(path, maxConnections = 10) {
+        this.path = path;
+        this.maxConnections = maxConnections;
+        this.pool = [];
+        this.inUse = new Set();
+        this.waitQueue = [];
+    }
+    
+    getConnection() {
+        return new Promise((resolve, reject) => {
+            // Reuse available connection
+            if (this.pool.length > 0) {
+                const conn = this.pool.pop();
+                this.inUse.add(conn);
+                return resolve(conn);
+            }
+            
+            // Create new connection if under limit
+            if (this.inUse.size < this.maxConnections) {
+                const conn = new sqlite3.Database(this.path, sqlite3.OPEN_READONLY, (err) => {
+                    if (err) {
+                        reject(err);
+                    } else {
+                        this.inUse.add(conn);
+                        resolve(conn);
+                    }
+                });
+            } else {
+                // Queue request if at max connections
+                this.waitQueue.push({ resolve, reject });
+            }
+        });
+    }
+    
+    releaseConnection(conn) {
+        this.inUse.delete(conn);
+        
+        if (this.waitQueue.length > 0) {
+            const { resolve } = this.waitQueue.shift();
+            this.inUse.add(conn);
+            resolve(conn);
+        } else {
+            this.pool.push(conn);
+        }
+    }
+    
+    close() {
+        [...this.pool, ...this.inUse].forEach(conn => {
+            try {
+                conn.close();
+            } catch (err) {
+                console.warn('Error closing connection:', err.message);
+            }
+        });
+        this.pool.length = 0;
+        this.inUse.clear();
+        
+        // Reject any waiting requests
+        this.waitQueue.forEach(({ reject }) => {
+            reject(new Error('Database pool closing'));
+        });
+        this.waitQueue.length = 0;
+    }
+}
+
+// Initialize connection pool
+const dbPool = new DatabasePool(DB_PATH, 10);
+
+// Database connection helper with connection pooling
+async function getDb() {
+    return await dbPool.getConnection();
+}
+
+// Legacy sync version (for backward compatibility)
+function getDbSync() {
     return new sqlite3.Database(DB_PATH, sqlite3.OPEN_READONLY, (err) => {
         if (err) {
             console.error('Error opening database:', err);
         }
     });
+}
+
+// Helper for releasing database connections
+function releaseDb(db) {
+    if (dbPool) {
+        dbPool.releaseConnection(db);
+    } else {
+        db.close();
+    }
+}
+
+// Performance optimization: Create database indexes for frequently queried columns
+function createPerformanceIndexes() {
+    const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE, (err) => {
+        if (err) {
+            console.error('Error opening database for indexing:', err);
+            return;
+        }
+    });
+    
+    console.log('🚀 Creating performance indexes for large music collections...');
+    
+    const indexes = [
+        // Primary search indexes
+        'CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(album_artist)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_label ON albums(label)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_quality ON albums(quality_type)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_quality_legacy ON albums(quality)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_mode ON albums(organization_mode)',
+        
+        // Composite indexes for common filter combinations
+        'CREATE INDEX IF NOT EXISTS idx_albums_artist_label ON albums(album_artist, label)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_quality_mode ON albums(COALESCE(quality_type, quality), organization_mode)',
+        
+        // Sorting and pagination indexes
+        'CREATE INDEX IF NOT EXISTS idx_albums_sort_date ON albums(COALESCE(processing_date, created_at, id))',
+        'CREATE INDEX IF NOT EXISTS idx_albums_created_at ON albums(created_at)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_id ON albums(id)',
+        
+        // Additional performance indexes
+        'CREATE INDEX IF NOT EXISTS idx_albums_year ON albums(year)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_catalog ON albums(catalog_number)',
+        
+        // Artist aliases performance
+        'CREATE INDEX IF NOT EXISTS idx_artist_aliases_original ON artist_aliases(original_name)',
+        'CREATE INDEX IF NOT EXISTS idx_artist_aliases_canonical ON artist_aliases(canonical_name)'
+    ];
+    
+    let indexesCreated = 0;
+    let indexErrors = 0;
+    
+    const createNextIndex = (i) => {
+        if (i >= indexes.length) {
+            db.close();
+            console.log(`✅ Performance indexes complete: ${indexesCreated} created, ${indexErrors} errors`);
+            return;
+        }
+        
+        db.run(indexes[i], (err) => {
+            if (err) {
+                console.warn(`⚠️ Index creation failed: ${err.message}`);
+                indexErrors++;
+            } else {
+                indexesCreated++;
+            }
+            createNextIndex(i + 1);
+        });
+    };
+    
+    createNextIndex(0);
 }
 
 // API Routes
@@ -351,58 +496,154 @@ app.get('/api/stats', (req, res) => {
     });
 });
 
-// Get albums with filtering (optimized with caching)
-app.get('/api/albums', (req, res) => {
-    const { limit = 100, offset = 0, artist, label, quality, mode } = req.query;
+// Get albums with filtering (performance optimized with caching and indexing)
+app.get('/api/albums', async (req, res) => {
+    const startTime = Date.now();
+    const { limit = 50, offset = 0, artist, label, quality, mode } = req.query;
+    
+    // Validate and limit parameters for performance
+    const safeLimit = Math.min(parseInt(limit) || 50, 200); // Max 200 per request
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
     
     // Create cache key based on query parameters
-    const cacheKey = getCacheKey('albums', { limit, offset, artist, label, quality, mode });
+    const cacheKey = getCacheKey('albums', { limit: safeLimit, offset: safeOffset, artist, label, quality, mode });
     const cached = getCache(cacheKey);
     
     if (cached) {
+        // Add cache hit performance info
+        cached.performance = { ...cached.performance, cacheHit: true, queryTime: Date.now() - startTime };
         return res.json(cached);
     }
     
-    const db = getDb();
-    let query = 'SELECT * FROM albums WHERE 1=1';
-    const params = [];
-    
-    if (artist) {
-        query += ' AND album_artist LIKE ?';
-        params.push(`%${artist}%`);
+    let db;
+    try {
+        db = await getDb();
+    } catch (err) {
+        console.error('Failed to get database connection:', err);
+        return res.status(500).json({ error: 'Database connection failed' });
     }
+    
+    // Build optimized query with proper indexing hints
+    let query = `
+        SELECT id, album_artist, album_title, year, label, 
+               COALESCE(quality_type, quality) as quality, 
+               organization_mode, catalog_number, created_at,
+               COALESCE(processing_date, created_at, id) as sort_date
+        FROM albums 
+        WHERE 1=1
+    `;
+    let params = [];
+    
+    // Add optimized filters with index usage
+    if (artist) {
+        query += ' AND (album_artist = ? OR album_artist LIKE ?)';
+        params.push(artist, `%${artist}%`);
+    }
+    
     if (label) {
         query += ' AND label LIKE ?';
         params.push(`%${label}%`);
     }
+    
     if (quality) {
-        query += ' AND quality_type = ?';
-        params.push(quality);
+        query += ' AND (COALESCE(quality_type, quality) = ? OR COALESCE(quality_type, quality) LIKE ?)';
+        params.push(quality, `%${quality}%`);
     }
+    
     if (mode) {
         query += ' AND organization_mode = ?';
         params.push(mode);
     }
     
-    query += ' ORDER BY processed_date DESC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), parseInt(offset));
+    // Optimized ordering with computed sort_date
+    query += ' ORDER BY sort_date DESC, id DESC LIMIT ? OFFSET ?';
+    params.push(safeLimit, safeOffset);
     
-    db.all(query, params, (err, rows) => {
-        db.close();
-        
+    db.all(query, params, (err, albums) => {
         if (err) {
-            console.error('Error fetching albums:', err);
-            return res.status(500).json({ error: 'Database error' });
+            console.error('Database error in /api/albums:', err.message);
+            releaseDb(db);
+            return res.status(500).json({ 
+                error: 'Failed to fetch albums', 
+                details: err.message,
+                query: query.substring(0, 100) + '...'
+            });
         }
         
-        const result = rows || [];
+        // Get total count for pagination (optimized with same filters)
+        let countQuery = 'SELECT COUNT(*) as total FROM albums WHERE 1=1';
+        let countParams = [];
         
-        // Cache the results (shorter TTL for paginated results)
-        if (!offset || offset === 0) {
-            setCache(cacheKey, result);
+        if (artist) {
+            countQuery += ' AND (album_artist = ? OR album_artist LIKE ?)';
+            countParams.push(artist, `%${artist}%`);
         }
         
-        res.json(result);
+        if (label) {
+            countQuery += ' AND label LIKE ?';
+            countParams.push(`%${label}%`);
+        }
+        
+        if (quality) {
+            countQuery += ' AND (COALESCE(quality_type, quality) = ? OR COALESCE(quality_type, quality) LIKE ?)';
+            countParams.push(quality, `%${quality}%`);
+        }
+        
+        if (mode) {
+            countQuery += ' AND organization_mode = ?';
+            countParams.push(mode);
+        }
+        
+        db.get(countQuery, countParams, (countErr, countResult) => {
+            releaseDb(db); // Return connection to pool
+            const queryTime = Date.now() - startTime;
+            
+            if (countErr) {
+                console.warn('Count query failed:', countErr.message);
+                const result = { 
+                    albums, 
+                    total: albums.length,
+                    limit: safeLimit,
+                    offset: safeOffset,
+                    performance: { 
+                        queryTime, 
+                        albumsReturned: albums.length, 
+                        warning: 'Count unavailable',
+                        cacheHit: false,
+                        connectionPooled: true
+                    }
+                };
+                
+                // Cache partial results
+                if (!safeOffset) {
+                    setCache(cacheKey, result);
+                }
+                
+                return res.json(result);
+            }
+            
+            const result = { 
+                albums, 
+                total: countResult.total,
+                limit: safeLimit,
+                offset: safeOffset,
+                performance: {
+                    queryTime,
+                    albumsReturned: albums.length,
+                    totalInDb: countResult.total,
+                    hasMore: countResult.total > (safeOffset + albums.length),
+                    cacheHit: false,
+                    connectionPooled: true
+                }
+            };
+            
+            // Cache the results (shorter TTL for paginated results)
+            if (!safeOffset || safeOffset === 0) {
+                setCache(cacheKey, result);
+            }
+            
+            res.json(result);
+        });
     });
 });
 
@@ -2285,6 +2526,9 @@ function getAudioContentType(filePath) {
 
 // Start server with WebSocket support
 server.listen(PORT, '0.0.0.0', () => {
+    // Initialize performance indexes on startup for large music collections
+    createPerformanceIndexes();
+    
     // Get local IP address for network access
     const os = require('os');
     const interfaces = os.networkInterfaces();
