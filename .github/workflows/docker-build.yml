@@ -118,10 +118,30 @@ jobs:
     if: github.event_name != 'pull_request'
     
     steps:
+    - name: Checkout code  
+      uses: actions/checkout@v4
+
+    - name: Extract metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+        tags: |
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}}
+          type=semver,pattern={{major}}.{{minor}}
+          type=semver,pattern={{major}}
+          type=sha,prefix={{branch}}-
+
+    - name: Get first tag
+      id: tag
+      run: echo "image_tag=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)" >> $GITHUB_OUTPUT
+
     - name: Run Trivy vulnerability scanner
       uses: aquasecurity/trivy-action@master
       with:
-        image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+        image-ref: ${{ steps.tag.outputs.image_tag }}
         format: 'sarif'
         output: 'trivy-results.sarif'
 
