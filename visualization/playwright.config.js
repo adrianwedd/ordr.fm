@@ -35,20 +35,35 @@ module.exports = defineConfig({
     video: 'retain-on-failure',
   },
 
-  /* Configure projects for major browsers */
-  projects: [
-    // Desktop browsers
+  /* Configure projects - OPTIMIZED: Reduced from 7 to 2 browsers (70% cost reduction) */
+  projects: process.env.CI ? [
+    // CI: Essential browsers only for cost optimization
     {
       name: 'chromium',
       use: { 
         ...devices['Desktop Chrome'],
-        // Enable permissions for PWA testing
         permissions: ['notifications', 'camera', 'microphone'],
-        // Enable service workers
         serviceWorkers: 'allow'
       },
     },
-
+    {
+      name: 'Mobile Chrome',
+      use: { 
+        ...devices['Pixel 5'],
+        permissions: ['notifications'],
+        serviceWorkers: 'allow'
+      },
+    }
+  ] : [
+    // Local development: Full browser matrix for comprehensive testing
+    {
+      name: 'chromium',
+      use: { 
+        ...devices['Desktop Chrome'],
+        permissions: ['notifications', 'camera', 'microphone'],
+        serviceWorkers: 'allow'
+      },
+    },
     {
       name: 'firefox',
       use: { 
@@ -57,7 +72,6 @@ module.exports = defineConfig({
         serviceWorkers: 'allow'
       },
     },
-
     {
       name: 'webkit',
       use: { 
@@ -66,8 +80,6 @@ module.exports = defineConfig({
         serviceWorkers: 'allow'
       },
     },
-
-    // Mobile browsers for PWA testing
     {
       name: 'Mobile Chrome',
       use: { 
@@ -84,30 +96,24 @@ module.exports = defineConfig({
         serviceWorkers: 'allow'
       },
     },
-
-    // PWA-specific test configurations
     {
       name: 'PWA Desktop',
       use: {
         ...devices['Desktop Chrome'],
-        // Simulate PWA standalone mode
         viewport: { width: 1200, height: 800 },
         permissions: ['notifications', 'camera', 'microphone'],
         serviceWorkers: 'allow',
-        // Add PWA-specific headers
         extraHTTPHeaders: {
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
         }
       }
     },
-
     {
       name: 'PWA Mobile',
       use: {
         ...devices['Pixel 5'],
         permissions: ['notifications'],
         serviceWorkers: 'allow',
-        // Simulate mobile PWA
         isMobile: true,
         hasTouch: true
       }
