@@ -367,29 +367,25 @@ function createPerformanceIndexes() {
     console.log('🚀 Creating performance indexes for large music collections...');
     
     const indexes = [
-        // Primary search indexes
-        'CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(album_artist)',
-        'CREATE INDEX IF NOT EXISTS idx_albums_label ON albums(label)',
-        'CREATE INDEX IF NOT EXISTS idx_albums_quality ON albums(quality_type)',
-        'CREATE INDEX IF NOT EXISTS idx_albums_quality_legacy ON albums(quality)',
-        'CREATE INDEX IF NOT EXISTS idx_albums_mode ON albums(organization_mode)',
+        // Primary search indexes (corrected column names)
+        'CREATE INDEX IF NOT EXISTS idx_albums_artist_v2 ON albums(album_artist)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_label_v2 ON albums(label)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_quality_v2 ON albums(quality_type)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_mode_v2 ON albums(organization_mode)',
         
         // Composite indexes for common filter combinations
-        'CREATE INDEX IF NOT EXISTS idx_albums_artist_label ON albums(album_artist, label)',
-        'CREATE INDEX IF NOT EXISTS idx_albums_quality_mode ON albums(COALESCE(quality_type, quality), organization_mode)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_artist_label_v2 ON albums(album_artist, label)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_quality_mode_v2 ON albums(quality_type, organization_mode)',
         
-        // Sorting and pagination indexes
-        'CREATE INDEX IF NOT EXISTS idx_albums_sort_date ON albums(COALESCE(processing_date, created_at, id))',
-        'CREATE INDEX IF NOT EXISTS idx_albums_created_at ON albums(created_at)',
-        'CREATE INDEX IF NOT EXISTS idx_albums_id ON albums(id)',
+        // Sorting and pagination indexes (corrected column names)
+        'CREATE INDEX IF NOT EXISTS idx_albums_processed_date ON albums(processed_date)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_id_v2 ON albums(id)',
         
-        // Additional performance indexes
-        'CREATE INDEX IF NOT EXISTS idx_albums_year ON albums(year)',
-        'CREATE INDEX IF NOT EXISTS idx_albums_catalog ON albums(catalog_number)',
-        
-        // Artist aliases performance
-        'CREATE INDEX IF NOT EXISTS idx_artist_aliases_original ON artist_aliases(original_name)',
-        'CREATE INDEX IF NOT EXISTS idx_artist_aliases_canonical ON artist_aliases(canonical_name)'
+        // Additional performance indexes (corrected column names)
+        'CREATE INDEX IF NOT EXISTS idx_albums_album_year ON albums(album_year)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_catalog_v2 ON albums(catalog_number)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_directory ON albums(directory_path)',
+        'CREATE INDEX IF NOT EXISTS idx_albums_discogs ON albums(discogs_release_id)'
     ];
     
     let indexesCreated = 0;
@@ -523,12 +519,12 @@ app.get('/api/albums', async (req, res) => {
         return res.status(500).json({ error: 'Database connection failed' });
     }
     
-    // Build optimized query with proper indexing hints
+    // Build optimized query with proper indexing hints (corrected column names)
     let query = `
-        SELECT id, album_artist, album_title, year, label, 
-               COALESCE(quality_type, quality) as quality, 
-               organization_mode, catalog_number, created_at,
-               COALESCE(processing_date, created_at, id) as sort_date
+        SELECT id, album_artist, album_title, album_year as year, label, 
+               quality_type as quality, 
+               organization_mode, catalog_number, processed_date as created_at,
+               processed_date as sort_date
         FROM albums 
         WHERE 1=1
     `;
@@ -546,7 +542,7 @@ app.get('/api/albums', async (req, res) => {
     }
     
     if (quality) {
-        query += ' AND (COALESCE(quality_type, quality) = ? OR COALESCE(quality_type, quality) LIKE ?)';
+        query += ' AND (quality_type = ? OR quality_type LIKE ?)';
         params.push(quality, `%${quality}%`);
     }
     
@@ -585,7 +581,7 @@ app.get('/api/albums', async (req, res) => {
         }
         
         if (quality) {
-            countQuery += ' AND (COALESCE(quality_type, quality) = ? OR COALESCE(quality_type, quality) LIKE ?)';
+            countQuery += ' AND (quality_type = ? OR quality_type LIKE ?)';
             countParams.push(quality, `%${quality}%`);
         }
         
@@ -3549,27 +3545,33 @@ function generateMetadataChanges(original, updated) {
 }
 
 // Initialize metadata_history table if it doesn't exist
-function initMetadataHistoryTable() {
-    const db = getDb();
-    
-    db.run(`
-        CREATE TABLE IF NOT EXISTS metadata_history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            album_id INTEGER NOT NULL,
-            timestamp TEXT NOT NULL,
-            user_id TEXT,
-            changes TEXT NOT NULL,
-            metadata_version INTEGER,
-            FOREIGN KEY (album_id) REFERENCES albums (id)
-        )
-    `, (err) => {
-        if (err) {
-            console.error('Failed to create metadata_history table:', err);
-        } else {
-            console.log('Metadata history table initialized');
-        }
-        db.close();
-    });
+async function initMetadataHistoryTable() {
+    let db;
+    try {
+        db = await getDb();
+        
+        db.run(`
+            CREATE TABLE IF NOT EXISTS metadata_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                album_id INTEGER NOT NULL,
+                timestamp TEXT NOT NULL,
+                user_id TEXT,
+                changes TEXT NOT NULL,
+                metadata_version INTEGER,
+                FOREIGN KEY (album_id) REFERENCES albums (id)
+            )
+        `, (err) => {
+            if (err) {
+                console.error('Failed to create metadata_history table:', err);
+            } else {
+                console.log('✅ Metadata history table initialized');
+            }
+            releaseDb(db);
+        });
+    } catch (err) {
+        console.error('Failed to initialize metadata history table:', err);
+        if (db) releaseDb(db);
+    }
 }
 
 // Initialize the metadata history table on server start
