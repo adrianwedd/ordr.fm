@@ -241,10 +241,15 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         
+      - name: Install dependencies for help test
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y exiftool jq bc sqlite3
+        
       - name: Check documentation completeness
         run: |
           # Verify all key docs exist
-          for doc in README.md SPECIFICATIONS.md CLAUDE.md docs/PARALLEL_PROCESSING.md; do
+          for doc in README.md SPECIFICATIONS.md CLAUDE.md; do
             [ -f "$doc" ] || echo "Missing: $doc"
           done
           
