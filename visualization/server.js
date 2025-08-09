@@ -286,6 +286,427 @@ function broadcastJobUpdate(job, isCompleted = false) {
     }, 'jobs');
 }
 
+// Search Analytics Functions
+function trackSearchQuery(query, userId, resultCount, searchType, responseTime, ipAddress, userAgent) {
+    const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE);
+    
+    db.run(
+        'INSERT INTO search_analytics (query, user_id, result_count, search_type, response_time, ip_address, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [query.trim().toLowerCase(), userId, resultCount, searchType, responseTime, ipAddress, userAgent],
+        (err) => {
+            db.close();
+            if (err) {
+                console.error('Search analytics error:', err.message);
+            }
+        }
+    );
+}
+
+// Advanced Search System with Fuzzy Matching
+function levenshteinDistance(str1, str2) {
+    const matrix = Array(str2.length + 1).fill().map(() => Array(str1.length + 1).fill(0));
+    
+    for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
+    for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
+    
+    for (let j = 1; j <= str2.length; j++) {
+        for (let i = 1; i <= str1.length; i++) {
+            const cost = str1[i - 1] === str2[j - 1] ? 0 : 1;
+            matrix[j][i] = Math.min(
+                matrix[j - 1][i] + 1,     // deletion
+                matrix[j][i - 1] + 1,     // insertion
+                matrix[j - 1][i - 1] + cost // substitution
+            );
+        }
+    }
+    
+    return matrix[str2.length][str1.length];
+}
+
+function calculateSimilarity(str1, str2) {
+    const maxLength = Math.max(str1.length, str2.length);
+    if (maxLength === 0) return 1.0;
+    
+    const distance = levenshteinDistance(str1.toLowerCase(), str2.toLowerCase());
+    return (maxLength - distance) / maxLength;
+}
+
+function fuzzyMatch(query, text, threshold = 0.6) {
+    if (!query || !text) return { matches: false, similarity: 0 };
+    
+    const queryLower = query.toLowerCase().trim();
+    const textLower = text.toLowerCase().trim();
+    
+    // Exact match gets highest score
+    if (textLower === queryLower) {
+        return { matches: true, similarity: 1.0, matchType: 'exact' };
+    }
+    
+    // Contains match
+    if (textLower.includes(queryLower)) {
+        const similarity = Math.max(0.8, queryLower.length / textLower.length);
+        return { matches: true, similarity, matchType: 'contains' };
+    }
+    
+    // Word boundary matches
+    const queryWords = queryLower.split(/\s+/);
+    const textWords = textLower.split(/\s+/);
+    
+    let wordMatches = 0;
+    let totalSimilarity = 0;
+    
+    for (const queryWord of queryWords) {
+        let bestWordSimilarity = 0;
+        
+        for (const textWord of textWords) {
+            const wordSimilarity = calculateSimilarity(queryWord, textWord);
+            if (wordSimilarity > bestWordSimilarity) {
+                bestWordSimilarity = wordSimilarity;
+            }
+        }
+        
+        if (bestWordSimilarity >= threshold) {
+            wordMatches++;
+        }
+        totalSimilarity += bestWordSimilarity;
+    }
+    
+    const avgSimilarity = totalSimilarity / queryWords.length;
+    const wordMatchRatio = wordMatches / queryWords.length;
+    
+    // Require at least 50% of words to match above threshold
+    if (wordMatchRatio >= 0.5 || avgSimilarity >= threshold) {
+        return { 
+            matches: true, 
+            similarity: Math.max(avgSimilarity, wordMatchRatio * 0.8),
+            matchType: 'fuzzy',
+            wordMatchRatio
+        };
+    }
+    
+    // Full string similarity as fallback
+    const stringSimilarity = calculateSimilarity(queryLower, textLower);
+    if (stringSimilarity >= threshold) {
+        return { matches: true, similarity: stringSimilarity, matchType: 'fuzzy_full' };
+    }
+    
+    return { matches: false, similarity: stringSimilarity };
+}
+
+function rankSearchResults(results, query) {
+    return results.map(item => {
+        let totalScore = 0;
+        let matchDetails = {};
+        
+        // Artist matching (weight: 0.4)
+        if (item.album_artist) {
+            const artistMatch = fuzzyMatch(query, item.album_artist);
+            matchDetails.artist = artistMatch;
+            totalScore += artistMatch.similarity * 0.4;
+        }
+        
+        // Album title matching (weight: 0.4)
+        if (item.album_title) {
+            const albumMatch = fuzzyMatch(query, item.album_title);
+            matchDetails.album = albumMatch;
+            totalScore += albumMatch.similarity * 0.4;
+        }
+        
+        // Label matching (weight: 0.15)
+        if (item.label) {
+            const labelMatch = fuzzyMatch(query, item.label);
+            matchDetails.label = labelMatch;
+            totalScore += labelMatch.similarity * 0.15;
+        }
+        
+        // Catalog number matching (weight: 0.05)
+        if (item.catalog_number) {
+            const catalogMatch = fuzzyMatch(query, item.catalog_number);
+            matchDetails.catalog = catalogMatch;
+            totalScore += catalogMatch.similarity * 0.05;
+        }
+        
+        return {
+            ...item,
+            searchScore: Math.round(totalScore * 100) / 100,
+            matchDetails,
+            relevance: totalScore > 0.6 ? 'high' : totalScore > 0.3 ? 'medium' : 'low'
+        };
+    }).sort((a, b) => b.searchScore - a.searchScore);
+}
+
+// Advanced Search API Endpoint
+app.get('/api/search/fuzzy', async (req, res) => {
+    const { q: query, limit = 50, threshold = 0.4, include_low_relevance = false } = req.query;
+    const startTime = Date.now();
+    
+    if (!query || query.trim().length < 2) {
+        return res.status(400).json({ 
+            error: 'Query must be at least 2 characters long',
+            code: 'INVALID_QUERY'
+        });
+    }
+    
+    const safeLimit = Math.min(parseInt(limit) || 50, 200);
+    const searchThreshold = Math.max(0.1, Math.min(1.0, parseFloat(threshold) || 0.4));
+    
+    // Create cache key for search results
+    const cacheKey = getCacheKey('fuzzy_search', { query: query.trim(), limit: safeLimit, threshold: searchThreshold });
+    const cached = getCache(cacheKey);
+    
+    if (cached) {
+        cached.performance.cacheHit = true;
+        cached.performance.queryTime = Date.now() - startTime;
+        return res.json(cached);
+    }
+    
+    try {
+        const db = getDbSync();
+        
+        // Get all albums for fuzzy matching (can be optimized with pre-filtering for large DBs)
+        const albums = await new Promise((resolve, reject) => {
+            db.all(`
+                SELECT id, album_artist, album_title, album_year as year, label, 
+                       quality_type as quality, organization_mode, catalog_number, 
+                       processed_date as created_at
+                FROM albums 
+                WHERE album_artist IS NOT NULL OR album_title IS NOT NULL
+                LIMIT 2000
+            `, (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows || []);
+            });
+        });
+        
+        db.close();
+        
+        // Perform fuzzy matching and ranking
+        const rankedResults = rankSearchResults(albums, query.trim());
+        
+        // Filter results based on relevance
+        let filteredResults = rankedResults.filter(item => {
+            if (include_low_relevance === 'true') return item.searchScore > 0.1;
+            return item.searchScore >= searchThreshold;
+        });
+        
+        // Apply limit
+        filteredResults = filteredResults.slice(0, safeLimit);
+        
+        const response = {
+            query: query.trim(),
+            results: filteredResults,
+            total: filteredResults.length,
+            totalScanned: albums.length,
+            threshold: searchThreshold,
+            performance: {
+                queryTime: Date.now() - startTime,
+                algorithmsUsed: ['levenshtein', 'fuzzy_matching', 'relevance_ranking'],
+                cacheHit: false
+            },
+            suggestions: {
+                tryLowerThreshold: filteredResults.length === 0 && searchThreshold > 0.3,
+                includeLowRelevance: filteredResults.length < 5 && !include_low_relevance
+            }
+        };
+        
+        // Cache results for 5 minutes
+        setCache(cacheKey, response);
+        
+        // Track search analytics (async)
+        trackSearchQuery(
+            query.trim(), 
+            req.user?.id || null, 
+            filteredResults.length, 
+            'fuzzy', 
+            Date.now() - startTime,
+            req.ip || req.connection.remoteAddress,
+            req.headers['user-agent']
+        );
+        
+        res.json(response);
+        
+    } catch (error) {
+        console.error('Fuzzy search error:', error);
+        res.status(500).json({
+            error: 'Search operation failed',
+            code: 'SEARCH_ERROR',
+            details: error.message
+        });
+    }
+});
+
+// Search suggestions API
+app.get('/api/search/suggestions', (req, res) => {
+    const { q: query, limit = 10 } = req.query;
+    
+    if (!query || query.trim().length < 1) {
+        return res.json({ suggestions: [] });
+    }
+    
+    const db = getDbSync();
+    const queryTerm = `%${query.trim()}%`;
+    
+    // Get suggestions from different fields
+    const suggestions = [];
+    
+    db.all(`
+        SELECT DISTINCT album_artist as suggestion, 'artist' as type, COUNT(*) as count
+        FROM albums 
+        WHERE album_artist LIKE ? 
+        GROUP BY album_artist 
+        ORDER BY count DESC 
+        LIMIT ?
+    `, [queryTerm, Math.ceil(limit / 3)], (err, artists) => {
+        if (!err && artists) suggestions.push(...artists);
+        
+        db.all(`
+            SELECT DISTINCT album_title as suggestion, 'album' as type, COUNT(*) as count
+            FROM albums 
+            WHERE album_title LIKE ? 
+            GROUP BY album_title 
+            ORDER BY count DESC 
+            LIMIT ?
+        `, [queryTerm, Math.ceil(limit / 3)], (err, albums) => {
+            if (!err && albums) suggestions.push(...albums);
+            
+            db.all(`
+                SELECT DISTINCT label as suggestion, 'label' as type, COUNT(*) as count
+                FROM albums 
+                WHERE label LIKE ? 
+                GROUP BY label 
+                ORDER BY count DESC 
+                LIMIT ?
+            `, [queryTerm, Math.ceil(limit / 3)], (err, labels) => {
+                db.close();
+                
+                if (!err && labels) suggestions.push(...labels);
+                
+                // Sort by relevance and limit
+                const sortedSuggestions = suggestions
+                    .sort((a, b) => b.count - a.count)
+                    .slice(0, limit);
+                
+                res.json({
+                    query: query.trim(),
+                    suggestions: sortedSuggestions
+                });
+            });
+        });
+    });
+});
+
+// Popular queries and search analytics
+app.get('/api/search/popular', (req, res) => {
+    const { limit = 10, timeframe = '7d' } = req.query;
+    const safeLimit = Math.min(parseInt(limit) || 10, 50);
+    
+    // Calculate timeframe
+    let dateFilter = '';
+    switch (timeframe) {
+        case '1d':
+            dateFilter = "AND timestamp >= datetime('now', '-1 day')";
+            break;
+        case '7d':
+            dateFilter = "AND timestamp >= datetime('now', '-7 days')";
+            break;
+        case '30d':
+            dateFilter = "AND timestamp >= datetime('now', '-30 days')";
+            break;
+        case 'all':
+        default:
+            dateFilter = '';
+            break;
+    }
+    
+    const db = getDbSync();
+    
+    db.all(`
+        SELECT 
+            query,
+            COUNT(*) as search_count,
+            AVG(result_count) as avg_results,
+            AVG(response_time) as avg_response_time,
+            MAX(timestamp) as last_searched
+        FROM search_analytics 
+        WHERE query IS NOT NULL ${dateFilter}
+        GROUP BY query 
+        ORDER BY search_count DESC, last_searched DESC
+        LIMIT ?
+    `, [safeLimit], (err, popularQueries) => {
+        if (err) {
+            db.close();
+            console.error('Popular queries error:', err);
+            return res.status(500).json({ error: 'Failed to fetch popular queries' });
+        }
+        
+        // Get search statistics
+        db.get(`
+            SELECT 
+                COUNT(*) as total_searches,
+                COUNT(DISTINCT query) as unique_queries,
+                AVG(result_count) as avg_results_per_search,
+                AVG(response_time) as avg_response_time
+            FROM search_analytics 
+            WHERE query IS NOT NULL ${dateFilter}
+        `, (err, stats) => {
+            db.close();
+            
+            res.json({
+                timeframe,
+                popularQueries: popularQueries || [],
+                statistics: stats || {
+                    total_searches: 0,
+                    unique_queries: 0,
+                    avg_results_per_search: 0,
+                    avg_response_time: 0
+                }
+            });
+        });
+    });
+});
+
+// Search analytics endpoint (admin only)
+app.get('/api/search/analytics', authenticateToken, requireRole('admin'), (req, res) => {
+    const { limit = 100, offset = 0 } = req.query;
+    const safeLimit = Math.min(parseInt(limit) || 100, 500);
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
+    
+    const db = getDbSync();
+    
+    db.all(`
+        SELECT 
+            s.query,
+            s.result_count,
+            s.search_type,
+            s.response_time,
+            s.timestamp,
+            s.ip_address,
+            u.username
+        FROM search_analytics s
+        LEFT JOIN users u ON s.user_id = u.id
+        ORDER BY s.timestamp DESC
+        LIMIT ? OFFSET ?
+    `, [safeLimit, safeOffset], (err, searches) => {
+        if (err) {
+            db.close();
+            console.error('Search analytics error:', err);
+            return res.status(500).json({ error: 'Failed to fetch search analytics' });
+        }
+        
+        // Get total count
+        db.get('SELECT COUNT(*) as total FROM search_analytics', (err, countResult) => {
+            db.close();
+            
+            res.json({
+                searches: searches || [],
+                total: countResult?.total || 0,
+                limit: safeLimit,
+                offset: safeOffset
+            });
+        });
+    });
+});
+
 // Send periodic stats updates to subscribers
 setInterval(async () => {
     if (clients.size === 0) return;
@@ -576,7 +997,25 @@ function initializeUserDatabase() {
         'CREATE INDEX IF NOT EXISTS idx_sessions_token ON user_sessions(token_hash)',
         'CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id)',
         'CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id)',
-        'CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)'
+        'CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)',
+        
+        // Search analytics table
+        `CREATE TABLE IF NOT EXISTS search_analytics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            query TEXT NOT NULL,
+            user_id INTEGER,
+            result_count INTEGER DEFAULT 0,
+            search_type TEXT DEFAULT 'fuzzy',
+            response_time INTEGER,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            ip_address TEXT,
+            user_agent TEXT,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )`,
+        
+        'CREATE INDEX IF NOT EXISTS idx_search_query ON search_analytics(query)',
+        'CREATE INDEX IF NOT EXISTS idx_search_timestamp ON search_analytics(timestamp)',
+        'CREATE INDEX IF NOT EXISTS idx_search_user ON search_analytics(user_id)'
     ];
     
     let tablesCreated = 0;
