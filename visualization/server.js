@@ -25,6 +25,13 @@ const {
     validateSecurityConfig
 } = require('./src/middleware/security');
 const { authenticateToken, requireRole } = require('./src/middleware/auth');
+const {
+    performanceTracking,
+    performanceHeaders,
+    setupPerformanceAlerts,
+    createDatabaseMonitor,
+    createWebSocketMonitor
+} = require('./src/middleware/performance');
 
 // Import controllers
 const authController = require('./src/controllers/auth');
@@ -34,6 +41,7 @@ const backupController = require('./src/controllers/backup');
 const processingController = require('./src/controllers/processing');
 const tracksController = require('./src/controllers/tracks');
 const systemController = require('./src/controllers/system');
+const performanceController = require('./src/controllers/performance');
 
 // Create Express app
 const app = express();
@@ -57,6 +65,10 @@ app.use(configureCors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
+
+// Performance monitoring
+app.use(performanceTracking);
+app.use(performanceHeaders);
 
 // Suspicious activity monitoring
 app.use(suspiciousActivityDetector);
@@ -95,6 +107,8 @@ app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerOption
  *     description: Music processing and organization jobs
  *   - name: System
  *     description: System information and configuration
+ *   - name: Performance
+ *     description: Performance monitoring and metrics
  */
 
 // API Routes
@@ -209,7 +223,55 @@ app.get('/api/config', systemController.getConfig.bind(systemController));
 app.post('/api/config', authenticateToken, requireRole('admin'), systemController.updateConfig.bind(systemController));
 app.get('/api/export', exportApiLimiter, authenticateToken, systemController.exportCollection.bind(systemController));
 app.get('/api/insights', systemController.getInsights.bind(systemController));
-app.get('/api/performance', systemController.getPerformance.bind(systemController));
+
+/**
+ * @swagger
+ * /api/performance/health:
+ *   get:
+ *     summary: Get system health status
+ *     description: Returns overall system health assessment and performance score
+ *     tags: [Performance]
+ *     responses:
+ *       200:
+ *         description: System health status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     score:
+ *                       type: number
+ *                       description: Health score (0-100)
+ *                     status:
+ *                       type: string
+ *                       enum: [healthy, degraded, unhealthy]
+ *                     issues:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                     uptime:
+ *                       type: number
+ *     security: []
+ */
+
+// Performance monitoring routes
+app.get('/api/performance', authenticateToken, performanceController.getStats.bind(performanceController));
+app.get('/api/performance/stats', authenticateToken, performanceController.getStats.bind(performanceController));
+app.get('/api/performance/trends', authenticateToken, performanceController.getTrends.bind(performanceController));
+app.get('/api/performance/report', authenticateToken, requireRole('admin'), performanceController.getDetailedReport.bind(performanceController));
+app.get('/api/performance/alerts', authenticateToken, performanceController.getAlerts.bind(performanceController));
+app.get('/api/performance/health', performanceController.getSystemHealth.bind(performanceController));
+app.get('/api/performance/metrics', authenticateToken, performanceController.getMetricsRange.bind(performanceController));
+app.get('/api/performance/endpoints', authenticateToken, performanceController.getEndpointPerformance.bind(performanceController));
+app.get('/api/performance/config', authenticateToken, requireRole('admin'), performanceController.getConfig.bind(performanceController));
+app.get('/api/performance/export', exportApiLimiter, authenticateToken, requireRole('admin'), performanceController.exportData.bind(performanceController));
+app.post('/api/performance/reset', authenticateToken, requireRole('admin'), performanceController.resetMetrics.bind(performanceController));
+app.post('/api/performance/config', authenticateToken, requireRole('admin'), performanceController.updateConfig.bind(performanceController));
 
 // Serve index.html for all other routes (SPA support)
 app.get('*', (req, res) => {
@@ -230,11 +292,16 @@ async function startServer() {
     try {
         console.log('🚀 Starting ordr.fm visualization server...');
 
-        // Initialize database
+        // Initialize database with performance monitoring
         await databaseService.connect();
+        createDatabaseMonitor(databaseService);
 
-        // Initialize WebSocket service
+        // Initialize WebSocket service with performance monitoring
         webSocketService.initialize(server);
+        createWebSocketMonitor(webSocketService.io);
+
+        // Setup performance alerting
+        setupPerformanceAlerts();
 
         // Start HTTP server
         server.listen(config.PORT, () => {
