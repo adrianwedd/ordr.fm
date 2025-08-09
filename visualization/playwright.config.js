@@ -6,6 +6,8 @@ const { defineConfig, devices } = require('@playwright/test');
  */
 module.exports = defineConfig({
   testDir: './tests',
+  /* CI Mode: Only run smoke tests */
+  testMatch: process.env.CI ? '**/00-ci-smoke.spec.js' : '**/*.spec.js',
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -35,21 +37,13 @@ module.exports = defineConfig({
     video: 'retain-on-failure',
   },
 
-  /* Configure projects - OPTIMIZED: Reduced from 7 to 2 browsers (70% cost reduction) */
+  /* Configure projects - ULTRA LEAN CI: Just Chromium for smoke tests, comprehensive local testing */
   projects: process.env.CI ? [
-    // CI: Essential browsers only for cost optimization
+    // CI: Single browser smoke tests only - comprehensive testing done locally
     {
       name: 'chromium',
       use: { 
         ...devices['Desktop Chrome'],
-        permissions: ['notifications', 'camera', 'microphone'],
-        serviceWorkers: 'allow'
-      },
-    },
-    {
-      name: 'Mobile Chrome',
-      use: { 
-        ...devices['Pixel 5'],
         permissions: ['notifications'],
         serviceWorkers: 'allow'
       },

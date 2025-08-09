@@ -13,6 +13,8 @@
     "status": "PM2_HOME=/tmp/.pm2 pm2 status",
     "test": "node -c server.js && echo 'Server syntax check passed'",
     "test:e2e": "npx playwright test",
+    "test:e2e:ci": "CI=true npx playwright test",
+    "test:e2e:local": "npx playwright test",
     "test:e2e:ui": "npx playwright test --ui",
     "test:e2e:headed": "npx playwright test --headed",
     "test:e2e:report": "npx playwright show-report",
