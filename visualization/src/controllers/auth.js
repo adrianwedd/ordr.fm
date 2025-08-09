@@ -4,7 +4,69 @@ const databaseService = require('../services/database');
 
 class AuthController {
     /**
-     * User login
+     * @swagger
+     * /api/auth/login:
+     *   post:
+     *     summary: User authentication
+     *     description: Authenticate user with username and password, returns JWT token for authorized access.
+     *     tags: [Authentication]
+     *     requestBody:
+     *       required: true
+     *       content:
+     *         application/json:
+     *           schema:
+     *             type: object
+     *             required: [username, password]
+     *             properties:
+     *               username:
+     *                 type: string
+     *                 description: User's username
+     *               password:
+     *                 type: string
+     *                 format: password
+     *                 description: User's password
+     *             example:
+     *               username: admin
+     *               password: secretpassword
+     *     responses:
+     *       200:
+     *         description: Login successful
+     *         content:
+     *           application/json:
+     *             schema:
+     *               type: object
+     *               properties:
+     *                 token:
+     *                   type: string
+     *                   description: JWT authentication token
+     *                 user:
+     *                   $ref: '#/components/schemas/User'
+     *               example:
+     *                 token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+     *                 user:
+     *                   id: 1
+     *                   username: admin
+     *                   role: admin
+     *                   email: admin@example.com
+     *       400:
+     *         description: Missing username or password
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/Error'
+     *       401:
+     *         description: Invalid credentials
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/Error'
+     *       500:
+     *         description: Internal server error
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/Error'
+     *     security: []
      */
     async login(req, res) {
         try {

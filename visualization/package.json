@@ -42,6 +42,8 @@
     "helmet": "^7.1.0",
     "jsonwebtoken": "^9.0.2",
     "sqlite3": "^5.1.6",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
     "uuid": "^11.1.0",
     "ws": "^8.18.3"
   },

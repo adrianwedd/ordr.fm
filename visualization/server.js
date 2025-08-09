@@ -5,6 +5,7 @@ const path = require('path');
 
 // Import configuration
 const config = require('./src/config');
+const { swaggerSpec, swaggerOptions } = require('./src/config/swagger');
 
 // Import services
 const databaseService = require('./src/services/database');
@@ -48,8 +49,71 @@ if (config.isProduction()) {
 // Rate limiting
 app.use('/api/', generalApiLimiter);
 
+// API Documentation
+const swaggerUi = require('swagger-ui-express');
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerOptions));
+
+/**
+ * @swagger
+ * tags:
+ *   - name: Authentication
+ *     description: User authentication and authorization endpoints
+ *   - name: Albums
+ *     description: Music album management and retrieval
+ *   - name: Search
+ *     description: Advanced search and discovery features
+ *   - name: Tracks
+ *     description: Individual track operations and audio streaming
+ *   - name: Backup
+ *     description: Backup and restore operations
+ *   - name: Processing
+ *     description: Music processing and organization jobs
+ *   - name: System
+ *     description: System information and configuration
+ */
+
 // API Routes
 
+/**
+ * @swagger
+ * /api/health:
+ *   get:
+ *     summary: System health check
+ *     description: Get current system health status and basic information
+ *     tags: [System]
+ *     responses:
+ *       200:
+ *         description: System is healthy
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 status:
+ *                   type: string
+ *                   enum: [ok]
+ *                   description: Health status
+ *                 timestamp:
+ *                   type: string
+ *                   format: date-time
+ *                   description: Current timestamp
+ *                 version:
+ *                   type: string
+ *                   description: API version
+ *                 environment:
+ *                   type: string
+ *                   description: Runtime environment
+ *                 uptime:
+ *                   type: number
+ *                   description: Server uptime in seconds
+ *               example:
+ *                 status: ok
+ *                 timestamp: "2024-01-15T10:30:00.000Z"
+ *                 version: "2.5.0"
+ *                 environment: development
+ *                 uptime: 3600.5
+ *     security: []
+ */
 // Health check
 app.get('/api/health', (req, res) => {
     res.json({

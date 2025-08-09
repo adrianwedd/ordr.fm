@@ -4,7 +4,107 @@ const cacheManager = require('../utils/cache');
 
 class AlbumsController {
     /**
-     * Get albums with pagination and filtering
+     * @swagger
+     * /api/albums:
+     *   get:
+     *     summary: Get albums with pagination and filtering
+     *     description: Retrieve a paginated list of albums from the music collection with optional filtering by artist, genre, year, quality, and search term.
+     *     tags: [Albums]
+     *     parameters:
+     *       - in: query
+     *         name: page
+     *         schema:
+     *           type: integer
+     *           minimum: 1
+     *           default: 1
+     *         description: Page number for pagination
+     *       - in: query
+     *         name: pageSize
+     *         schema:
+     *           type: integer
+     *           minimum: 1
+     *           maximum: 100
+     *           default: 20
+     *         description: Number of albums per page
+     *       - in: query
+     *         name: sortBy
+     *         schema:
+     *           type: string
+     *           enum: [album_title, album_artist, album_year, genre, quality, track_count, total_duration, created_at]
+     *           default: album_title
+     *         description: Field to sort by
+     *       - in: query
+     *         name: sortOrder
+     *         schema:
+     *           type: string
+     *           enum: [ASC, DESC]
+     *           default: ASC
+     *         description: Sort order
+     *       - in: query
+     *         name: artist
+     *         schema:
+     *           type: string
+     *         description: Filter by album artist (partial match)
+     *       - in: query
+     *         name: genre
+     *         schema:
+     *           type: string
+     *         description: Filter by genre (partial match)
+     *       - in: query
+     *         name: year
+     *         schema:
+     *           type: integer
+     *         description: Filter by release year (exact match)
+     *       - in: query
+     *         name: quality
+     *         schema:
+     *           type: string
+     *           enum: [Lossless, Lossy, Mixed]
+     *         description: Filter by audio quality
+     *       - in: query
+     *         name: search
+     *         schema:
+     *           type: string
+     *         description: Search across album title, artist, and genre
+     *     responses:
+     *       200:
+     *         description: Albums retrieved successfully
+     *         content:
+     *           application/json:
+     *             schema:
+     *               type: object
+     *               allOf:
+     *                 - $ref: '#/components/schemas/PaginatedResponse'
+     *                 - type: object
+     *                   properties:
+     *                     albums:
+     *                       type: array
+     *                       items:
+     *                         $ref: '#/components/schemas/Album'
+     *                     filters:
+     *                       type: object
+     *                       properties:
+     *                         artist:
+     *                           type: string
+     *                         genre:
+     *                           type: string
+     *                         year:
+     *                           type: integer
+     *                         quality:
+     *                           type: string
+     *                         search:
+     *                           type: string
+     *                         sortBy:
+     *                           type: string
+     *                         sortOrder:
+     *                           type: string
+     *       500:
+     *         description: Internal server error
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/Error'
+     *     security: []
      */
     async getAlbums(req, res) {
         try {
@@ -116,7 +216,49 @@ class AlbumsController {
     }
 
     /**
-     * Get single album by ID
+     * @swagger
+     * /api/albums/{id}:
+     *   get:
+     *     summary: Get single album by ID
+     *     description: Retrieve detailed information about a specific album including its tracks.
+     *     tags: [Albums]
+     *     parameters:
+     *       - in: path
+     *         name: id
+     *         required: true
+     *         schema:
+     *           type: integer
+     *         description: Album ID
+     *     responses:
+     *       200:
+     *         description: Album retrieved successfully
+     *         content:
+     *           application/json:
+     *             schema:
+     *               type: object
+     *               properties:
+     *                 album:
+     *                   allOf:
+     *                     - $ref: '#/components/schemas/Album'
+     *                     - type: object
+     *                       properties:
+     *                         tracks:
+     *                           type: array
+     *                           items:
+     *                             $ref: '#/components/schemas/Track'
+     *       404:
+     *         description: Album not found
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/Error'
+     *       500:
+     *         description: Internal server error
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/Error'
+     *     security: []
      */
     async getAlbum(req, res) {
         try {

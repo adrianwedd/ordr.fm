@@ -4,7 +4,86 @@ const cacheManager = require('../utils/cache');
 
 class SearchController {
     /**
-     * Fuzzy search across albums and tracks
+     * @swagger
+     * /api/search/fuzzy:
+     *   get:
+     *     summary: Fuzzy search across albums and tracks
+     *     description: Perform intelligent fuzzy search across album titles, artists, track titles with relevance scoring.
+     *     tags: [Search]
+     *     parameters:
+     *       - in: query
+     *         name: q
+     *         required: true
+     *         schema:
+     *           type: string
+     *           minLength: 2
+     *         description: Search query (minimum 2 characters)
+     *         example: "aphex twin"
+     *       - in: query
+     *         name: limit
+     *         schema:
+     *           type: integer
+     *           minimum: 1
+     *           maximum: 100
+     *           default: 20
+     *         description: Maximum number of results
+     *     responses:
+     *       200:
+     *         description: Search results with relevance scoring
+     *         content:
+     *           application/json:
+     *             schema:
+     *               type: object
+     *               properties:
+     *                 query:
+     *                   type: string
+     *                   description: Original search query
+     *                 results:
+     *                   type: array
+     *                   items:
+     *                     type: object
+     *                     properties:
+     *                       type:
+     *                         type: string
+     *                         enum: [album, track]
+     *                         description: Result type
+     *                       id:
+     *                         type: integer
+     *                         description: Item ID
+     *                       title:
+     *                         type: string
+     *                         description: Album or track title
+     *                       artist:
+     *                         type: string
+     *                         description: Artist name
+     *                       year:
+     *                         type: integer
+     *                         description: Release year
+     *                       genre:
+     *                         type: string
+     *                         description: Genre
+     *                       quality:
+     *                         type: string
+     *                         description: Audio quality
+     *                       relevance_score:
+     *                         type: integer
+     *                         description: Relevance score (1-10)
+     *                 total:
+     *                   type: integer
+     *                   description: Total number of results
+     *       400:
+     *         description: Invalid search query
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/Error'
+     *       500:
+     *         description: Internal server error
+     *         content:
+     *           application/json:
+     *             schema:
+     *               $ref: '#/components/schemas/Error'
+     *     security: []
      */
     async fuzzySearch(req, res) {
         try {

@@ -6,7 +6,43 @@ const { createReadStream } = require('fs');
 
 class TracksController {
     /**
-     * Update track metadata
+     * @swagger
+     * /api/tracks/{id}:
+     *   put:
+     *     summary: Update track metadata
+     *     description: Update metadata for a specific track
+     *     tags: [Tracks]
+     *     security:
+     *       - bearerAuth: []
+     *     parameters:
+     *       - in: path
+     *         name: id
+     *         required: true
+     *         schema:
+     *           type: integer
+     *         description: Track ID
+     *     requestBody:
+     *       required: true
+     *       content:
+     *         application/json:
+     *           schema:
+     *             type: object
+     *             properties:
+     *               track_title:
+     *                 type: string
+     *               track_artist:
+     *                 type: string
+     *               track_number:
+     *                 type: integer
+     *               disc_number:
+     *                 type: integer
+     *     responses:
+     *       200:
+     *         description: Track updated successfully
+     *       404:
+     *         description: Track not found
+     *       500:
+     *         description: Internal server error
      */
     async updateTrack(req, res) {
         try {
