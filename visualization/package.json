@@ -11,7 +11,11 @@
     "restart": "PM2_HOME=/tmp/.pm2 pm2 restart ordr-fm-viz",
     "logs": "PM2_HOME=/tmp/.pm2 pm2 logs ordr-fm-viz",
     "status": "PM2_HOME=/tmp/.pm2 pm2 status",
-    "test": "npm run lint && npm run test:syntax && npm run test:e2e",
+    "test": "npm run lint && npm run test:syntax && npm run test:unit && npm run test:integration",
+    "test:unit": "jest tests/unit --coverage",
+    "test:integration": "jest tests/integration --coverage",
+    "test:all": "jest --coverage",
+    "test:watch": "jest --watch",
     "test:syntax": "node -c server.js && echo 'Server syntax check passed'",
     "test:e2e": "npx playwright test",
     "test:e2e:ci": "CI=true npx playwright test",
@@ -42,11 +46,14 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.33.0",
+    "@jest/globals": "^30.0.5",
     "@playwright/test": "^1.54.2",
     "eslint": "^9.33.0",
+    "jest": "^30.0.5",
     "nodemon": "^3.0.2",
     "playwright": "^1.54.2",
     "pm2": "^6.0.8",
-    "prettier": "^3.6.2"
+    "prettier": "^3.6.2",
+    "supertest": "^7.1.4"
   }
 }
