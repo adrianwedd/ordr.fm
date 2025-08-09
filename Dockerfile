@@ -10,7 +10,7 @@ COPY visualization/package*.json ./
 RUN npm ci --only=production && npm cache clean --force
 
 # Build stage with all system dependencies
-FROM alpine:3.18 AS system-deps
+FROM alpine:3.22 AS system-deps
 
 # Install system dependencies
 RUN apk add --no-cache \
