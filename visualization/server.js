@@ -72,18 +72,22 @@ const server = http.createServer(app);
 // Create WebSocket server
 const wss = new WebSocket.Server({ server });
 
-// WebSocket connection handling
+// WebSocket connection handling with progress tracking
 const clients = new Set();
+const activeJobs = new Map(); // jobId -> { id, type, status, progress, startTime, details }
+const jobHistory = []; // Recent completed jobs
 
 wss.on('connection', (ws, req) => {
     console.log('WebSocket client connected from:', req.socket.remoteAddress);
     clients.add(ws);
     
-    // Send initial connection message
+    // Send initial connection message with active jobs
     ws.send(JSON.stringify({
         type: 'connection',
         message: 'Connected to ordr.fm real-time updates',
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        activeJobs: Array.from(activeJobs.values()),
+        recentJobs: jobHistory.slice(-5)
     }));
     
     // Handle client messages
@@ -106,6 +110,30 @@ wss.on('connection', (ws, req) => {
                         channels: Array.from(ws.subscriptions),
                         timestamp: new Date().toISOString()
                     }));
+                    break;
+                    
+                case 'cancel_job':
+                    if (message.jobId && activeJobs.has(message.jobId)) {
+                        const job = activeJobs.get(message.jobId);
+                        job.status = 'cancelled';
+                        job.cancelled = true;
+                        broadcastJobUpdate(job);
+                        ws.send(JSON.stringify({
+                            type: 'job_cancelled',
+                            jobId: message.jobId,
+                            timestamp: new Date().toISOString()
+                        }));
+                    }
+                    break;
+                    
+                case 'get_job_status':
+                    if (message.jobId && activeJobs.has(message.jobId)) {
+                        ws.send(JSON.stringify({
+                            type: 'job_status',
+                            job: activeJobs.get(message.jobId),
+                            timestamp: new Date().toISOString()
+                        }));
+                    }
                     break;
                     
                 default:
@@ -151,6 +179,98 @@ function broadcast(message, channel = null) {
             clients.delete(ws);
         }
     });
+}
+
+// Progress tracking functions for real-time job monitoring
+function createJob(type, totalItems = 0, details = {}) {
+    const jobId = `${type}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const job = {
+        id: jobId,
+        type,
+        status: 'starting',
+        progress: 0,
+        totalItems,
+        processedItems: 0,
+        startTime: new Date().toISOString(),
+        details,
+        errors: [],
+        warnings: []
+    };
+    
+    activeJobs.set(jobId, job);
+    broadcastJobUpdate(job);
+    console.log(`🎯 Created job: ${jobId} (${type})`);
+    return jobId;
+}
+
+function updateJobProgress(jobId, processedItems, status = 'running', details = {}) {
+    const job = activeJobs.get(jobId);
+    if (!job || job.cancelled) return false;
+    
+    job.processedItems = processedItems;
+    job.progress = job.totalItems > 0 ? Math.round((processedItems / job.totalItems) * 100) : 0;
+    job.status = status;
+    job.lastUpdate = new Date().toISOString();
+    job.details = { ...job.details, ...details };
+    
+    broadcastJobUpdate(job);
+    return true;
+}
+
+function addJobError(jobId, error) {
+    const job = activeJobs.get(jobId);
+    if (job) {
+        job.errors.push({
+            message: error,
+            timestamp: new Date().toISOString()
+        });
+        broadcastJobUpdate(job);
+    }
+}
+
+function addJobWarning(jobId, warning) {
+    const job = activeJobs.get(jobId);
+    if (job) {
+        job.warnings.push({
+            message: warning,
+            timestamp: new Date().toISOString()
+        });
+        broadcastJobUpdate(job);
+    }
+}
+
+function completeJob(jobId, status = 'completed', summary = {}) {
+    const job = activeJobs.get(jobId);
+    if (!job) return;
+    
+    job.status = status;
+    job.endTime = new Date().toISOString();
+    job.duration = new Date(job.endTime) - new Date(job.startTime);
+    job.summary = summary;
+    
+    if (status === 'completed') {
+        job.progress = 100;
+        job.processedItems = job.totalItems;
+    }
+    
+    // Move to history and clean up
+    jobHistory.push({ ...job });
+    if (jobHistory.length > 50) jobHistory.shift(); // Keep last 50 jobs
+    
+    activeJobs.delete(jobId);
+    broadcastJobUpdate(job, true);
+    
+    console.log(`✅ Completed job: ${jobId} (${status}) in ${job.duration}ms`);
+}
+
+// Broadcast job updates to all connected clients
+function broadcastJobUpdate(job, isCompleted = false) {
+    broadcast({
+        type: 'job_update',
+        job,
+        isCompleted,
+        activeJobsCount: activeJobs.size
+    }, 'jobs');
 }
 
 // Send periodic stats updates to subscribers
@@ -2560,7 +2680,7 @@ server.listen(PORT, '0.0.0.0', () => {
 
 // Action API Endpoints
 
-// Start music processing
+// Start music processing with real-time progress tracking
 app.post('/api/actions/process', (req, res) => {
     const { sourceDirectory, dryRun = true, enableDiscogs = true, electronicMode = false } = req.body;
     
@@ -2579,6 +2699,23 @@ app.post('/api/actions/process', (req, res) => {
     if (!fs.existsSync(sourceDirectory) || !fs.statSync(sourceDirectory).isDirectory()) {
         return res.status(400).json({ error: 'Source directory does not exist or is not a directory' });
     }
+    
+    // Count total items for progress tracking
+    let totalItems = 0;
+    try {
+        const items = fs.readdirSync(sourceDirectory, { withFileTypes: true });
+        totalItems = items.filter(item => item.isDirectory()).length; // Album directories
+    } catch (err) {
+        console.warn('Could not count directories for progress tracking:', err.message);
+    }
+    
+    // Create progress tracking job
+    const jobId = createJob('music_processing', totalItems, {
+        sourceDirectory,
+        dryRun,
+        enableDiscogs,
+        electronicMode
+    });
     
     // Build command arguments securely using array-based spawn
     const args = ['../ordr.fm.sh', '--source', sourceDirectory];
@@ -2603,17 +2740,49 @@ app.post('/api/actions/process', (req, res) => {
     
     let output = '';
     let errorOutput = '';
+    let processedItems = 0;
+    
+    // Update job status to running
+    updateJobProgress(jobId, 0, 'running', { pid: process.pid });
     
     process.stdout.on('data', (data) => {
         const chunk = data.toString();
         output += chunk;
         
-        // Broadcast real-time updates to WebSocket clients
+        // Parse progress from output
+        const albumMatches = chunk.match(/Processing album directory: (.+)/g);
+        if (albumMatches) {
+            processedItems += albumMatches.length;
+            updateJobProgress(jobId, processedItems, 'running', { 
+                currentAlbum: albumMatches[albumMatches.length - 1].replace('Processing album directory: ', '').trim()
+            });
+        }
+        
+        // Check for warnings and errors in output
+        const warningMatches = chunk.match(/WARNING: (.+)/g);
+        if (warningMatches) {
+            warningMatches.forEach(warning => {
+                addJobWarning(jobId, warning.replace('WARNING: ', '').trim());
+            });
+        }
+        
+        const errorMatches = chunk.match(/ERROR: (.+)/g);
+        if (errorMatches) {
+            errorMatches.forEach(error => {
+                addJobError(jobId, error.replace('ERROR: ', '').trim());
+            });
+        }
+        
+        // Enhanced WebSocket broadcast with progress info
         broadcast({
             type: 'processing_update',
             data: {
+                jobId,
                 status: 'running',
                 output: chunk,
+                progress: totalItems > 0 ? Math.round((processedItems / totalItems) * 100) : 0,
+                processedItems,
+                totalItems,
                 timestamp: new Date().toISOString()
             }
         }, 'processing');
@@ -2624,28 +2793,115 @@ app.post('/api/actions/process', (req, res) => {
     });
     
     process.on('close', (code) => {
+        const status = code === 0 ? 'completed' : 'failed';
         const result = {
             success: code === 0,
             exitCode: code,
             output: output,
             error: errorOutput,
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            finalProgress: processedItems,
+            totalItems: totalItems
         };
         
-        // Broadcast completion status
+        // Complete the job with appropriate status
+        completeJob(jobId, status, {
+            exitCode: code,
+            processedAlbums: processedItems,
+            totalAlbums: totalItems,
+            hasErrors: errorOutput.length > 0,
+            outputLength: output.length
+        });
+        
+        // Enhanced completion broadcast
         broadcast({
             type: 'processing_complete',
-            data: result
+            data: {
+                ...result,
+                jobId,
+                status
+            }
         }, 'processing');
         
-        console.log('Processing completed with exit code:', code);
+        console.log(`Processing completed with exit code: ${code}, processed: ${processedItems}/${totalItems}`);
+    });
+    
+    // Handle process errors
+    process.on('error', (err) => {
+        console.error('Process spawn error:', err);
+        addJobError(jobId, `Process spawn error: ${err.message}`);
+        completeJob(jobId, 'error', { spawnError: err.message });
+        
+        broadcast({
+            type: 'processing_error',
+            data: {
+                jobId,
+                error: err.message,
+                timestamp: new Date().toISOString()
+            }
+        }, 'processing');
     });
     
     res.json({ 
-        message: 'Processing started', 
-        command: command.replace(/--source "[^"]*"/, '--source "[REDACTED]"'),
+        message: 'Processing started with real-time progress tracking', 
+        jobId,
+        command: `bash ${args.join(' ')}`,
+        dryRun: dryRun,
+        enableDiscogs: enableDiscogs,
+        electronicMode: electronicMode,
+        totalItems,
+        progressTracking: true,
         timestamp: new Date().toISOString() 
     });
+});
+
+// Jobs API for progress tracking
+app.get('/api/jobs/active', (req, res) => {
+    res.json({
+        activeJobs: Array.from(activeJobs.values()),
+        count: activeJobs.size
+    });
+});
+
+app.get('/api/jobs/history', (req, res) => {
+    const { limit = 10 } = req.query;
+    const limitNum = Math.min(parseInt(limit) || 10, 50);
+    
+    res.json({
+        recentJobs: jobHistory.slice(-limitNum),
+        count: jobHistory.length
+    });
+});
+
+app.get('/api/jobs/:jobId', (req, res) => {
+    const { jobId } = req.params;
+    
+    if (activeJobs.has(jobId)) {
+        res.json({ job: activeJobs.get(jobId), active: true });
+    } else {
+        const historyJob = jobHistory.find(job => job.id === jobId);
+        if (historyJob) {
+            res.json({ job: historyJob, active: false });
+        } else {
+            res.status(404).json({ error: 'Job not found' });
+        }
+    }
+});
+
+app.post('/api/jobs/:jobId/cancel', (req, res) => {
+    const { jobId } = req.params;
+    
+    if (activeJobs.has(jobId)) {
+        const job = activeJobs.get(jobId);
+        job.status = 'cancelled';
+        job.cancelled = true;
+        job.cancelledAt = new Date().toISOString();
+        
+        broadcastJobUpdate(job);
+        res.json({ message: 'Job cancellation requested', jobId });
+    } else {
+        res.status(404).json({ error: 'Active job not found' });
+    }
 });
 
 // System status check
