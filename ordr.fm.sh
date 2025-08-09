@@ -1,3519 +1,620 @@
 #!/bin/bash
-# Source security patches
+#
+# ordr.fm - Intelligent Music Organization Tool (Modular Version)
+# Organizes music collections based on metadata, quality, and customizable rules
+#
+# Usage: ./ordr.fm.modular.sh [options]
+# Run with --help for detailed options
+
+set -euo pipefail
+
+# Script directory for module loading
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "$SCRIPT_DIR/security_patch.sh" || { echo "ERROR: Failed to load security patches"; exit 1; }
 
-# Source Google Drive backup functions
-if [[ -f "$SCRIPT_DIR/gdrive_backup.sh" ]]; then
-    source "$SCRIPT_DIR/gdrive_backup.sh"
-fi
+# Load all modules
+source "$SCRIPT_DIR/lib/common.sh"
+source "$SCRIPT_DIR/lib/fileops.sh"
+source "$SCRIPT_DIR/lib/database.sh"
+source "$SCRIPT_DIR/lib/organization.sh"
+source "$SCRIPT_DIR/lib/metadata_extraction.sh"
 
-# Source optimized alias resolution
-if [[ -f "$SCRIPT_DIR/alias_optimization.sh" ]]; then
-    source "$SCRIPT_DIR/alias_optimization.sh"
-fi
-
-# Source alias validation
-if [[ -f "$SCRIPT_DIR/alias_validation.sh" ]]; then
-    source "$SCRIPT_DIR/alias_validation.sh"
-fi
-
-# Source metadata processing module
-if [[ -f "$SCRIPT_DIR/lib/metadata.sh" ]]; then
-    source "$SCRIPT_DIR/lib/metadata.sh"
-else
-    echo "WARNING: Metadata module not found at $SCRIPT_DIR/lib/metadata.sh" >&2
-fi
-
-# Source Discogs API integration module
+# Check if Discogs module exists
 if [[ -f "$SCRIPT_DIR/lib/discogs.sh" ]]; then
     source "$SCRIPT_DIR/lib/discogs.sh"
-else
-    echo "WARNING: Discogs module not found at $SCRIPT_DIR/lib/discogs.sh" >&2
 fi
 
-# Source duplicate detection engine
-if [[ -f "$SCRIPT_DIR/lib/duplicate_detection.sh" ]]; then
-    source "$SCRIPT_DIR/lib/duplicate_detection.sh"
-else
-    echo "WARNING: Duplicate detection module not found at $SCRIPT_DIR/lib/duplicate_detection.sh" >&2
+# Check if metadata module exists
+if [[ -f "$SCRIPT_DIR/lib/metadata.sh" ]]; then
+    source "$SCRIPT_DIR/lib/metadata.sh"
 fi
 
-# Initialize alias system 
-init_alias_system() {
-    # Parse alias groups once at startup for performance
-    if command -v parse_alias_groups_once >/dev/null 2>&1; then
-        parse_alias_groups_once
-    fi
-    
-    # Validate alias configuration
-    if [[ "$GROUP_ARTIST_ALIASES" == "1" ]] && [[ -n "$ARTIST_ALIAS_GROUPS" ]]; then
-        if command -v validate_artist_aliases >/dev/null 2>&1; then
-            if ! validate_artist_aliases "$ARTIST_ALIAS_GROUPS" "0" > /dev/null 2>&1; then
-                echo "WARNING: Artist alias configuration has errors. Run: ./alias_validation.sh validate" >&2
-                if [[ "$STRICT_MODE" == "1" ]]; then
-                    echo "ERROR: Exiting due to invalid alias configuration (strict mode)" >&2
-                    exit 1
-                fi
-            fi
-        fi
-    fi
-    
-    # Show alias cache stats in verbose mode
-    if [[ "$VERBOSE" == "1" ]] && command -v show_alias_cache_stats >/dev/null 2>&1; then
-        show_alias_cache_stats
-    fi
-}
-
-set -e
-
-# ordr.fm - Organizes music libraries based on metadata.
-
-# --- Configuration Loading ---
-# Default configuration file path
-CONFIG_FILE="$(dirname "$0")/ordr.fm.conf"
-
-# --- Global Variables ---
-DRY_RUN=1 # Default to dry run for safety
-MOVE_FILES=0 # Flag to enable actual file movement
-UNSORTED_DIR="" # Will be set in main() with timestamp
-INCREMENTAL_MODE=0 # Flag to enable incremental processing
-SINCE_DATE="" # Process files newer than this date
-STATE_DB="" # Path to state tracking database
-FORCE_REPROCESS_DIR="" # Directory to force reprocess
-FIND_DUPLICATES=0 # Flag to enable duplicate detection analysis mode
-RESOLVE_DUPLICATES=0 # Flag to enable automatic duplicate resolution
-DUPLICATES_DB="" # Path to duplicates database
-SCAN_DUPLICATES=0 # Flag to scan collection and generate fingerprints
-DETECT_DUPLICATES=0 # Flag to detect duplicate groups from fingerprints
-DUPLICATE_REPORT=0 # Flag to generate duplicate analysis report
-CLEANUP_DUPLICATES=0 # Flag to cleanup duplicate albums
-DUPLICATE_THRESHOLD=0.85 # Minimum score to consider albums duplicates
-PROFILE_NAME="" # Active configuration profile name
-PROFILES_DIR="" # Directory containing profile configurations
-LIST_PROFILES=0 # Flag to list available profiles
-BATCH_MODE=0 # Flag for fully automated batch operation
-VALIDATE_CONFIG=0 # Flag to validate configuration and exit
-NOTIFY_EMAIL="" # Email address for notifications
-NOTIFY_WEBHOOK="" # Webhook URL for notifications
-LOCK_FILE="" # Path to lock file for concurrent run prevention
-
-# Discogs API integration variables
-DISCOGS_ENABLED=0 # Flag to enable Discogs metadata enrichment
-DISCOGS_USER_TOKEN="" # User token for Discogs API
-DISCOGS_CONSUMER_KEY="" # Consumer key for Discogs API
-DISCOGS_CONSUMER_SECRET="" # Consumer secret for Discogs API
-DISCOGS_CACHE_DIR="" # Directory for API response cache
-DISCOGS_CACHE_EXPIRY=24 # Cache expiration in hours
-DISCOGS_RATE_LIMIT=60 # API rate limit (requests per minute)
-DISCOGS_CONFIDENCE_THRESHOLD=0.7 # Confidence threshold for metadata acceptance
-DISCOGS_CATALOG_NUMBERS=1 # Enable catalog number extraction
-DISCOGS_REMIX_ARTISTS=1 # Enable remix artist extraction
-DISCOGS_LABEL_SERIES=1 # Enable label series identification
-DISCOGS_RATE_LIMITER_FILE="" # Rate limiter state file
-DISCOGS_LAST_REQUEST_TIME=0 # Last API request timestamp
-
-# Advanced Electronic Music Organization variables
-ORGANIZATION_MODE="artist" # Organization mode: artist, label, series, hybrid
-LABEL_PRIORITY_THRESHOLD=0.8 # Threshold for label-based organization
-MIN_LABEL_RELEASES=3 # Minimum releases from label to use label organization
-SEPARATE_REMIXES=0 # Flag to organize remixes separately
-SEPARATE_COMPILATIONS=0 # Flag to handle compilations separately
-VINYL_SIDE_MARKERS=0 # Flag to add vinyl side markers
-UNDERGROUND_DETECTION=0 # Flag for underground/white label handling
-PATTERN_ARTIST="{quality}/{artist}/{album} ({year})" # Default artist pattern
-PATTERN_ARTIST_CATALOG="{quality}/{artist}/{album} ({year}) [{catalog}]" # Artist with catalog
-PATTERN_LABEL="{quality}/Labels/{label}/{artist}/{album} ({year})" # Label-based pattern
-PATTERN_SERIES="{quality}/Series/{series}/{album} ({year})" # Series pattern
-PATTERN_REMIX="{quality}/Remixes/{original_artist}/{remixer}/{title}" # Remix pattern
-PATTERN_UNDERGROUND="{quality}/Underground/{catalog_or_year}/{album}" # Underground pattern
-PATTERN_COMPILATION="{quality}/Compilations/{album} ({year})" # Compilation pattern
-REMIX_KEYWORDS="remix|rmx|rework|edit|dub|mix|bootleg|refix|flip" # Remix detection
-VA_ARTISTS="Various Artists|Various|VA|V.A.|Compilation" # VA detection
-UNDERGROUND_PATTERNS="white|promo|bootleg|unreleased|dubplate|test press" # Underground detection
-ARTIST_ALIAS_GROUPS="" # Artist alias grouping configuration
-GROUP_ARTIST_ALIASES=0 # Flag to enable alias grouping
-USE_PRIMARY_ARTIST_NAME=1 # Use primary name for aliases
-
-# Parallel processing configuration
-PARALLEL_PROCESSING=0 # Enable parallel processing
-PARALLEL_WORKERS=4 # Number of worker processes
-
-# --- Load Configuration Files ---
-# Load defaults from config file if it exists
-if [[ -f "$CONFIG_FILE" ]]; then
-    source "$CONFIG_FILE"
-else
-    echo "Warning: Configuration file not found at $CONFIG_FILE. Using hardcoded defaults." >&2
-    # Hardcoded defaults if config file is missing
-    SOURCE_DIR="/home/plex/Music/Unsorted and Incomplete"
-    DEST_DIR="/home/plex/Music/sorted_music"
-    UNSORTED_DIR_BASE="/home/plex/Music/Unsorted and Incomplete/unsorted"
-    LOG_FILE="/home/plex/Music/ordr.fm.log"
-    VERBOSITY=1
+# Check if parallel processor exists
+if [[ -f "$SCRIPT_DIR/lib/parallel_processor.sh" ]]; then
+    source "$SCRIPT_DIR/lib/parallel_processor.sh"
 fi
 
-# Load local config overrides if they exist (for sensitive data like API tokens)
-LOCAL_CONFIG_FILE="$(dirname "$0")/ordr.fm.conf.local"
-if [[ -f "$LOCAL_CONFIG_FILE" ]]; then
-    source "$LOCAL_CONFIG_FILE"
-    # Don't log the token itself for security
-    if [[ -n "$DISCOGS_USER_TOKEN" ]]; then
-        echo "Info: Loaded local configuration with Discogs token (hidden for security)" >&2
-    fi
-    # Debug artist alias configuration
-    echo "Debug: GROUP_ARTIST_ALIASES=$GROUP_ARTIST_ALIASES" >&2
-    echo "Debug: First 100 chars of ARTIST_ALIAS_GROUPS: ${ARTIST_ALIAS_GROUPS:0:100}..." >&2
+# Check if performance module exists
+if [[ -f "$SCRIPT_DIR/lib/performance.sh" ]]; then
+    source "$SCRIPT_DIR/lib/performance.sh"
 fi
 
-# Define log levels (consistent with lib/common.sh)
-if [[ -z "${LOG_ERROR:-}" ]]; then
-    readonly LOG_QUIET=0
-    readonly LOG_ERROR=0
-    readonly LOG_WARNING=1
-    readonly LOG_INFO=2
-    readonly LOG_DEBUG=3
-    readonly LOG_FATAL=5
+# Check if cleanup module exists
+if [[ -f "$SCRIPT_DIR/lib/cleanup.sh" ]]; then
+    source "$SCRIPT_DIR/lib/cleanup.sh"
 fi
 
-# --- Helper Functions ---
-# Log function
-log() {
-    local level=$1
-    local message="$2"
-    local timestamp=$(date +"%Y-%m-%d %H:%M:%S")
+# Global variables with defaults
+VERSION="2.0.0-modular"
+DATE_NOW=$(date +%Y%m%d_%H%M%S)
 
-    # Write to log file
-    echo "[$timestamp] [$(printf '%-5s' "$(get_log_level_name $level)")] $message" >> "$LOG_FILE"
+# Core settings
+SOURCE_DIR="."
+DEST_DIR=""
+UNSORTED_BASE_DIR=""
+LOG_FILE="ordr.fm.log"
+CONFIG_FILE=""
+DRY_RUN=1
+VERBOSITY=$LOG_INFO
+INCREMENTAL=0
+DUPLICATE_DETECTION=0
 
-    # Write to console based on verbosity
-    if [[ $VERBOSITY -ge $level ]]; then
-        echo "$message" >&2
-    fi
-}
+# Database paths
+STATE_DB="ordr.fm.state.db"
+METADATA_DB="ordr.fm.metadata.db"
+DUPLICATES_DB="ordr.fm.duplicates.db"
 
-get_log_level_name() {
-    case $1 in
-        $LOG_QUIET) echo "QUIET" ;;
-        $LOG_INFO) echo "INFO" ;;
-        $LOG_DEBUG) echo "DEBUG" ;;
-        $LOG_WARNING) echo "WARNING" ;;
-        $LOG_ERROR) echo "ERROR" ;;
-        $LOG_FATAL) echo "FATAL" ;;
-        *) echo "UNKNOWN" ;;
-    esac
-}
+# Electronic music organization
+ENABLE_ELECTRONIC_ORGANIZATION=0
+ORGANIZATION_MODE="artist"
+SEPARATE_REMIXES=0
+VINYL_SIDE_MARKERS=0
 
-# Function to check for required dependencies
+# Parallel processing
+ENABLE_PARALLEL=0
+PARALLEL_JOBS=0  # 0 = auto-detect
+
+# Cleanup options
+CLEANUP_EMPTY_DIRS=0
+CLEANUP_ARTIFACTS=0
+
+# Check dependencies
 check_dependencies() {
-    local missing_deps=()
-    for cmd in "exiftool" "jq" "rsync" "md5sum" "sqlite3" "curl" "bc"; do
-        if ! command -v "$cmd" &> /dev/null; then
-            missing_deps+=("$cmd")
+    local required_tools=("exiftool" "jq")
+    local missing_tools=()
+    
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            missing_tools+=("$tool")
         fi
     done
-
-    if [[ ${#missing_deps[@]} -ne 0 ]]; then
-        log $LOG_FATAL "FATAL: Missing required dependencies: ${missing_deps[*]}"
-        exit 1
+    
+    # Optional tools
+    local optional_tools=("sqlite3" "rsync" "bc")
+    for tool in "${optional_tools[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            log $LOG_WARNING "Optional tool not found: $tool (some features may be limited)"
+        fi
+    done
+    
+    if [[ ${#missing_tools[@]} -gt 0 ]]; then
+        log $LOG_ERROR "Missing required tools: ${missing_tools[*]}"
+        log $LOG_ERROR "Please install: sudo apt-get install ${missing_tools[*]}"
+        return 1
     fi
+    
     log $LOG_INFO "All required dependencies are installed."
+    return 0
 }
 
-# Function to escape SQL strings
-sql_escape() {
-    local input="$1"
-    # Replace single quotes with two single quotes for SQL escaping
-    echo "$input" | sed "s/'/''/g"
-}
-
-# Function to sanitize strings for filesystem use
-sanitize_filename() {
-    local input="$1"
-    # Remove or replace problematic characters
-    local sanitized=$(echo "$input" | sed 's/[\\/:*?"<>|]\+/_/g')
-    # Trim leading/trailing spaces and replace multiple spaces with a single space
-    sanitized=$(echo "$sanitized" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//;s/[[:space:]]\+/ /g')
-    echo "$sanitized"
-}
-
-# Function to securely move files/directories with permission handling
-secure_move_file() {
-    local source="$1"
-    local dest="$2"
-    
-    # Try regular mv first
-    if mv "$source" "$dest" 2>/dev/null; then
-        return 0
-    fi
-    
-    # If that fails, try with sudo if available
-    if command -v sudo >/dev/null 2>&1; then
-        if sudo mv "$source" "$dest" 2>/dev/null; then
-            # Fix ownership to match parent directory
-            local parent_dir=$(dirname "$dest")
-            local parent_owner=$(stat -c '%U:%G' "$parent_dir" 2>/dev/null)
-            if [[ -n "$parent_owner" ]]; then
-                sudo chown -R "$parent_owner" "$dest" 2>/dev/null
-            fi
-            return 0
-        fi
-    fi
-    
-    # If all else fails, log error
-    log $LOG_ERROR "Failed to move: $source -> $dest"
-    return 1
-}
-
-# Note: Discogs API integration functions are now provided by the discogs module (lib/discogs.sh)
-# Available functions: init_discogs, discogs_search_releases, discogs_get_release, 
-# discogs_api_request, discogs_rate_limit, discogs_cache_*
-
-# --- Advanced Electronic Music Organization Functions ---
-
-# Detect if an album is a compilation or VA release
-is_compilation() {
-    local album_artist="$1"
-    local album_title="$2"
-    local label_series="$3"
-    
-    # Check if artist matches VA patterns
-    if echo "$album_artist" | grep -iE "($VA_ARTISTS)" >/dev/null 2>&1; then
-        log $LOG_DEBUG "Detected compilation: VA artist match"
-        return 0
-    fi
-    
-    # Check if we have a label series (like Fabric, Global Underground)
-    if [[ -n "$label_series" ]]; then
-        log $LOG_DEBUG "Detected compilation: Has label series '$label_series'"
-        return 0
-    fi
-    
-    # Check common compilation patterns in album title
-    if echo "$album_title" | grep -iE "(compilation|various|mixed by|dj mix|essential mix)" >/dev/null 2>&1; then
-        log $LOG_DEBUG "Detected compilation: Title pattern match"
-        return 0
-    fi
-    
-    return 1
-}
-
-# Detect if a release is underground/white label
-is_underground() {
-    local album_artist="$1"
-    local album_title="$2"
-    local catalog_number="$3"
-    local label="$4"
-    
-    # Check underground patterns in various fields
-    local all_fields="$album_artist $album_title $catalog_number $label"
-    
-    if echo "$all_fields" | grep -iE "($UNDERGROUND_PATTERNS)" >/dev/null 2>&1; then
-        log $LOG_DEBUG "Detected underground release: Pattern match"
-        return 0
-    fi
-    
-    # Check for missing critical metadata (often indicates white label)
-    if [[ "$album_artist" == "Unknown Artist" ]] || [[ -z "$album_artist" && -n "$catalog_number" ]]; then
-        log $LOG_DEBUG "Detected underground release: Missing artist with catalog"
-        return 0
-    fi
-    
-    return 1
-}
-
-# Detect if a track or album contains remixes
-detect_remixes() {
-    local album_title="$1"
-    local remix_artists="$2"
-    
-    # Check if title contains remix keywords
-    if echo "$album_title" | grep -iE "($REMIX_KEYWORDS)" >/dev/null 2>&1; then
-        log $LOG_DEBUG "Detected remix content in album title"
-        return 0
-    fi
-    
-    # Check if we have remix artists from Discogs
-    if [[ -n "$remix_artists" ]]; then
-        log $LOG_DEBUG "Detected remix content from Discogs data"
-        return 0
-    fi
-    
-    return 1
-}
-
-# Extract remix artist from track title
-extract_remix_artist() {
-    local track_title="$1"
-    
-    # Pattern: "Track Name (Artist Remix)" or "Track Name [Artist Remix]"
-    local remixer=$(echo "$track_title" | sed -n 's/.*[[(]\([^])]*\)[Rr]emix[])]*.*/\1/p' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    
-    if [[ -z "$remixer" ]]; then
-        # Try pattern: "Track Name - Artist Remix"
-        remixer=$(echo "$track_title" | sed -n 's/.* - \(.*\)[Rr]emix.*/\1/p' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-    fi
-    
-    echo "$remixer"
-}
-
-# Apply organization pattern based on metadata
-apply_organization_pattern() {
-    local pattern="$1"
-    local quality="$2"
-    local artist="$3"
-    local album="$4"
-    local year="$5"
-    local catalog="$6"
-    local label="$7"
-    local series="$8"
-    
-    # Sanitize all variables
-    local safe_quality=$(sanitize_filename "$quality")
-    local safe_artist=$(sanitize_filename "$artist")
-    local safe_album=$(sanitize_filename "$album")
-    local safe_year=$(sanitize_filename "$year")
-    local safe_catalog=$(sanitize_filename "$catalog")
-    local safe_label=$(sanitize_filename "$label")
-    local safe_series=$(sanitize_filename "$series")
-    
-    # Replace pattern variables
-    local result="$pattern"
-    result="${result//\{quality\}/$safe_quality}"
-    result="${result//\{artist\}/$safe_artist}"
-    result="${result//\{album\}/$safe_album}"
-    result="${result//\{year\}/$safe_year}"
-    result="${result//\{catalog\}/$safe_catalog}"
-    result="${result//\{label\}/$safe_label}"
-    result="${result//\{series\}/$safe_series}"
-    result="${result//\{catalog_or_year\}/${safe_catalog:-$safe_year}}"
-    
-    # Clean up empty placeholders and extra spaces
-    result=$(echo "$result" | sed 's/\[\]//g;s/()//g;s/  \+/ /g;s/\/\//\//g')
-    
-    echo "$result"
-}
-
-# Count existing releases for an entity (artist or label)
-count_existing_releases() {
-    local entity_type="$1"  # "artist" or "label"
-    local entity_name="$2"
-    
-    if [[ -z "$entity_name" ]]; then
-        echo "0"
-        return
-    fi
-    
-    local sanitized_name=$(sanitize_filename "$entity_name")
-    local total_count=0
-    
-    # Define search paths based on entity type
-    local search_paths=()
-    if [[ "$entity_type" == "label" ]]; then
-        search_paths=(
-            "${DEST_DIR}/Lossless/Labels/$sanitized_name"
-            "${DEST_DIR}/Lossy/Labels/$sanitized_name"
-            "${DEST_DIR}/Mixed/Labels/$sanitized_name"
-        )
-    else  # artist
-        search_paths=(
-            "${DEST_DIR}/Lossless/$sanitized_name"
-            "${DEST_DIR}/Lossy/$sanitized_name"
-            "${DEST_DIR}/Mixed/$sanitized_name"
-            "${DEST_DIR}/Lossless/Labels/*/$sanitized_name"
-            "${DEST_DIR}/Lossy/Labels/*/$sanitized_name"
-            "${DEST_DIR}/Mixed/Labels/*/$sanitized_name"
-        )
-    fi
-    
-    # Count existing releases
-    for pattern in "${search_paths[@]}"; do
-        for path in $pattern; do
-            if [[ -d "$path" ]]; then
-                # Count album directories
-                local count=$(find "$path" -mindepth 1 -maxdepth 1 -type d 2>/dev/null | wc -l)
-                total_count=$((total_count + count))
-            fi
-        done
-    done
-    
-    echo "$total_count"
-}
-
-# Determine if label or artist organization is better based on existing releases
-should_use_label_organization() {
-    local label="$1"
-    local artist="$2"
-    local current_path="$3"
-    
-    if [[ -z "$label" ]]; then
-        return 1
-    fi
-    
-    # Count existing releases for both label and artist
-    local label_count=$(count_existing_releases "label" "$label")
-    
-    # Use alias-aware counting if enabled
-    local artist_count
-    if [[ $GROUP_ARTIST_ALIASES -eq 1 ]]; then
-        artist_count=$(count_artist_releases_with_aliases "$artist")
-    else
-        artist_count=$(count_existing_releases "artist" "$artist")
-    fi
-    
-    log $LOG_DEBUG "Release counts - Label '$label': $label_count, Artist '$artist': $artist_count"
-    
-    # Decision logic:
-    # 1. If label has significantly more releases than artist, use label
-    # 2. If artist has more releases, use artist
-    # 3. If similar, check against minimum threshold
-    
-    if [[ $label_count -ge $MIN_LABEL_RELEASES ]]; then
-        if [[ $label_count -gt $((artist_count * 2)) ]]; then
-            # Label has at least twice as many releases as artist
-            log $LOG_DEBUG "Using label organization: label has significantly more releases"
-            return 0
-        elif [[ $artist_count -le 2 ]] && [[ $label_count -ge 5 ]]; then
-            # Artist has very few releases but label has many
-            log $LOG_DEBUG "Using label organization: artist has few releases, label has many"
-            return 0
-        fi
-    fi
-    
-    # Default to artist if label doesn't meet criteria
-    log $LOG_DEBUG "Using artist organization: artist has $artist_count releases vs label's $label_count"
-    return 1
-}
-
-# Determine best organization mode for album
-determine_organization_mode() {
-    local album_artist="$1"
-    local album_title="$2"
-    local catalog_number="$3"
-    local label="$4"
-    local label_series="$5"
-    local discogs_confidence="$6"
-    local remix_detected="$7"
-    local album_path="$8"
-    
-    # Start with configured default mode
-    local mode="$ORGANIZATION_MODE"
-    
-    # Override logic based on metadata and settings
-    if [[ "$mode" == "hybrid" ]] || [[ "$mode" == "label" ]]; then
-        # Intelligent mode selection based on available metadata
-        
-        # Series takes priority for compilations
-        if [[ $SEPARATE_COMPILATIONS -eq 1 ]] && is_compilation "$album_artist" "$album_title" "$label_series"; then
-            if [[ -n "$label_series" ]]; then
-                mode="series"
-                log $LOG_DEBUG "Mode selected: series (compilation with series data)"
-            else
-                mode="compilation"
-                log $LOG_DEBUG "Mode selected: compilation (VA release)"
-            fi
-        # Underground/white label handling
-        elif [[ $UNDERGROUND_DETECTION -eq 1 ]] && is_underground "$album_artist" "$album_title" "$catalog_number" "$label"; then
-            mode="underground"
-            log $LOG_DEBUG "Mode selected: underground"
-        # Remix handling
-        elif [[ $SEPARATE_REMIXES -eq 1 && "$remix_detected" == "1" ]]; then
-            mode="remix"
-            log $LOG_DEBUG "Mode selected: remix"
-        # Label-based if conditions are met
-        elif [[ -n "$label" ]] && [[ -n "$discogs_confidence" ]]; then
-            local use_label=0
-            
-            # Check confidence threshold
-            if (( $(echo "$discogs_confidence >= $LABEL_PRIORITY_THRESHOLD" | bc -l 2>/dev/null) )); then
-                # Check if we have enough releases from this label compared to artist
-                if should_use_label_organization "$label" "$album_artist" "$album_path"; then
-                    use_label=1
-                fi
-            fi
-            
-            if [[ $use_label -eq 1 ]]; then
-                mode="label"
-                log $LOG_DEBUG "Mode selected: label (high confidence: $discogs_confidence, sufficient releases)"
-            else
-                mode="artist"
-                log $LOG_DEBUG "Mode selected: artist (fallback from label mode)"
-            fi
-        else
-            mode="artist"
-            log $LOG_DEBUG "Mode selected: artist (default fallback)"
-        fi
-    elif [[ "$mode" == "series" ]]; then
-        # Force series mode only if we actually have series data
-        if [[ -z "$label_series" ]]; then
-            mode="artist"
-            log $LOG_DEBUG "Mode fallback: series to artist (no series data)"
-        fi
-    fi
-    
-    echo "$mode"
-}
-
-# Build organization path based on mode
-build_organization_path() {
-    local mode="$1"
-    local quality="$2"
-    local artist="$3"
-    local album="$4"
-    local year="$5"
-    local catalog="$6"
-    local label="$7"
-    local series="$8"
-    
-    local pattern=""
-    
-    case "$mode" in
-        "label")
-            pattern="$PATTERN_LABEL"
-            ;;
-        "series")
-            pattern="$PATTERN_SERIES"
-            ;;
-        "remix")
-            # For remix mode, we'll need special handling at track level
-            pattern="$PATTERN_REMIX"
-            ;;
-        "underground")
-            pattern="$PATTERN_UNDERGROUND"
-            ;;
-        "compilation")
-            pattern="$PATTERN_COMPILATION"
-            ;;
-        "artist")
-            if [[ -n "$catalog" ]]; then
-                pattern="$PATTERN_ARTIST_CATALOG"
-            else
-                pattern="$PATTERN_ARTIST"
-            fi
-            ;;
-        *)
-            # Default to artist pattern
-            pattern="$PATTERN_ARTIST"
-            ;;
-    esac
-    
-    local path=$(apply_organization_pattern "$pattern" "$quality" "$artist" "$album" "$year" "$catalog" "$label" "$series")
-    
-    # Prepend destination directory
-    echo "${DEST_DIR}/${path}"
-}
-
-# Detect vinyl side markers in Discogs tracklist
-detect_vinyl_sides() {
-    local tracklist_json="$1"
-    
-    if [[ -z "$tracklist_json" || "$tracklist_json" == "null" ]]; then
-        return 1
-    fi
-    
-    # Check for vinyl position markers (A1, A2, B1, B2, etc.)
-    local has_vinyl_positions=$(echo "$tracklist_json" | jq -r '.[].position // empty' 2>/dev/null | grep -E '^[A-Z][0-9]' | head -1)
-    
-    if [[ -n "$has_vinyl_positions" ]]; then
-        log $LOG_DEBUG "Detected vinyl side positions in tracklist"
-        return 0
-    fi
-    
-    return 1
-}
-
-# Extract vinyl position for a track
-get_vinyl_position() {
-    local track_json="$1"
-    
-    if [[ -z "$track_json" || "$track_json" == "null" ]]; then
-        echo ""
-        return
-    fi
-    
-    local position=$(echo "$track_json" | jq -r '.position // empty' 2>/dev/null)
-    
-    # Validate it's a vinyl position (A1, B2, etc.)
-    if echo "$position" | grep -E '^[A-Z][0-9]' >/dev/null 2>&1; then
-        echo "$position"
-    else
-        echo ""
-    fi
-}
-
-# --- Artist Alias Management Functions ---
-
-# Find primary artist name for an alias
-# OLD_FUNCTION: resolve_artist_alias() {
-# OLD_FUNCTION:     local artist_name="$1"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     log $LOG_DEBUG "resolve_artist_alias called with: '$artist_name'"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     if [[ $GROUP_ARTIST_ALIASES -eq 0 ]] || [[ -z "$ARTIST_ALIAS_GROUPS" ]]; then
-# OLD_FUNCTION:         log $LOG_DEBUG "Artist alias resolution disabled or no groups configured"
-# OLD_FUNCTION:         echo "$artist_name"
-# OLD_FUNCTION:         return
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Normalize the artist name for comparison
-# OLD_FUNCTION:     local normalized_input=$(echo "$artist_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
-# OLD_FUNCTION:     log $LOG_DEBUG "Normalized input: '$normalized_input'"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Debug what we're actually getting
-# OLD_FUNCTION:     log $LOG_DEBUG "Raw ARTIST_ALIAS_GROUPS (length ${#ARTIST_ALIAS_GROUPS}): '$ARTIST_ALIAS_GROUPS'"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Check if the string contains the expected content
-# OLD_FUNCTION:     if [[ "$ARTIST_ALIAS_GROUPS" == *"00110100 01010100"* ]]; then
-# OLD_FUNCTION:         log $LOG_DEBUG "String contains binary Four Tet alias"
-# OLD_FUNCTION:     else
-# OLD_FUNCTION:         log $LOG_DEBUG "WARNING: String missing binary Four Tet alias!"
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Parse alias groups - use awk which should handle this correctly
-# OLD_FUNCTION:     local alias_groups_array=()
-# OLD_FUNCTION:     while IFS= read -r group; do
-# OLD_FUNCTION:         alias_groups_array+=("$group")
-# OLD_FUNCTION:     done < <(echo "$ARTIST_ALIAS_GROUPS" | awk -F'|' '{for(i=1;i<=NF;i++) print $i}')
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     log $LOG_DEBUG "Found ${#alias_groups_array[@]} alias groups to check"
-# OLD_FUNCTION:     if [[ ${#alias_groups_array[@]} -gt 0 ]]; then
-# OLD_FUNCTION:         log $LOG_DEBUG "First group: '${alias_groups_array[0]}'"
-# OLD_FUNCTION:         log $LOG_DEBUG "Last group: '${alias_groups_array[-1]}'"
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     for group in "${alias_groups_array[@]}"; do
-# OLD_FUNCTION:         # Split on comma using awk  
-# OLD_FUNCTION:         local current_aliases_array=()
-# OLD_FUNCTION:         while IFS= read -r alias; do
-# OLD_FUNCTION:             current_aliases_array+=("$alias")
-# OLD_FUNCTION:         done < <(echo "$group" | awk -F',' '{for(i=1;i<=NF;i++) print $i}')
-# OLD_FUNCTION:         
-# OLD_FUNCTION:         log $LOG_DEBUG "Checking group with ${#current_aliases_array[@]} aliases: first few are '${current_aliases_array[0]}' '${current_aliases_array[1]}' '${current_aliases_array[2]}'"
-# OLD_FUNCTION:         
-# OLD_FUNCTION:         # Check if input matches any alias in this group
-# OLD_FUNCTION:         for alias in "${current_aliases_array[@]}"; do
-# OLD_FUNCTION:             # Trim whitespace and normalize
-# OLD_FUNCTION:             alias=$(echo "$alias" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-# OLD_FUNCTION:             local normalized_alias=$(echo "$alias" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
-# OLD_FUNCTION:             log $LOG_DEBUG "Comparing normalized input '$normalized_input' with normalized alias '$normalized_alias' (from '$alias')"
-# OLD_FUNCTION:             
-# OLD_FUNCTION:             if [[ "$normalized_input" == "$normalized_alias" ]]; then
-# OLD_FUNCTION:                 if [[ $USE_PRIMARY_ARTIST_NAME -eq 1 ]]; then
-# OLD_FUNCTION:                     # Return the primary (first) artist in the group
-# OLD_FUNCTION:                     local primary="${current_aliases_array[0]}"
-# OLD_FUNCTION:                     primary=$(echo "$primary" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-# OLD_FUNCTION:                     log $LOG_INFO "MATCH FOUND! Resolved alias '$artist_name' to primary artist '$primary'"
-# OLD_FUNCTION:                     echo "$primary"
-# OLD_FUNCTION:                     return
-# OLD_FUNCTION:                 else
-# OLD_FUNCTION:                     # Return the matched name as-is
-# OLD_FUNCTION:                     log $LOG_DEBUG "Match found but USE_PRIMARY_ARTIST_NAME=0, returning original"
-# OLD_FUNCTION:                     echo "$artist_name"
-# OLD_FUNCTION:                     return
-# OLD_FUNCTION:                 fi
-# OLD_FUNCTION:             fi
-# OLD_FUNCTION:         done
-# OLD_FUNCTION:     done
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # No alias match found, return original
-# OLD_FUNCTION:     log $LOG_DEBUG "No alias match found for '$artist_name'"
-# OLD_FUNCTION:     echo "$artist_name"
-# OLD_FUNCTION: }
-
-# Check if two artists are aliases of each other
-# OLD_FUNCTION: are_artist_aliases() {
-# OLD_FUNCTION:     local artist1="$1"
-# OLD_FUNCTION:     local artist2="$2"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     if [[ $GROUP_ARTIST_ALIASES -eq 0 ]] || [[ -z "$ARTIST_ALIAS_GROUPS" ]]; then
-# OLD_FUNCTION:         return 1
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Get primary names for both
-# OLD_FUNCTION:     local primary1=$(resolve_artist_alias "$artist1")
-# OLD_FUNCTION:     local primary2=$(resolve_artist_alias "$artist2")
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     if [[ "$primary1" == "$primary2" ]]; then
-# OLD_FUNCTION:         return 0
-# OLD_FUNCTION:     else
-# OLD_FUNCTION:         return 1
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION: }
-
-# Get all known aliases for an artist
-# OLD_FUNCTION: get_artist_aliases() {
-# OLD_FUNCTION:     local artist_name="$1"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     if [[ $GROUP_ARTIST_ALIASES -eq 0 ]] || [[ -z "$ARTIST_ALIAS_GROUPS" ]]; then
-# OLD_FUNCTION:         echo "$artist_name"
-# OLD_FUNCTION:         return
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     local normalized_input=$(echo "$artist_name" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Parse alias groups
-# OLD_FUNCTION:     IFS='|' read -ra GROUPS <<< "$ARTIST_ALIAS_GROUPS"
-# OLD_FUNCTION:     for group in "${GROUPS[@]}"; do
-# OLD_FUNCTION:         IFS=',' read -ra ALIASES <<< "$group"
-# OLD_FUNCTION:         
-# OLD_FUNCTION:         # Check if input matches any alias in this group
-# OLD_FUNCTION:         for alias in "${ALIASES[@]}"; do
-# OLD_FUNCTION:             alias=$(echo "$alias" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-# OLD_FUNCTION:             local normalized_alias=$(echo "$alias" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9 ]//g')
-# OLD_FUNCTION:             
-# OLD_FUNCTION:             if [[ "$normalized_input" == "$normalized_alias" ]]; then
-# OLD_FUNCTION:                 # Return all aliases in the group
-# OLD_FUNCTION:                 echo "$group"
-# OLD_FUNCTION:                 return
-# OLD_FUNCTION:             fi
-# OLD_FUNCTION:         done
-# OLD_FUNCTION:     done
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # No alias group found, return just the input
-# OLD_FUNCTION:     echo "$artist_name"
-# OLD_FUNCTION: }
-
-# Count releases across all artist aliases
-# OLD_FUNCTION: count_artist_releases_with_aliases() {
-# OLD_FUNCTION:     local artist_name="$1"
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     if [[ $GROUP_ARTIST_ALIASES -eq 0 ]]; then
-# OLD_FUNCTION:         # Just count for this artist
-# OLD_FUNCTION:         count_existing_releases "artist" "$artist_name"
-# OLD_FUNCTION:         return
-# OLD_FUNCTION:     fi
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Get all aliases
-# OLD_FUNCTION:     local aliases=$(get_artist_aliases "$artist_name")
-# OLD_FUNCTION:     local total_count=0
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     # Count releases for each alias
-# OLD_FUNCTION:     IFS=',' read -ra ALIAS_LIST <<< "$aliases"
-# OLD_FUNCTION:     for alias in "${ALIAS_LIST[@]}"; do
-# OLD_FUNCTION:         alias=$(echo "$alias" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-# OLD_FUNCTION:         local count=$(count_existing_releases "artist" "$alias")
-# OLD_FUNCTION:         total_count=$((total_count + count))
-# OLD_FUNCTION:         log $LOG_DEBUG "Alias '$alias' has $count releases"
-# OLD_FUNCTION:     done
-# OLD_FUNCTION:     
-# OLD_FUNCTION:     log $LOG_DEBUG "Total releases across all aliases of '$artist_name': $total_count"
-# OLD_FUNCTION:     echo "$total_count"
-# OLD_FUNCTION: }
-
-# --- Metadata Database Functions for Full Tracking ---
-
-# Initialize comprehensive metadata database
-init_metadata_db() {
-    local metadata_db="$1"
-    
-    if [[ -z "$metadata_db" ]]; then
-        metadata_db="$(dirname "$LOG_FILE")/ordr.fm.metadata.db"
-    fi
-    
-    # Create database with comprehensive schema
-    sqlite3 "$metadata_db" <<EOF
-CREATE TABLE IF NOT EXISTS albums (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    original_path TEXT NOT NULL,
-    new_path TEXT,
-    artist TEXT,
-    artist_resolved TEXT,
-    album TEXT,
-    year INTEGER,
-    quality TEXT,
-    label TEXT,
-    catalog_number TEXT,
-    series TEXT,
-    organization_mode TEXT,
-    discogs_confidence REAL,
-    processing_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    move_executed INTEGER DEFAULT 0,
-    error_message TEXT
-);
-
-CREATE TABLE IF NOT EXISTS tracks (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    album_id INTEGER,
-    original_filename TEXT,
-    new_filename TEXT,
-    track_number INTEGER,
-    disc_number INTEGER,
-    title TEXT,
-    artist TEXT,
-    duration INTEGER,
-    bitrate TEXT,
-    format TEXT,
-    vinyl_position TEXT,
-    is_remix INTEGER DEFAULT 0,
-    remix_artist TEXT,
-    FOREIGN KEY (album_id) REFERENCES albums(id)
-);
-
-CREATE TABLE IF NOT EXISTS moves (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    source_path TEXT NOT NULL,
-    destination_path TEXT NOT NULL,
-    move_type TEXT, -- 'album', 'track', 'unsorted'
-    move_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    success INTEGER DEFAULT 1,
-    dry_run INTEGER DEFAULT 0,
-    undo_available INTEGER DEFAULT 1,
-    undo_executed INTEGER DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS artist_aliases (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    artist_name TEXT NOT NULL,
-    primary_name TEXT NOT NULL,
-    alias_group TEXT,
-    discovered_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS labels (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    label_name TEXT UNIQUE NOT NULL,
-    release_count INTEGER DEFAULT 0,
-    first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS organization_stats (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    stat_date DATE DEFAULT CURRENT_DATE,
-    total_albums INTEGER DEFAULT 0,
-    lossless_count INTEGER DEFAULT 0,
-    lossy_count INTEGER DEFAULT 0,
-    mixed_count INTEGER DEFAULT 0,
-    artist_organized INTEGER DEFAULT 0,
-    label_organized INTEGER DEFAULT 0,
-    series_organized INTEGER DEFAULT 0,
-    underground_count INTEGER DEFAULT 0,
-    remix_count INTEGER DEFAULT 0,
-    compilation_count INTEGER DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS move_operations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    operation_id TEXT UNIQUE NOT NULL,
-    source_path TEXT NOT NULL,
-    dest_path TEXT NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    status TEXT DEFAULT 'IN_PROGRESS', -- 'IN_PROGRESS', 'SUCCESS', 'FAILED', 'ROLLED_BACK', 'ROLLBACK_FAILED'
-    error_message TEXT
-);
-
-CREATE TABLE IF NOT EXISTS file_renames (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    operation_id TEXT NOT NULL,
-    old_path TEXT NOT NULL,
-    new_path TEXT NOT NULL,
-    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (operation_id) REFERENCES move_operations(operation_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist);
-CREATE INDEX IF NOT EXISTS idx_albums_label ON albums(label);
-CREATE INDEX IF NOT EXISTS idx_albums_quality ON albums(quality);
-CREATE INDEX IF NOT EXISTS idx_tracks_album ON tracks(album_id);
-CREATE INDEX IF NOT EXISTS idx_moves_source ON moves(source_path);
-CREATE INDEX IF NOT EXISTS idx_move_operations_id ON move_operations(operation_id);
-CREATE INDEX IF NOT EXISTS idx_move_operations_status ON move_operations(status);
-CREATE INDEX IF NOT EXISTS idx_file_renames_operation ON file_renames(operation_id);
-CREATE INDEX IF NOT EXISTS idx_artist_aliases_name ON artist_aliases(artist_name);
-EOF
-    
-    log $LOG_DEBUG "Initialized metadata database: $metadata_db"
-    echo "$metadata_db"
-}
-
-# Record album processing to database
-s*secure_record_album_metadata() {
-    local metadata_db="$1"
-    local original_path="$2"
-    local new_path="$3"
-    local artist="$4"
-    local artist_resolved="$5"
-    local album="$6"
-    local year="$7"
-    local quality="$8"
-    local label="$9"
-    local catalog="${10}"
-    local series="${11}"
-    local org_mode="${12}"
-    local confidence="${13}"
-    local move_executed="${14}"
-    
-    sqlite3 "$metadata_db" <<EOF
-INSERT INTO albums (
-    original_path, new_path, artist, artist_resolved, album, year,
-    quality, label, catalog_number, series, organization_mode,
-    discogs_confidence, move_executed
-) VALUES (
-    '$original_path', '$new_path', '$artist', '$artist_resolved', '$album', $year,
-    '$quality', '$label', '$catalog', '$series', '$org_mode',
-    $confidence, $move_executed
-);
-EOF
-    
-    # Return the album ID for track association
-    sqlite3 "$metadata_db" "SELECT last_insert_rowid();"
-}
-
-# Record track information
-s*secure_record_track_metadata() {
-    local metadata_db="$1"
-    local album_id="$2"
-    local original_filename="$3"
-    local new_filename="$4"
-    local track_data="$5"  # JSON from exiftool
-    
-    local track_number=$(echo "$track_data" | jq -r '.Track // 0')
-    local disc_number=$(echo "$track_data" | jq -r '.DiscNumber // 1')
-    local title=$(echo "$track_data" | jq -r '.Title // empty' | sed "s/'/''/g")
-    local artist=$(echo "$track_data" | jq -r '.Artist // empty' | sed "s/'/''/g")
-    local duration=$(echo "$track_data" | jq -r '.Duration // 0' | sed 's/[^0-9]//g')
-    local bitrate=$(echo "$track_data" | jq -r '.AudioBitrate // empty')
-    local format=$(echo "$track_data" | jq -r '.FileTypeExtension // empty')
-    
-    sqlite3 "$metadata_db" <<EOF
-INSERT INTO tracks (
-    album_id, original_filename, new_filename, track_number, disc_number,
-    title, artist, duration, bitrate, format
-) VALUES (
-    $album_id, '$original_filename', '$new_filename', $track_number, $disc_number,
-    '$title', '$artist', $duration, '$bitrate', '$format'
-);
-EOF
-}
-
-# Generate JSON export for visualization
-export_metadata_json() {
-    local metadata_db="$1"
-    local output_file="$2"
-    
-    if [[ -z "$output_file" ]]; then
-        output_file="$(dirname "$metadata_db")/ordr.fm.metadata.json"
-    fi
-    
-    # Export comprehensive data for visualization
-    sqlite3 -json "$metadata_db" <<EOF > "$output_file"
-SELECT json_object(
-    'albums', (SELECT json_group_array(json_object(
-        'id', id,
-        'original_path', original_path,
-        'new_path', new_path,
-        'artist', artist,
-        'artist_resolved', artist_resolved,
-        'album', album,
-        'year', year,
-        'quality', quality,
-        'label', label,
-        'catalog_number', catalog_number,
-        'series', series,
-        'organization_mode', organization_mode,
-        'discogs_confidence', discogs_confidence,
-        'processing_date', processing_date,
-        'tracks', (SELECT json_group_array(json_object(
-            'title', title,
-            'track_number', track_number,
-            'format', format,
-            'bitrate', bitrate
-        )) FROM tracks WHERE album_id = albums.id)
-    )) FROM albums),
-    'stats', (SELECT json_object(
-        'total_albums', COUNT(DISTINCT id),
-        'total_tracks', (SELECT COUNT(*) FROM tracks),
-        'artists', COUNT(DISTINCT artist),
-        'labels', COUNT(DISTINCT label),
-        'quality_breakdown', json_object(
-            'lossless', SUM(CASE WHEN quality = 'Lossless' THEN 1 ELSE 0 END),
-            'lossy', SUM(CASE WHEN quality = 'Lossy' THEN 1 ELSE 0 END),
-            'mixed', SUM(CASE WHEN quality = 'Mixed' THEN 1 ELSE 0 END)
-        ),
-        'organization_breakdown', json_object(
-            'artist', SUM(CASE WHEN organization_mode = 'artist' THEN 1 ELSE 0 END),
-            'label', SUM(CASE WHEN organization_mode = 'label' THEN 1 ELSE 0 END),
-            'series', SUM(CASE WHEN organization_mode = 'series' THEN 1 ELSE 0 END),
-            'underground', SUM(CASE WHEN organization_mode = 'underground' THEN 1 ELSE 0 END)
-        )
-    ) FROM albums),
-    'artist_aliases', (SELECT json_group_array(json_object(
-        'artist', artist_name,
-        'primary', primary_name,
-        'group', alias_group
-    )) FROM artist_aliases),
-    'labels', (SELECT json_group_array(json_object(
-        'name', label_name,
-        'releases', release_count
-    )) FROM labels ORDER BY release_count DESC)
-);
-EOF
-    
-    log $LOG_INFO "Exported metadata to JSON: $output_file"
-}
-
-# --- State Database Functions for Incremental Processing ---
-
-# Initialize the state tracking database
-init_state_db() {
-    local state_db="$1"
-    
-    if [[ ! -f "$state_db" ]]; then
-        log $LOG_INFO "Creating state database: $state_db"
-        sqlite3 "$state_db" <<EOF
-CREATE TABLE IF NOT EXISTS processed_directories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    directory_path TEXT UNIQUE NOT NULL,
-    last_modified INTEGER NOT NULL,
-    directory_hash TEXT NOT NULL,
-    processed_at INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS processed_files (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    file_path TEXT UNIQUE NOT NULL,
-    file_size INTEGER NOT NULL,
-    file_hash TEXT NOT NULL,
-    last_modified INTEGER NOT NULL,
-    processed_at INTEGER NOT NULL,
-    status TEXT NOT NULL,
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-);
-
-CREATE INDEX IF NOT EXISTS idx_dir_path ON processed_directories(directory_path);
-CREATE INDEX IF NOT EXISTS idx_dir_modified ON processed_directories(last_modified);
-CREATE INDEX IF NOT EXISTS idx_file_path ON processed_files(file_path);
-CREATE INDEX IF NOT EXISTS idx_file_hash ON processed_files(file_hash);
-EOF
-        log $LOG_INFO "State database initialized successfully"
-    else
-        log $LOG_DEBUG "State database already exists: $state_db"
-    fi
-}
-
-# Check if a directory needs processing based on modification time
-directory_needs_processing() {
-    local dir_path="$1"
-    local state_db="$2"
-    local current_mtime=$(stat -c "%Y" "$dir_path" 2>/dev/null || echo "0")
-    local current_hash=$(find "$dir_path" -maxdepth 1 -type f -exec stat -c "%Y %s %n" {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
-    
-    local stored_info=$(sqlite3 "$state_db" "SELECT last_modified, directory_hash, status FROM processed_directories WHERE directory_path = \"$dir_path\";" 2>/dev/null)
-    
-    if [[ -z "$stored_info" ]]; then
-        log $LOG_DEBUG "Directory '$dir_path' not found in state database - needs processing"
-        return 0
-    fi
-    
-    local stored_mtime=$(echo "$stored_info" | cut -d'|' -f1)
-    local stored_hash=$(echo "$stored_info" | cut -d'|' -f2)
-    local stored_status=$(echo "$stored_info" | cut -d'|' -f3)
-    
-    if [[ "$stored_status" != "success" ]]; then
-        log $LOG_DEBUG "Directory '$dir_path' previously failed - needs reprocessing"
-        return 0
-    fi
-    
-    if [[ "$current_mtime" -gt "$stored_mtime" ]] || [[ "$current_hash" != "$stored_hash" ]]; then
-        log $LOG_DEBUG "Directory '$dir_path' has been modified - needs processing"
-        return 0
-    fi
-    
-    log $LOG_DEBUG "Directory '$dir_path' unchanged since last processing - skipping"
-    return 1
-}
-
-# Record directory processing result in state database
-record_directory_processing() {
-    local dir_path="$1"
-    local status="$2"
-    local state_db="$3"
-    local current_mtime=$(stat -c "%Y" "$dir_path" 2>/dev/null || echo "0")
-    local current_hash=$(find "$dir_path" -maxdepth 1 -type f -exec stat -c "%Y %s %n" {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
-    local processed_at=$(date +%s)
-    
-    sqlite3 "$state_db" <<EOF
-INSERT OR REPLACE INTO processed_directories 
-(directory_path, last_modified, directory_hash, processed_at, status) 
-VALUES ("$dir_path", $current_mtime, "$current_hash", $processed_at, "$status");
-EOF
-    
-    log $LOG_DEBUG "Recorded processing result for '$dir_path': $status"
-}
-
-# Check if processing should continue based on --since date filter
-should_process_since_date() {
-    local dir_path="$1"
-    local since_date="$2"
-    
-    if [[ -z "$since_date" ]]; then
-        return 0
-    fi
-    
-    local since_timestamp=$(date -d "$since_date" +%s 2>/dev/null)
-    if [[ $? -ne 0 ]]; then
-        log $LOG_WARNING "Invalid --since date format: $since_date"
-        return 0
-    fi
-    
-    local dir_mtime=$(stat -c "%Y" "$dir_path" 2>/dev/null || echo "0")
-    
-    if [[ "$dir_mtime" -ge "$since_timestamp" ]]; then
-        log $LOG_DEBUG "Directory '$dir_path' modified since $since_date - processing"
+# Load configuration file
+load_config() {
+    local config_file="${1:-ordr.fm.conf}"
+    
+    if [[ -f "$config_file" ]]; then
+        log $LOG_INFO "Loading configuration from: $config_file"
+        # Save and restore script state to prevent config from affecting execution
+        local old_opts=$-
+        set +e
+        source "$config_file"
+        set -$old_opts
         return 0
     else
-        log $LOG_DEBUG "Directory '$dir_path' not modified since $since_date - skipping"
+        log $LOG_WARNING "Configuration file not found: $config_file"
         return 1
     fi
 }
 
-# --- Duplicate Detection Functions ---
-
-# Initialize the duplicates tracking database
-init_duplicates_db() {
-    local duplicates_db="$1"
-    
-    if [[ ! -f "$duplicates_db" ]]; then
-        log $LOG_INFO "Creating duplicates database: $duplicates_db"
-        sqlite3 "$duplicates_db" <<EOF
-CREATE TABLE IF NOT EXISTS albums (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    directory_path TEXT UNIQUE NOT NULL,
-    album_artist TEXT NOT NULL,
-    album_title TEXT NOT NULL,
-    album_year INTEGER,
-    track_count INTEGER,
-    total_size INTEGER,
-    quality_type TEXT NOT NULL,
-    avg_bitrate INTEGER,
-    format_mix TEXT,
-    album_hash TEXT NOT NULL,
-    detected_at INTEGER DEFAULT (strftime('%s', 'now')),
-    created_at INTEGER DEFAULT (strftime('%s', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS duplicate_groups (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_hash TEXT UNIQUE NOT NULL,
-    album_artist TEXT NOT NULL,
-    album_title TEXT NOT NULL,
-    album_year INTEGER,
-    track_count INTEGER,
-    best_quality_album_id INTEGER,
-    duplicate_count INTEGER DEFAULT 1,
-    resolution_status TEXT DEFAULT 'pending',
-    created_at INTEGER DEFAULT (strftime('%s', 'now')),
-    FOREIGN KEY (best_quality_album_id) REFERENCES albums(id)
-);
-
-CREATE TABLE IF NOT EXISTS group_members (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    group_id INTEGER NOT NULL,
-    album_id INTEGER NOT NULL,
-    quality_score INTEGER NOT NULL,
-    is_recommended_keeper INTEGER DEFAULT 0,
-    FOREIGN KEY (group_id) REFERENCES duplicate_groups(id),
-    FOREIGN KEY (album_id) REFERENCES albums(id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_albums_hash ON albums(album_hash);
-CREATE INDEX IF NOT EXISTS idx_albums_metadata ON albums(album_artist, album_title, album_year);
-CREATE INDEX IF NOT EXISTS idx_duplicate_groups_hash ON duplicate_groups(group_hash);
-CREATE INDEX IF NOT EXISTS idx_group_members_group ON group_members(group_id);
-EOF
-        log $LOG_INFO "Duplicates database initialized successfully"
-    else
-        log $LOG_DEBUG "Duplicates database already exists: $duplicates_db"
-    fi
-}
-
-# Calculate quality score for an album based on format, bitrate, and file size
-calculate_quality_score() {
-    local quality_type="$1"
-    local avg_bitrate="$2"
-    local total_size="$3"
-    local format_mix="$4"
-    local score=0
-    
-    # Base score by quality type
-    case "$quality_type" in
-        "Lossless") score=1000 ;;
-        "Lossy") score=500 ;;
-        "Mixed") score=300 ;;
-        *) score=100 ;;
-    esac
-    
-    # Bonus for higher bitrate (for lossy formats)
-    if [[ "$quality_type" == "Lossy" && -n "$avg_bitrate" ]]; then
-        if [[ "$avg_bitrate" -ge 320 ]]; then
-            score=$((score + 200))
-        elif [[ "$avg_bitrate" -ge 256 ]]; then
-            score=$((score + 150))
-        elif [[ "$avg_bitrate" -ge 192 ]]; then
-            score=$((score + 100))
-        elif [[ "$avg_bitrate" -ge 128 ]]; then
-            score=$((score + 50))
-        fi
-    fi
-    
-    # Bonus for larger file size (indicates better quality)
-    if [[ -n "$total_size" && "$total_size" -gt 0 ]]; then
-        local size_mb=$((total_size / 1024 / 1024))
-        if [[ "$size_mb" -gt 500 ]]; then
-            score=$((score + 100))
-        elif [[ "$size_mb" -gt 200 ]]; then
-            score=$((score + 50))
-        elif [[ "$size_mb" -gt 100 ]]; then
-            score=$((score + 25))
-        fi
-    fi
-    
-    # Penalty for mixed formats (less consistent)
-    if [[ "$format_mix" == *","* ]]; then
-        score=$((score - 100))
-    fi
-    
-    echo "$score"
-}
-
-# Generate a hash for album metadata to identify potential duplicates
-generate_album_hash() {
-    local album_artist="$1"
-    local album_title="$2"
-    local album_year="$3"
-    local track_count="$4"
-    
-    # Normalize metadata for comparison
-    local normalized_artist=$(echo "$album_artist" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
-    local normalized_title=$(echo "$album_title" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
-    local year_part="${album_year:-0000}"
-    
-    # Create hash from normalized metadata
-    echo "${normalized_artist}_${normalized_title}_${year_part}_${track_count}" | md5sum | cut -d' ' -f1
-}
-
-# Analyze album directory for duplicate detection
-analyze_album_for_duplicates() {
+# Process album directory
+process_album_directory() {
     local album_dir="$1"
-    local duplicates_db="$2"
     
-    log $LOG_DEBUG "Analyzing album for duplicates: $album_dir"
+    log $LOG_INFO "Processing album directory: $album_dir"
     
-    # Extract metadata using the metadata module
-    local exiftool_output
-    exiftool_output=$(extract_audio_metadata "$album_dir")
-    
-    if [[ -z "$exiftool_output" ]]; then
-        log $LOG_DEBUG "Could not extract metadata from '$album_dir' for duplicate analysis"
-        return 1
-    fi
-    
-    # Determine album metadata using the metadata module
-    local album_metadata
-    album_metadata=$(determine_album_metadata "$exiftool_output" "$(basename "$album_dir")")
-    
-    if [[ -z "$album_metadata" ]] || ! validate_album_metadata "$album_metadata"; then
-        log $LOG_DEBUG "Could not determine valid album metadata for '$album_dir'"
-        return 1
-    fi
-    
-    # Extract album information from metadata JSON
-    local album_artist=$(echo "$album_metadata" | jq -r '.artist')
-    local album_title=$(echo "$album_metadata" | jq -r '.title')
-    local album_year=$(echo "$album_metadata" | jq -r '.year')
-    local track_count=$(echo "$album_metadata" | jq -r '.track_count')
-    
-    # Get additional metadata for quality analysis
-    local all_file_types=$(echo "$exiftool_output" | jq -r '.[].FileTypeExtension // empty')
-    local all_bitrates=$(echo "$exiftool_output" | jq -r '.[].AudioBitrate // empty' | grep -v '^$' | sed 's/ kbps$//')
-    
-    # Calculate quality metrics using metadata module
-    local quality_type
-    quality_type=$(determine_album_quality "$exiftool_output")
-    
-    # Calculate additional metrics for duplicate detection
-    local bitrate_sum=0 bitrate_count=0
-    local format_list=()
-    local total_size=0
-    local has_lossless=0 has_lossy=0
-    
-    for file_type in $all_file_types; do
-        local file_type_upper=$(echo "$file_type" | tr '[:lower:]' '[:upper:]')
-        case "$file_type_upper" in
-            "FLAC"|"WAV"|"AIFF"|"ALAC") has_lossless=1; format_list+=("$file_type") ;;
-            "MP3"|"AAC"|"M4A"|"OGG") has_lossy=1; format_list+=("$file_type") ;;
-        esac
-    done
-    
-    for bitrate in $all_bitrates; do
-        if [[ "$bitrate" =~ ^[0-9]+$ ]]; then
-            bitrate_sum=$((bitrate_sum + bitrate))
-            bitrate_count=$((bitrate_count + 1))
-        fi
-    done
-    
-    # Calculate total file size
-    while IFS= read -r -d $'\0' file; do
-        local file_size=$(stat -c "%s" "$file" 2>/dev/null || echo "0")
-        total_size=$((total_size + file_size))
-    done < <(detect_audio_files "$album_dir" | tr '\n' '\0')
-    
-    local avg_bitrate=0
-    if [[ $bitrate_count -gt 0 ]]; then
-        avg_bitrate=$((bitrate_sum / bitrate_count))
-    fi
-    
-    local format_mix=$(printf "%s," "${format_list[@]}" | sed 's/,$//')
-    local album_hash=$(generate_album_hash "$album_artist" "$album_title" "$album_year" "$track_count")
-    
-    # Store in database
-    sqlite3 "$duplicates_db" <<EOF
-INSERT OR REPLACE INTO albums 
-(directory_path, album_artist, album_title, album_year, track_count, total_size, quality_type, avg_bitrate, format_mix, album_hash) 
-VALUES ("$(sql_escape "$album_dir")", "$(sql_escape "$album_artist")", "$(sql_escape "$album_title")", ${album_year:-NULL}, $track_count, $total_size, "$(sql_escape "$quality_type")", $avg_bitrate, "$(sql_escape "$format_mix")", "$(sql_escape "$album_hash")");
-EOF
-    
-    log $LOG_DEBUG "Stored album analysis: $album_artist - $album_title ($album_year) [$quality_type, ${track_count} tracks]"
-    return 0
-}
-
-# Find and group duplicate albums
-find_duplicate_groups() {
-    local duplicates_db="$1"
-    
-    log $LOG_INFO "Analyzing albums for duplicates..."
-    
-    # Clear existing duplicate groups for fresh analysis
-    sqlite3 "$duplicates_db" "DELETE FROM group_members; DELETE FROM duplicate_groups;"
-    
-    # Find albums with the same hash (potential duplicates)
-    local duplicate_hashes=$(sqlite3 "$duplicates_db" "SELECT album_hash FROM albums GROUP BY album_hash HAVING COUNT(*) > 1;")
-    
-    local group_count=0
-    local total_duplicates=0
-    
-    for hash in $duplicate_hashes; do
-        # Get all albums with this hash
-        local albums=$(sqlite3 "$duplicates_db" "SELECT id, directory_path, album_artist, album_title, album_year, track_count, quality_type, avg_bitrate, total_size, format_mix FROM albums WHERE album_hash = '$(sql_escape "$hash")';")
-        
-        if [[ -z "$albums" ]]; then
-            continue
-        fi
-        
-        local album_count=$(echo "$albums" | wc -l)
-        if [[ $album_count -lt 2 ]]; then
-            continue
-        fi
-        
-        # Get representative metadata from first album
-        local first_album=$(echo "$albums" | head -n 1)
-        local album_artist=$(echo "$first_album" | cut -d'|' -f3)
-        local album_title=$(echo "$first_album" | cut -d'|' -f4)
-        local album_year=$(echo "$first_album" | cut -d'|' -f5)
-        local track_count=$(echo "$first_album" | cut -d'|' -f6)
-        
-        # Create duplicate group
-        sqlite3 "$duplicates_db" <<EOF
-INSERT INTO duplicate_groups (group_hash, album_artist, album_title, album_year, track_count, duplicate_count)
-VALUES ('$hash', '$album_artist', '$album_title', ${album_year:-NULL}, $track_count, $album_count);
-EOF
-        
-        local group_id=$(sqlite3 "$duplicates_db" "SELECT last_insert_rowid();")
-        local best_score=0
-        local best_album_id=0
-        
-        # Process each album in the group
-        while IFS='|' read -r album_id directory_path album_artist album_title album_year track_count quality_type avg_bitrate total_size format_mix; do
-            local quality_score=$(calculate_quality_score "$quality_type" "$avg_bitrate" "$total_size" "$format_mix")
-            local is_keeper=0
-            
-            if [[ $quality_score -gt $best_score ]]; then
-                best_score=$quality_score
-                best_album_id=$album_id
-            fi
-            
-            # Add to group members
-            sqlite3 "$duplicates_db" <<EOF
-INSERT INTO group_members (group_id, album_id, quality_score, is_recommended_keeper)
-VALUES ($group_id, $album_id, $quality_score, $is_keeper);
-EOF
-        done <<< "$albums"
-        
-        # Mark the best quality album as recommended keeper
-        sqlite3 "$duplicates_db" "UPDATE group_members SET is_recommended_keeper = 1 WHERE group_id = $group_id AND album_id = $best_album_id;"
-        sqlite3 "$duplicates_db" "UPDATE duplicate_groups SET best_quality_album_id = $best_album_id WHERE id = $group_id;"
-        
-        group_count=$((group_count + 1))
-        total_duplicates=$((total_duplicates + album_count))
-        
-        log $LOG_INFO "Found duplicate group $group_count: $album_artist - $album_title ($album_count copies)"
-    done
-    
-    log $LOG_INFO "Duplicate analysis complete: $group_count groups containing $total_duplicates albums"
-    return 0
-}
-
-# Generate duplicate report
-generate_duplicate_report() {
-    local duplicates_db="$1"
-    local report_file="$2"
-    
-    log $LOG_INFO "Generating duplicate report: $report_file"
-    
-    {
-        echo "# Duplicate Albums Report"
-        echo "Generated: $(date)"
-        echo "Database: $duplicates_db"
-        echo ""
-        
-        local total_groups=$(sqlite3 "$duplicates_db" "SELECT COUNT(*) FROM duplicate_groups;")
-        local total_albums=$(sqlite3 "$duplicates_db" "SELECT SUM(duplicate_count) FROM duplicate_groups;")
-        local total_size_mb=$(sqlite3 "$duplicates_db" "SELECT ROUND(SUM(a.total_size) / 1024.0 / 1024.0, 1) FROM albums a JOIN group_members gm ON a.id = gm.album_id WHERE gm.is_recommended_keeper = 0;")
-        
-        echo "## Summary"
-        echo "- Duplicate Groups: $total_groups"
-        echo "- Total Duplicate Albums: $total_albums"
-        echo "- Potential Space Savings: ${total_size_mb} MB"
-        echo ""
-        
-        echo "## Duplicate Groups"
-        echo ""
-        
-        local groups=$(sqlite3 "$duplicates_db" "SELECT id, album_artist, album_title, album_year, duplicate_count FROM duplicate_groups ORDER BY duplicate_count DESC, album_artist, album_title;")
-        
-        local group_num=1
-        while IFS='|' read -r group_id album_artist album_title album_year duplicate_count; do
-            echo "### Group $group_num: $album_artist - $album_title${album_year:+ ($album_year)}"
-            echo "**Copies found:** $duplicate_count"
-            echo ""
-            
-            # List all albums in group with recommendations
-            local members=$(sqlite3 "$duplicates_db" "SELECT a.directory_path, a.quality_type, a.avg_bitrate, ROUND(a.total_size / 1024.0 / 1024.0, 1), gm.quality_score, gm.is_recommended_keeper FROM albums a JOIN group_members gm ON a.id = gm.album_id WHERE gm.group_id = $group_id ORDER BY gm.quality_score DESC;")
-            
-            echo "| Path | Quality | Bitrate | Size (MB) | Score | Recommendation |"
-            echo "|------|---------|---------|-----------|-------|----------------|"
-            
-            while IFS='|' read -r path quality_type avg_bitrate size_mb quality_score is_keeper; do
-                local recommendation="Remove"
-                if [[ "$is_keeper" == "1" ]]; then
-                    recommendation="**KEEP**"
-                fi
-                local bitrate_display="${avg_bitrate:-N/A}"
-                if [[ "$avg_bitrate" != "0" && -n "$avg_bitrate" ]]; then
-                    bitrate_display="${avg_bitrate} kbps"
-                fi
-                echo "| \`$path\` | $quality_type | $bitrate_display | $size_mb | $quality_score | $recommendation |"
-            done <<< "$members"
-            
-            echo ""
-            group_num=$((group_num + 1))
-        done <<< "$groups"
-        
-        echo "## Recommended Actions"
-        echo ""
-        echo "To automatically resolve duplicates (keep highest quality, remove others):"
-        echo "\`\`\`bash"
-        echo "./ordr.fm.sh --resolve-duplicates --duplicates-db \"$duplicates_db\""
-        echo "\`\`\`"
-        echo ""
-        echo "**WARNING:** Always review this report before running automatic resolution!"
-        
-    } > "$report_file"
-    
-    log $LOG_INFO "Duplicate report generated: $report_file"
-}
-
-# Resolve duplicates by removing lower quality copies
-resolve_duplicates() {
-    local duplicates_db="$1"
-    local backup_dir="$2"
-    
-    log $LOG_INFO "Resolving duplicates (removing lower quality copies)..."
-    
-    # Create backup directory
-    mkdir -p "$backup_dir" || {
-        log $LOG_ERROR "Could not create backup directory: $backup_dir"
-        return 1
-    }
-    
-    local groups_to_resolve=$(sqlite3 "$duplicates_db" "SELECT id FROM duplicate_groups WHERE resolution_status = 'pending';")
-    local resolved_count=0
-    local removed_count=0
-    
-    for group_id in $groups_to_resolve; do
-        local group_info=$(sqlite3 "$duplicates_db" "SELECT album_artist, album_title FROM duplicate_groups WHERE id = $group_id;")
-        local album_artist=$(echo "$group_info" | cut -d'|' -f1)
-        local album_title=$(echo "$group_info" | cut -d'|' -f2)
-        
-        log $LOG_INFO "Resolving duplicates for: $album_artist - $album_title"
-        
-        # Get albums to remove (not the recommended keeper)
-        local albums_to_remove=$(sqlite3 "$duplicates_db" "SELECT a.directory_path FROM albums a JOIN group_members gm ON a.id = gm.album_id WHERE gm.group_id = $group_id AND gm.is_recommended_keeper = 0;")
-        
-        local group_removed=0
-        for album_path in $albums_to_remove; do
-            if [[ -d "$album_path" ]]; then
-                local backup_name="$(basename "$album_path")_$(date +%Y%m%d_%H%M%S)"
-                local backup_path="$backup_dir/$backup_name"
-                
-                if [[ $DRY_RUN -eq 1 ]]; then
-                    log $LOG_INFO "(Dry Run) Would move '$album_path' to '$backup_path'"
-                else
-                    log $LOG_INFO "Moving duplicate to backup: $album_path -> $backup_path"
-                    secure_move_file "$album_path" "$backup_path"
-                    if [[ $? -eq 0 ]]; then
-                        group_removed=$((group_removed + 1))
-                        removed_count=$((removed_count + 1))
-                    else
-                        log $LOG_ERROR "Failed to move '$album_path' to backup"
-                    fi
-                fi
-            else
-                log $LOG_WARNING "Album directory no longer exists: $album_path"
-            fi
-        done
-        
-        if [[ $group_removed -gt 0 || $DRY_RUN -eq 1 ]]; then
-            sqlite3 "$duplicates_db" "UPDATE duplicate_groups SET resolution_status = 'resolved' WHERE id = $group_id;"
-            resolved_count=$((resolved_count + 1))
-        fi
-    done
-    
-    log $LOG_INFO "Duplicate resolution complete: $resolved_count groups resolved, $removed_count albums moved to backup"
-    return 0
-}
-
-# --- Configuration Profile Functions ---
-
-# Load a configuration profile
-load_profile() {
-    local profile_name="$1"
-    local profiles_dir="$2"
-    local profile_file="$profiles_dir/$profile_name.conf"
-    
-    if [[ ! -f "$profile_file" ]]; then
-        log $LOG_ERROR "Profile '$profile_name' not found at: $profile_file"
-        return 1
-    fi
-    
-    log $LOG_INFO "Loading profile: $profile_name"
-    log $LOG_DEBUG "Profile file: $profile_file"
-    
-    # Source the profile configuration
-    source "$profile_file"
-    
-    # Set profile-specific variables
-    PROFILE_NAME="$profile_name"
-    
-    log $LOG_DEBUG "Profile '$profile_name' loaded successfully"
-    return 0
-}
-
-# List available configuration profiles
-list_profiles() {
-    local profiles_dir="$1"
-    
-    if [[ ! -d "$profiles_dir" ]]; then
-        echo "No profiles directory found at: $profiles_dir"
-        echo "Create profiles by adding .conf files to this directory."
-        return 1
-    fi
-    
-    echo "Available Configuration Profiles:"
-    echo "=================================="
-    
-    local profile_count=0
-    for profile_file in "$profiles_dir"/*.conf; do
-        if [[ -f "$profile_file" ]]; then
-            local profile_name=$(basename "$profile_file" .conf)
-            local description=""
-            
-            # Try to extract description from profile file
-            if grep -q "^# DESCRIPTION:" "$profile_file"; then
-                description=$(grep "^# DESCRIPTION:" "$profile_file" | cut -d: -f2- | sed 's/^ *//')
-            fi
-            
-            echo "  $profile_name${description:+ - $description}"
-            profile_count=$((profile_count + 1))
-        fi
-    done
-    
-    if [[ $profile_count -eq 0 ]]; then
-        echo "  No profiles found in $profiles_dir"
-        echo ""
-        echo "Create a profile by copying ordr.fm.conf to $profiles_dir/<name>.conf"
-    else
-        echo ""
-        echo "Usage: ./ordr.fm.sh --profile <name> [other options]"
-    fi
-    
-    return 0
-}
-
-# Initialize default profiles directory and create sample profiles
-init_profiles() {
-    local profiles_dir="$1"
-    
-    mkdir -p "$profiles_dir" || {
-        log $LOG_ERROR "Could not create profiles directory: $profiles_dir"
-        return 1
-    }
-    
-    # Create default profile if it doesn't exist
-    if [[ ! -f "$profiles_dir/default.conf" ]]; then
-        log $LOG_INFO "Creating default profile: $profiles_dir/default.conf"
-        cp "$CONFIG_FILE" "$profiles_dir/default.conf"
-    fi
-    
-    # Create sample profiles if they don't exist
-    create_sample_profiles "$profiles_dir"
-    
-    return 0
-}
-
-# Create sample configuration profiles
-create_sample_profiles() {
-    local profiles_dir="$1"
-    
-    # Vinyl rips profile
-    if [[ ! -f "$profiles_dir/vinyl.conf" ]]; then
-        cat > "$profiles_dir/vinyl.conf" <<'EOF'
-# DESCRIPTION: Configuration for vinyl rip organization
-# Profile optimized for vinyl rips and analog sources
-
-# Source and destination directories
-SOURCE_DIR="/home/plex/Music/Vinyl Rips"
-DEST_DIR="/home/plex/Music/Vinyl"
-UNSORTED_DIR_BASE="/home/plex/Music/Vinyl/Unsorted"
-
-# Vinyl-specific settings
-LOG_FILE="ordr.fm.vinyl.log"
-VERBOSITY=1
-
-# Incremental processing (recommended for large vinyl collections)
-INCREMENTAL_MODE=1
-STATE_DB="ordr.fm.vinyl.state.db"
-
-# Duplicate detection (common with vinyl rips)
-FIND_DUPLICATES=0
-DUPLICATES_DB="ordr.fm.vinyl.duplicates.db"
-
-# Profile-specific organization pattern
-PROFILE_ORGANIZATION_PATTERN="{quality}/{artist}/{album_year} - {album}"
-PROFILE_TRACK_PATTERN="{disc}{track_num} - {title}"
-
-# Quality classification for vinyl (more forgiving of artifacts)
-PROFILE_QUALITY_VINYL_MODE=1
-PROFILE_ACCEPT_MIXED_QUALITY=1
-EOF
-        log $LOG_DEBUG "Created vinyl profile: $profiles_dir/vinyl.conf"
-    fi
-    
-    # Digital purchases profile
-    if [[ ! -f "$profiles_dir/purchases.conf" ]]; then
-        cat > "$profiles_dir/purchases.conf" <<'EOF'
-# DESCRIPTION: Configuration for digital music purchases
-# Profile optimized for purchased digital music (Bandcamp, iTunes, etc.)
-
-# Source and destination directories
-SOURCE_DIR="/home/plex/Music/Downloads/Purchases"
-DEST_DIR="/home/plex/Music/Digital"
-UNSORTED_DIR_BASE="/home/plex/Music/Digital/Unsorted"
-
-# Digital purchases settings
-LOG_FILE="ordr.fm.purchases.log"
-VERBOSITY=1
-
-# Incremental processing
-INCREMENTAL_MODE=1
-STATE_DB="ordr.fm.purchases.state.db"
-
-# Duplicate detection (less common but still useful)
-FIND_DUPLICATES=0
-DUPLICATES_DB="ordr.fm.purchases.duplicates.db"
-
-# Profile-specific organization pattern (include catalog numbers)
-PROFILE_ORGANIZATION_PATTERN="{quality}/{artist}/{album_year} - {album}{catalog}"
-PROFILE_TRACK_PATTERN="{track_num:02d} - {title}"
-
-# Quality classification for digital purchases (strict quality requirements)
-PROFILE_QUALITY_STRICT_MODE=1
-PROFILE_ACCEPT_MIXED_QUALITY=0
-PROFILE_REQUIRE_LOSSLESS=0
-EOF
-        log $LOG_DEBUG "Created purchases profile: $profiles_dir/purchases.conf"
-    fi
-    
-    # Downloads/rips profile
-    if [[ ! -f "$profiles_dir/downloads.conf" ]]; then
-        cat > "$profiles_dir/downloads.conf" <<'EOF'
-# DESCRIPTION: Configuration for various downloads and rips
-# Profile for mixed sources (YouTube rips, SoundCloud, etc.)
-
-# Source and destination directories
-SOURCE_DIR="/home/plex/Music/Downloads/Mixed"
-DEST_DIR="/home/plex/Music/Downloads"
-UNSORTED_DIR_BASE="/home/plex/Music/Downloads/Unsorted"
-
-# Downloads settings
-LOG_FILE="ordr.fm.downloads.log"
-VERBOSITY=2
-
-# Incremental processing
-INCREMENTAL_MODE=1
-STATE_DB="ordr.fm.downloads.state.db"
-
-# Duplicate detection (very important for downloads)
-FIND_DUPLICATES=1
-DUPLICATES_DB="ordr.fm.downloads.duplicates.db"
-
-# Profile-specific organization pattern (simplified for varied quality)
-PROFILE_ORGANIZATION_PATTERN="{artist}/{album}{album_year_suffix}"
-PROFILE_TRACK_PATTERN="{track_num} - {title}"
-
-# Quality classification for downloads (very permissive)
-PROFILE_QUALITY_PERMISSIVE_MODE=1
-PROFILE_ACCEPT_MIXED_QUALITY=1
-PROFILE_ACCEPT_LOW_QUALITY=1
-EOF
-        log $LOG_DEBUG "Created downloads profile: $profiles_dir/downloads.conf"
-    fi
-}
-
-# Apply profile-specific directory organization pattern
-apply_profile_organization() {
-    local album_artist="$1"
-    local album_title="$2" 
-    local album_year="$3"
-    local album_quality="$4"
-    local catalog_number="$5"
-    
-    # Use profile-specific pattern if available, otherwise use default
-    local pattern="${PROFILE_ORGANIZATION_PATTERN:-{quality}/{artist}/{album}{album_year_suffix}}"
-    
-    # Sanitize inputs
-    local clean_artist=$(sanitize_filename "$album_artist")
-    local clean_title=$(sanitize_filename "$album_title")
-    local clean_quality=$(sanitize_filename "$album_quality")
-    local clean_catalog=$(sanitize_filename "$catalog_number")
-    
-    # Build year suffix
-    local year_suffix=""
-    if [[ -n "$album_year" ]]; then
-        year_suffix=" ($album_year)"
-    fi
-    
-    # Build catalog suffix
-    local catalog_suffix=""
-    if [[ -n "$catalog_number" ]]; then
-        catalog_suffix=" [$clean_catalog]"
-    fi
-    
-    # Apply pattern substitutions
-    local result="$pattern"
-    result="${result//\{quality\}/$clean_quality}"
-    result="${result//\{artist\}/$clean_artist}"
-    result="${result//\{album\}/$clean_title}"
-    result="${result//\{album_year\}/$album_year}"
-    result="${result//\{album_year_suffix\}/$year_suffix}"
-    result="${result//\{catalog\}/$catalog_suffix}"
-    
-    echo "$DEST_DIR/$result"
-}
-
-# Apply profile-specific track naming pattern
-apply_profile_track_naming() {
-    local track_number="$1"
-    local track_title="$2"
-    local disc_number="$3"
-    local file_extension="$4"
-    
-    # Use profile-specific pattern if available, otherwise use default
-    local pattern="${PROFILE_TRACK_PATTERN:-{track_num:02d} - {title}}"
-    
-    # Sanitize inputs
-    local clean_title=$(sanitize_filename "$track_title")
-    
-    # Format track number
-    local formatted_track=""
-    if [[ -n "$track_number" ]]; then
-        if [[ "$pattern" == *"{track_num:02d}"* ]]; then
-            formatted_track=$(printf "%02d" "$track_number")
-        else
-            formatted_track="$track_number"
-        fi
-    fi
-    
-    # Format disc prefix
-    local disc_prefix=""
-    if [[ -n "$disc_number" && "$disc_number" != "1" ]]; then
-        disc_prefix="D${disc_number}-"
-    fi
-    
-    # Apply pattern substitutions
-    local result="$pattern"
-    result="${result//\{track_num:02d\}/$formatted_track}"
-    result="${result//\{track_num\}/$track_number}"
-    result="${result//\{title\}/$clean_title}"
-    result="${result//\{disc\}/$disc_prefix}"
-    
-    echo "$result.$file_extension"
-}
-
-# --- Automation and Batch Processing Functions ---
-
-# Acquire lock file to prevent concurrent runs
-acquire_lock() {
-    local lock_file="$1"
-    local max_wait="${2:-300}" # Default 5 minutes
-    local wait_time=0
-    
-    # Create lock directory if it doesn't exist
-    mkdir -p "$(dirname "$lock_file")" 2>/dev/null
-    
-    while [[ -f "$lock_file" ]]; do
-        if [[ $wait_time -ge $max_wait ]]; then
-            log $LOG_ERROR "Could not acquire lock file: $lock_file (timeout after ${max_wait}s)"
-            return 1
-        fi
-        
-        # Check if the process holding the lock is still running
-        if [[ -f "$lock_file" ]]; then
-            local lock_pid=$(cat "$lock_file" 2>/dev/null)
-            if [[ -n "$lock_pid" ]] && ! kill -0 "$lock_pid" 2>/dev/null; then
-                log $LOG_WARNING "Removing stale lock file: $lock_file (PID $lock_pid no longer running)"
-                secure_remove_file "$lock_file"
-                break
-            fi
-        fi
-        
-        log $LOG_INFO "Waiting for lock file: $lock_file (${wait_time}s elapsed)"
-        sleep 5
-        wait_time=$((wait_time + 5))
-    done
-    
-    # Create lock file with current PID
-    echo $$ > "$lock_file" || {
-        log $LOG_ERROR "Could not create lock file: $lock_file"
-        return 1
-    }
-    
-    log $LOG_DEBUG "Acquired lock file: $lock_file (PID $$)"
-    return 0
-}
-
-# Release lock file
-release_lock() {
-    local lock_file="$1"
-    
-    if [[ -f "$lock_file" ]]; then
-        local lock_pid=$(cat "$lock_file" 2>/dev/null)
-        if [[ "$lock_pid" == "$$" ]]; then
-            secure_remove_file "$lock_file"
-            log $LOG_DEBUG "Released lock file: $lock_file"
-        else
-            log $LOG_WARNING "Lock file PID mismatch: expected $$, found $lock_pid"
-        fi
-    fi
-}
-
-# Validate configuration before processing
-validate_configuration() {
-    local errors=0
-    
-    log $LOG_INFO "Validating configuration..."
-    
-    # Check required directories
-    if [[ ! -d "$SOURCE_DIR" ]]; then
-        log $LOG_ERROR "Source directory does not exist: $SOURCE_DIR"
-        errors=$((errors + 1))
-    fi
-    
-    # Check if destination directory parent exists
-    if [[ ! -d "$(dirname "$DEST_DIR")" ]]; then
-        log $LOG_ERROR "Destination directory parent does not exist: $(dirname "$DEST_DIR")"
-        errors=$((errors + 1))
-    fi
-    
-    # Check if unsorted directory parent exists
-    if [[ ! -d "$(dirname "$UNSORTED_DIR_BASE")" ]]; then
-        log $LOG_ERROR "Unsorted directory parent does not exist: $(dirname "$UNSORTED_DIR_BASE")"
-        errors=$((errors + 1))
-    fi
-    
-    # Check log file directory
-    if [[ ! -d "$(dirname "$LOG_FILE")" ]]; then
-        if ! mkdir -p "$(dirname "$LOG_FILE")" 2>/dev/null; then
-            log $LOG_ERROR "Cannot create log directory: $(dirname "$LOG_FILE")"
-            errors=$((errors + 1))
-        fi
-    fi
-    
-    # Check write permissions
-    if [[ ! -w "$(dirname "$LOG_FILE")" ]]; then
-        log $LOG_ERROR "No write permission for log directory: $(dirname "$LOG_FILE")"
-        errors=$((errors + 1))
-    fi
-    
-    # Check profile configuration if specified
-    if [[ -n "$PROFILE_NAME" ]]; then
-        local profile_file="$PROFILES_DIR/$PROFILE_NAME.conf"
-        if [[ ! -f "$profile_file" ]]; then
-            log $LOG_ERROR "Profile configuration file not found: $profile_file"
-            errors=$((errors + 1))
-        fi
-    fi
-    
-    # Check notification settings
-    if [[ -n "$NOTIFY_EMAIL" ]]; then
-        if ! command -v mail >/dev/null 2>&1 && ! command -v sendmail >/dev/null 2>&1; then
-            log $LOG_WARNING "Email notification requested but no mail command found"
-        fi
-    fi
-    
-    if [[ -n "$NOTIFY_WEBHOOK" ]]; then
-        if ! command -v curl >/dev/null 2>&1; then
-            log $LOG_WARNING "Webhook notification requested but curl not found"
-        fi
-    fi
-    
-    if [[ $errors -eq 0 ]]; then
-        log $LOG_INFO "Configuration validation passed"
+    # Check incremental mode
+    if [[ $INCREMENTAL -eq 1 ]] && ! directory_needs_processing "$album_dir"; then
+        log $LOG_INFO "Skipping already processed directory: $album_dir"
         return 0
-    else
-        log $LOG_ERROR "Configuration validation failed with $errors error(s)"
+    fi
+    
+    # Extract metadata
+    local exiftool_output=$(extract_album_metadata "$album_dir")
+    if [[ "$exiftool_output" == "[]" ]] || [[ -z "$exiftool_output" ]]; then
+        log $LOG_WARNING "No audio files found in: $album_dir"
+        move_to_unsorted "$album_dir" "no audio files"
         return 1
     fi
-}
-
-# Send notification about processing results
-send_notification() {
-    local subject="$1"
-    local message="$2"
-    local status="$3" # success, warning, error
     
-    # Email notification
-    if [[ -n "$NOTIFY_EMAIL" ]]; then
-        if command -v mail >/dev/null 2>&1; then
-            echo "$message" | mail -s "$subject" "$NOTIFY_EMAIL"
-            log $LOG_DEBUG "Email notification sent to: $NOTIFY_EMAIL"
-        elif command -v sendmail >/dev/null 2>&1; then
-            {
-                echo "To: $NOTIFY_EMAIL"
-                echo "Subject: $subject"
-                echo ""
-                echo "$message"
-            } | sendmail "$NOTIFY_EMAIL"
-            log $LOG_DEBUG "Email notification sent via sendmail to: $NOTIFY_EMAIL"
-        else
-            log $LOG_WARNING "Could not send email notification (no mail command found)"
+    # Determine album quality
+    local quality=$(determine_album_quality "$exiftool_output")
+    log $LOG_DEBUG "Determined Album Quality: $quality"
+    
+    # Extract album information
+    local album_info=$(extract_album_info "$exiftool_output")
+    local album_artist=$(echo "$album_info" | cut -d'|' -f1)
+    local album_title=$(echo "$album_info" | cut -d'|' -f2)
+    local album_year=$(echo "$album_info" | cut -d'|' -f3)
+    local label=$(echo "$album_info" | cut -d'|' -f4)
+    local catalog=$(echo "$album_info" | cut -d'|' -f5)
+    local genre=$(echo "$album_info" | cut -d'|' -f6)
+    local track_count=$(echo "$album_info" | cut -d'|' -f7)
+    local total_size=$(echo "$album_info" | cut -d'|' -f8)
+    local avg_bitrate=$(echo "$album_info" | cut -d'|' -f9)
+    
+    # Validate required metadata
+    if [[ -z "$album_artist" ]] || [[ -z "$album_title" ]]; then
+        log $LOG_WARNING "Missing essential metadata for: $album_dir"
+        move_to_unsorted "$album_dir" "missing metadata"
+        return 1
+    fi
+    
+    # Resolve artist aliases
+    local resolved_artist=$(resolve_artist_alias "$album_artist")
+    if [[ "$resolved_artist" != "$album_artist" ]]; then
+        log $LOG_INFO "Resolved artist alias: '$album_artist' -> '$resolved_artist'"
+        album_artist="$resolved_artist"
+    fi
+    
+    # Enrich with Discogs if enabled
+    if [[ "$DISCOGS_ENABLED" == "1" ]] && command -v discogs_search_release &>/dev/null; then
+        log $LOG_DEBUG "Attempting to enrich metadata with Discogs"
+        local discogs_data=$(discogs_search_release "$album_artist" "$album_title" "$album_year")
+        if [[ -n "$discogs_data" ]]; then
+            # Update metadata with Discogs data
+            local discogs_label=$(echo "$discogs_data" | jq -r '.label // empty' 2>/dev/null)
+            local discogs_catalog=$(echo "$discogs_data" | jq -r '.catalog_number // empty' 2>/dev/null)
+            [[ -n "$discogs_label" ]] && label="$discogs_label"
+            [[ -n "$discogs_catalog" ]] && catalog="$discogs_catalog"
         fi
     fi
     
-    # Webhook notification
-    if [[ -n "$NOTIFY_WEBHOOK" ]] && command -v curl >/dev/null 2>&1; then
-        local webhook_payload=$(cat <<EOF
-{
-    "text": "$subject",
-    "attachments": [{
-        "color": "$([[ "$status" == "success" ]] && echo "good" || [[ "$status" == "warning" ]] && echo "warning" || echo "danger")",
-        "text": "$message",
-        "ts": $(date +%s)
-    }]
-}
-EOF
-)
-        
-        if curl -s -X POST -H "Content-Type: application/json" -d "$webhook_payload" "$NOTIFY_WEBHOOK" >/dev/null; then
-            log $LOG_DEBUG "Webhook notification sent to: $NOTIFY_WEBHOOK"
-        else
-            log $LOG_WARNING "Failed to send webhook notification"
-        fi
-    fi
-}
-
-# Setup signal handlers for graceful shutdown
-setup_signal_handlers() {
-    trap 'handle_signal SIGTERM' TERM
-    trap 'handle_signal SIGINT' INT
-    trap 'handle_signal SIGQUIT' QUIT
-}
-
-# Handle shutdown signals
-handle_signal() {
-    local signal="$1"
-    log $LOG_INFO "Received $signal signal, shutting down gracefully..."
+    # Determine organization mode
+    local is_va=0
+    is_compilation "$album_artist" && is_va=1
     
-    # Release lock file if we have one
-    if [[ -n "$LOCK_FILE" ]]; then
-        release_lock "$LOCK_FILE"
-    fi
+    local album_data="${album_artist}|${album_title}|${label}|${catalog}|${album_year}|${is_va}"
+    local org_mode=$(determine_organization_mode "$album_data")
     
-    # Send notification about early termination
-    if [[ $BATCH_MODE -eq 1 ]]; then
-        send_notification "ordr.fm Process Terminated" "Processing was interrupted by $signal signal" "warning"
-    fi
+    # Build destination path
+    local dest_path=$(build_organization_path "$org_mode" "$album_data" "$quality")
+    local full_dest_path="${DEST_DIR}/${dest_path}"
     
-    log $LOG_INFO "--- ordr.fm Script Terminated ---"
-    exit 130
-}
-
-# Standard exit codes for automation
-exit_with_code() {
-    local code="$1"
-    local message="$2"
+    # Sanitize destination
+    full_dest_path=$(sanitize_filename "$full_dest_path")
     
-    # Release lock file if we have one
-    if [[ -n "$LOCK_FILE" ]]; then
-        release_lock "$LOCK_FILE"
-    fi
+    log $LOG_INFO "Proposed new album path for '$album_dir': $full_dest_path"
     
-    case "$code" in
-        0) log $LOG_INFO "Script completed successfully: $message" ;;
-        1) log $LOG_ERROR "Script failed with errors: $message" ;;
-        2) log $LOG_ERROR "Configuration error: $message" ;;
-        3) log $LOG_ERROR "Permission error: $message" ;;
-        4) log $LOG_ERROR "Dependency error: $message" ;;
-        *) log $LOG_ERROR "Script failed with unknown error code $code: $message" ;;
-    esac
-    
-    exit "$code"
-}
-
-# move_to_unsorted: Moves an album directory to the unsorted area.
-# Arguments:
-#   $1: The absolute path to the album directory to move.
-#   $2: The reason for moving to unsorted.
-move_to_unsorted() {
-    local album_dir="$1"
-    local reason="$2"
-    local unsorted_target="${UNSORTED_DIR}/$(basename "$album_dir")"
-
-    log $LOG_INFO "Moving '$album_dir' to unsorted: $reason"
-
+    # Perform move or log dry run
     if [[ $DRY_RUN -eq 1 ]]; then
-        log $LOG_INFO "(Dry Run) Would move '$album_dir' to '$unsorted_target'"
+        log $LOG_INFO "(Dry Run) Would move album directory '$album_dir' to '$full_dest_path'"
     else
-        mkdir -p "$(dirname "$unsorted_target")" || { log $LOG_ERROR "ERROR: Could not create unsorted target directory for '$album_dir'."; return 1; }
-        secure_move_file "$album_dir" "$unsorted_target"
-        if [[ $? -eq 0 ]]; then
-            log $LOG_INFO "Successfully moved '$album_dir' to '$unsorted_target'"
-        else
-            log $LOG_ERROR "ERROR: Failed to move '$album_dir' to '$unsorted_target'."
-        fi
+        # Create move operation
+        local operation_id="move_${SECONDS}_$$"
+        perform_album_move "$album_dir" "$full_dest_path" "$exiftool_output" "$operation_id"
+        
+        # Track in metadata database
+        local db_album_data="${album_dir}|${album_artist}|${album_title}|${album_year}|${track_count}|${total_size}|${quality}|${org_mode}|${full_dest_path}"
+        track_album_metadata "$db_album_data"
+        
+        # Record processing
+        record_directory_processing "$album_dir" "SUCCESS"
     fi
+    
+    return 0
 }
 
-# --- File Move Operations ---
-
-# perform_album_move: Performs atomic move operation for an album directory
-# Arguments:
-#   $1: source album directory path
-#   $2: destination album directory path  
-#   $3: exiftool output JSON for track-level operations
-# Returns: 0 on success, 1 on failure
+# Perform album move with all files
 perform_album_move() {
     local source_dir="$1"
     local dest_dir="$2"
     local exiftool_output="$3"
-    local operation_id="move_$(date +%s)_$$"
+    local operation_id="$4"
     
     log $LOG_INFO "Starting atomic move operation: $operation_id"
     log $LOG_DEBUG "Source: $source_dir"
     log $LOG_DEBUG "Destination: $dest_dir"
     
-    # Validate inputs
-    if [[ ! -d "$source_dir" ]]; then
-        log $LOG_ERROR "Source directory does not exist: $source_dir"
+    # Create parent directory
+    local parent_dir=$(dirname "$dest_dir")
+    if ! create_directory_safe "$parent_dir"; then
+        log $LOG_ERROR "Failed to create parent directory: $parent_dir"
         return 1
     fi
     
-    if [[ -e "$dest_dir" ]]; then
-        log $LOG_ERROR "Destination already exists: $dest_dir"
-        return 1
-    fi
+    # Record move operation
+    create_move_operation "$operation_id" "$source_dir" "$dest_dir"
     
-    # Create destination parent directory
-    local dest_parent=$(dirname "$dest_dir")
-    if ! mkdir -p "$dest_parent"; then
-        log $LOG_ERROR "Failed to create destination parent directory: $dest_parent"
-        return 1
-    fi
-    
-    # Record move operation in database for rollback
-    local move_record=$(create_move_record "$operation_id" "$source_dir" "$dest_dir")
-    if [[ $? -ne 0 ]]; then
-        log $LOG_ERROR "Failed to create move record in database"
-        return 1
-    fi
-    
-    # Perform atomic move with progress tracking
+    # Perform atomic directory move
     log $LOG_INFO "Moving album files..."
     if perform_atomic_directory_move "$source_dir" "$dest_dir" "$operation_id"; then
-        # Rename individual files according to metadata
-        if rename_tracks_in_album "$dest_dir" "$exiftool_output" "$operation_id"; then
-            # Update move record as successful
-            update_move_record_status "$operation_id" "SUCCESS"
-            log $LOG_INFO "Album move completed successfully: $operation_id"
-            return 0
-        else
-            log $LOG_ERROR "Track renaming failed, rolling back move operation"
-            rollback_move_operation "$operation_id"
-            return 1
-        fi
+        # Update move record as successful
+        update_move_operation_status "$operation_id" "SUCCESS"
+        log $LOG_INFO "Album move completed successfully: $operation_id"
+        return 0
     else
-        log $LOG_ERROR "Directory move failed, rolling back operation"
-        rollback_move_operation "$operation_id"
+        log $LOG_ERROR "Directory move failed"
+        update_move_operation_status "$operation_id" "FAILED" "Directory move failed"
         return 1
     fi
 }
 
-# perform_atomic_directory_move: Moves directory atomically using rsync
-# Arguments:
-#   $1: source directory
-#   $2: destination directory  
-#   $3: operation ID for tracking
-# Returns: 0 on success, 1 on failure
-perform_atomic_directory_move() {
-    local source_dir="$1"
-    local dest_dir="$2"
-    local operation_id="$3"
+# Find album directories
+find_album_directories() {
+    local search_dir="$1"
+    local albums=()
     
-    log $LOG_DEBUG "Performing atomic directory move: $operation_id"
+    log $LOG_INFO "Scanning for album directories in $search_dir..."
     
-    # Use rsync for atomic move with verification
-    # --archive preserves permissions, timestamps, etc.
-    # --verbose for detailed logging
-    # --progress for progress tracking
-    # --checksum for integrity verification
-    local rsync_options="--archive --verbose --progress --checksum --remove-source-files"
-    
-    if [[ $VERBOSITY -ge $LOG_DEBUG ]]; then
-        rsync_options="$rsync_options --stats"
-    fi
-    
-    # Create temporary destination to ensure atomicity
-    local temp_dest="${dest_dir}.tmp.${operation_id}"
-    
-    log $LOG_INFO "Using rsync to move directory atomically..."
-    # Try rsync, and if it fails due to permissions, try with sudo
-    if rsync $rsync_options "$source_dir/" "$temp_dest/" 2>/dev/null; then
-        log $LOG_DEBUG "rsync succeeded without sudo"
-    elif command -v sudo >/dev/null 2>&1 && sudo rsync $rsync_options "$source_dir/" "$temp_dest/" 2>/dev/null; then
-        log $LOG_DEBUG "rsync succeeded with sudo"
-        # Fix ownership to match parent directory
-        local parent_owner=$(stat -c '%U:%G' "$(dirname "$dest_dir")" 2>/dev/null)
-        if [[ -n "$parent_owner" ]]; then
-            sudo chown -R "$parent_owner" "$temp_dest" 2>/dev/null
-        fi
+    # Check if source directory itself is an album
+    if directory_has_audio_files "$search_dir"; then
+        local audio_count=$(count_audio_files "$search_dir")
+        log $LOG_INFO "Source directory itself appears to be an album with $audio_count audio files"
+        albums+=("$search_dir")
     else
-        log $LOG_ERROR "rsync failed during directory move"
-        return 1
-    fi
-    
-    if true; then
-        # Atomic rename to final destination
-        if secure_move_file "$temp_dest" "$dest_dir"; then
-            # Remove empty source directory
-            if rmdir "$source_dir" 2>/dev/null; then
-                log $LOG_DEBUG "Successfully removed source directory: $source_dir"
-            else
-                log $LOG_WARNING "Could not remove source directory (may not be empty): $source_dir"
+        # Find subdirectories containing audio files
+        while IFS= read -r -d '' dir; do
+            if directory_has_audio_files "$dir"; then
+                albums+=("$dir")
             fi
-            return 0
-        else
-            log $LOG_ERROR "Failed to rename temporary directory to final destination"
-            # Cleanup temporary directory
-            rm -rf "$temp_dest" 2>/dev/null
-            return 1
-        fi
-    else
-        log $LOG_ERROR "rsync failed during directory move"
-        # Cleanup temporary directory if it exists
-        rm -rf "$temp_dest" 2>/dev/null
-        return 1
+        done < <(find "$search_dir" -mindepth 1 -maxdepth 3 \( -type d -o -type l \) -print0 2>/dev/null)
     fi
+    
+    # Output array properly
+    printf '%s\n' "${albums[@]}"
 }
 
-# rename_tracks_in_album: Renames individual tracks according to metadata
-# Arguments:
-#   $1: album directory path
-#   $2: exiftool output JSON
-#   $3: operation ID for tracking
-# Returns: 0 on success, 1 on failure
-rename_tracks_in_album() {
-    local album_dir="$1"
-    local exiftool_output="$2"
-    local operation_id="$3"
-    
-    log $LOG_DEBUG "Renaming tracks in album: $album_dir"
-    
-    local rename_count=0
-    local rename_errors=0
-    
-    # Process each track from exiftool output
-    echo "$exiftool_output" | jq -c '.[]' | while IFS= read -r track_json; do
-        local track_artist=$(echo "$track_json" | jq -r '.Artist // empty')
-        local track_title=$(echo "$track_json" | jq -r '.Title // empty')
-        local track_number=$(echo "$track_json" | jq -r '.Track // empty')
-        local track_disc_number=$(echo "$track_json" | jq -r '.DiscNumber // empty')
-        local track_ext=$(echo "$track_json" | jq -r '.FileTypeExtension // empty')
-        local original_filename=$(echo "$track_json" | jq -r '.FileName // empty')
-        local current_file_path="${album_dir}/${original_filename}"
-        
-        # Skip if file doesn't exist (may have been processed already)
-        if [[ ! -f "$current_file_path" ]]; then
-            log $LOG_WARNING "Track file not found, skipping: $current_file_path"
-            continue
-        fi
-        
-        # Generate new filename using same logic as dry-run
-        local sanitized_track_title=$(sanitize_filename "$track_title")
-        local formatted_track_number=""
-        
-        if [[ -n "$track_number" ]]; then
-            formatted_track_number=$(printf "%02d - " "$track_number")
-        fi
-        
-        local new_track_filename="${formatted_track_number}${sanitized_track_title}.${track_ext}"
-        
-        # Handle disc subdirectories
-        local track_dest_dir="$album_dir"
-        if [[ -n "$track_disc_number" && "$track_disc_number" != "1" ]]; then
-            local formatted_disc_number="Disc $(sanitize_filename "$track_disc_number")"
-            track_dest_dir="${album_dir}/${formatted_disc_number}"
-            mkdir -p "$track_dest_dir"
-        fi
-        
-        local new_track_path="${track_dest_dir}/${new_track_filename}"
-        
-        # Skip if already correctly named
-        if [[ "$current_file_path" == "$new_track_path" ]]; then
-            log $LOG_DEBUG "Track already correctly named: $original_filename"
-            continue
-        fi
-        
-        # Check for destination conflicts
-        if [[ -e "$new_track_path" && "$current_file_path" != "$new_track_path" ]]; then
-            log $LOG_ERROR "Destination file already exists: $new_track_path"
-            ((rename_errors++))
-            continue
-        fi
-        
-        # Perform the rename
-        log $LOG_INFO "Renaming: '$original_filename' -> '$(basename "$new_track_path")'"
-        if secure_move_file "$current_file_path" "$new_track_path"; then
-            # Record the rename operation for potential rollback
-            record_file_rename "$operation_id" "$current_file_path" "$new_track_path"
-            ((rename_count++))
-        else
-            log $LOG_ERROR "Failed to rename: $original_filename"
-            ((rename_errors++))
-        fi
-    done
-    
-    log $LOG_INFO "Track renaming completed: $rename_count renamed, $rename_errors errors"
-    
-    # Return success if no errors occurred
-    if [[ $rename_errors -eq 0 ]]; then
-        return 0
-    else
-        return 1
-    fi
-}
+# Display usage
+usage() {
+    cat << EOF
+ordr.fm v${VERSION} - Intelligent Music Organization Tool (Modular Version)
 
-# create_move_record: Records move operation in database for rollback capability
-# Arguments:
-#   $1: operation ID
-#   $2: source path
-#   $3: destination path
-# Returns: 0 on success, 1 on failure
-s*secure_create_move_record() {
-    local operation_id="$1"
-    local source_path="$2"
-    local dest_path="$3"
-    
-    # Initialize metadata database if not exists
-    METADATA_DB=$(init_metadata_db)
-    
-    # Insert move record
-    local sql="INSERT INTO move_operations (operation_id, source_path, dest_path, timestamp, status) 
-               VALUES ('$operation_id', '$source_path', '$dest_path', datetime('now'), 'IN_PROGRESS');"
-    
-    if sqlite3 "$METADATA_DB" "$sql"; then
-        log $LOG_DEBUG "Created move record: $operation_id"
-        return 0
-    else
-        log $LOG_ERROR "Failed to create move record in database"
-        return 1
-    fi
-}
+USAGE:
+    $0 [OPTIONS]
 
-# update_move_record_status: Updates move operation status
-# Arguments:
-#   $1: operation ID
-#   $2: new status (SUCCESS, FAILED, ROLLED_BACK)
-# Returns: 0 on success, 1 on failure
-s*secure_update_move_record_status() {
-    local operation_id="$1"
-    local status="$2"
+OPTIONS:
+    -s, --source DIR          Source directory (default: current directory)
+    -d, --destination DIR     Destination directory (required unless dry-run)
+    -c, --config FILE         Configuration file (default: ordr.fm.conf)
+    -u, --unsorted DIR        Base directory for unsorted albums
     
-    local sql="UPDATE move_operations SET status='$status', updated_at=datetime('now') 
-               WHERE operation_id='$operation_id';"
+    --move                    Actually move files (default: dry-run)
+    --dry-run                 Preview changes without moving files (default)
     
-    if sqlite3 "$METADATA_DB" "$sql"; then
-        log $LOG_DEBUG "Updated move record status: $operation_id -> $status"
-        return 0
-    else
-        log $LOG_ERROR "Failed to update move record status"
-        return 1
-    fi
-}
+    -v, --verbose             Enable verbose logging
+    -q, --quiet               Reduce logging verbosity
+    --log-file FILE           Log file path (default: ordr.fm.log)
+    
+    --incremental             Skip already processed directories
+    --duplicates              Enable duplicate detection
+    
+    --enable-electronic       Enable electronic music organization features
+    --discogs                 Enable Discogs metadata enrichment
+    --organization-mode MODE  Organization mode: artist, label, series, hybrid
+    
+    --parallel [JOBS]         Enable parallel processing (optional job count)
+    
+    --cleanup-empty           Remove empty source directories after processing
+    --cleanup-preview         Preview empty directories without removing
+    --cleanup-artifacts       Remove system artifacts (Thumbs.db, .DS_Store)
+    --preserve-structure      Keep top-level structure when cleaning
+    
+    -h, --help                Display this help message
+    -V, --version             Display version information
 
-# record_file_rename: Records individual file rename for rollback
-# Arguments:
-#   $1: operation ID
-#   $2: old file path
-#   $3: new file path
-# Returns: 0 on success, 1 on failure
-record_file_rename() {
-    local operation_id="$1"
-    local old_path="$2"
-    local new_path="$3"
-    
-    local sql="INSERT INTO file_renames (operation_id, old_path, new_path, timestamp) 
-               VALUES ('$operation_id', '$old_path', '$new_path', datetime('now'));"
-    
-    sqlite3 "$METADATA_DB" "$sql" || log $LOG_WARNING "Failed to record file rename"
-}
+EXAMPLES:
+    # Dry run with default settings
+    $0 --source ~/Music/Incoming --destination ~/Music/Organized
 
-# rollback_move_operation: Rolls back a failed move operation
-# Arguments:
-#   $1: operation ID
-# Returns: 0 on success, 1 on failure
-rollback_move_operation() {
-    local operation_id="$1"
-    
-    log $LOG_WARNING "Rolling back move operation: $operation_id"
-    
-    # Get move record details
-    local move_record=$(sqlite3 "$METADATA_DB" -separator '|' \
-        "SELECT source_path, dest_path FROM move_operations WHERE operation_id='$operation_id';")
-    
-    if [[ -z "$move_record" ]]; then
-        log $LOG_ERROR "Move record not found for rollback: $operation_id"
-        return 1
-    fi
-    
-    local source_path=$(echo "$move_record" | cut -d'|' -f1)
-    local dest_path=$(echo "$move_record" | cut -d'|' -f2)
-    
-    # Attempt to restore from destination back to source
-    if [[ -d "$dest_path" && ! -d "$source_path" ]]; then
-        log $LOG_INFO "Restoring directory: $dest_path -> $source_path"
-        if secure_move_file "$dest_path" "$source_path"; then
-            update_move_record_status "$operation_id" "ROLLED_BACK"
-            log $LOG_INFO "Successfully rolled back move operation: $operation_id"
-            return 0
-        else
-            log $LOG_ERROR "Failed to rollback directory move: $operation_id"
-            return 1
-        fi
-    else
-        log $LOG_WARNING "Cannot rollback - source exists or destination missing: $operation_id"
-        update_move_record_status "$operation_id" "ROLLBACK_FAILED"
-        return 1
-    fi
-}
+    # Actual move with electronic features
+    $0 --move --enable-electronic --discogs --source ~/Music/Incoming
 
-# list_move_operations: Lists all move operations with their status
-# No arguments
-# Returns: 0 on success
-list_move_operations() {
-    # Initialize metadata database if not exists
-    METADATA_DB=$(init_metadata_db)
-    
-    echo "Move Operations History:"
-    echo "======================="
-    
-    # Get total count
-    local total_count=$(sqlite3 "$METADATA_DB" "SELECT COUNT(*) FROM move_operations;")
-    
-    if [[ $total_count -eq 0 ]]; then
-        echo "No move operations found in database."
-        return 0
-    fi
-    
-    echo "Total operations: $total_count"
-    echo ""
-    
-    # List recent operations with formatted output
-    sqlite3 "$METADATA_DB" -header -column <<EOF
-SELECT 
-    SUBSTR(operation_id, 1, 20) || '...' AS 'Operation ID',
-    SUBSTR(source_path, MAX(1, LENGTH(source_path) - 40)) AS 'Source (last 40 chars)',
-    status AS 'Status',
-    DATETIME(timestamp, 'localtime') AS 'Timestamp'
-FROM move_operations 
-ORDER BY timestamp DESC 
-LIMIT 20;
+    # Incremental processing with custom config
+    $0 --incremental --config my-music.conf --move
+
 EOF
-    
-    echo ""
-    echo "Status Legend:"
-    echo "  IN_PROGRESS  - Operation currently running"
-    echo "  SUCCESS      - Completed successfully"
-    echo "  FAILED       - Failed during execution"
-    echo "  ROLLED_BACK  - Successfully rolled back"
-    echo "  ROLLBACK_FAILED - Rollback failed"
-    echo ""
-    echo "Use --undo <operation_id> to rollback a successful operation"
-    echo "Use --undo-last to rollback the most recent successful operation"
 }
 
-# undo_move_operation: Manually undo a specific move operation
-# Arguments:
-#   $1: operation ID to undo
-# Returns: 0 on success, 1 on failure
-undo_move_operation() {
-    local operation_id="$1"
-    
-    # Initialize metadata database if not exists
-    METADATA_DB=$(init_metadata_db)
-    
-    echo "Undoing move operation: $operation_id"
-    echo ""
-    
-    # Get operation details
-    local operation_details=$(sqlite3 "$METADATA_DB" -separator '|' \
-        "SELECT operation_id, source_path, dest_path, status, timestamp FROM move_operations WHERE operation_id LIKE '%$operation_id%';")
-    
-    if [[ -z "$operation_details" ]]; then
-        echo "❌ Error: Operation ID not found: $operation_id"
-        echo ""
-        echo "Use --list-operations to see available operations"
-        return 1
-    fi
-    
-    # Handle multiple matches
-    local match_count=$(echo "$operation_details" | wc -l)
-    if [[ $match_count -gt 1 ]]; then
-        echo "❌ Error: Multiple operations match '$operation_id':"
-        echo "$operation_details" | while IFS='|' read -r op_id source dest status timestamp; do
-            echo "  - $op_id ($status)"
-        done
-        echo ""
-        echo "Please provide a more specific operation ID"
-        return 1
-    fi
-    
-    # Parse operation details
-    IFS='|' read -r full_op_id source_path dest_path status timestamp <<< "$operation_details"
-    
-    echo "Operation Details:"
-    echo "  ID: $full_op_id"
-    echo "  Source: $source_path"
-    echo "  Destination: $dest_path"
-    echo "  Status: $status"
-    echo "  Date: $(date -d "$timestamp" 2>/dev/null || echo "$timestamp")"
-    echo ""
-    
-    # Check if operation can be undone
-    if [[ "$status" != "SUCCESS" ]]; then
-        echo "❌ Error: Cannot undo operation with status '$status'"
-        echo "Only successful operations can be manually undone"
-        return 1
-    fi
-    
-    # Verify destination still exists and source doesn't
-    if [[ ! -d "$dest_path" ]]; then
-        echo "❌ Error: Destination directory no longer exists: $dest_path"
-        echo "Cannot perform undo operation"
-        return 1
-    fi
-    
-    if [[ -d "$source_path" ]]; then
-        echo "❌ Error: Source directory still exists: $source_path"
-        echo "This could indicate a partial or failed operation"
-        echo "Manual intervention may be required"
-        return 1
-    fi
-    
-    # Confirm with user
-    echo "⚠️  WARNING: This will move the album back to its original location"
-    echo ""
-    read -p "Are you sure you want to undo this operation? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Undo operation cancelled by user"
-        return 1
-    fi
-    
-    echo ""
-    echo "🔄 Performing undo operation..."
-    
-    # Perform the undo using the existing rollback function
-    if rollback_move_operation "$full_op_id"; then
-        echo "✅ Successfully undone move operation: $full_op_id"
-        echo ""
-        echo "Album restored to: $source_path"
-        return 0
-    else
-        echo "❌ Failed to undo move operation: $full_op_id"
-        echo "Check logs for details"
-        return 1
-    fi
-}
-
-# undo_last_move_operation: Undoes the most recent successful move operation
-# No arguments
-# Returns: 0 on success, 1 on failure
-undo_last_move_operation() {
-    # Initialize metadata database if not exists
-    METADATA_DB=$(init_metadata_db)
-    
-    echo "Finding most recent successful move operation..."
-    
-    # Get the most recent successful operation
-    local last_operation=$(sqlite3 "$METADATA_DB" -separator '|' \
-        "SELECT operation_id FROM move_operations WHERE status='SUCCESS' ORDER BY timestamp DESC LIMIT 1;")
-    
-    if [[ -z "$last_operation" ]]; then
-        echo "❌ No successful move operations found"
-        echo ""
-        echo "Use --list-operations to see all operations"
-        return 1
-    fi
-    
-    echo "Most recent successful operation: $last_operation"
-    echo ""
-    
-    # Use the regular undo function
-    undo_move_operation "$last_operation"
-}
-
-# --- Album Processing Logic ---
-
-# process_album_directory: Analyzes a single directory assumed to be an album.
-# Extracts metadata, determines album identity and quality, and proposes a new path.
-# Arguments:
-#   $1: The absolute path to the album directory to process.
-process_album_directory() {
-    local album_dir="$1"
-    log $LOG_INFO "Processing album directory: $album_dir"
-
-    # Extract metadata using the metadata module
-    local exiftool_output
-    exiftool_output=$(extract_audio_metadata "$album_dir")
-
-    if [[ -z "$exiftool_output" ]]; then
-        log $LOG_WARNING "WARN: Could not extract metadata from any files in '$album_dir'. Moving to unsorted."
-        move_to_unsorted "$album_dir" "No readable metadata found."
-        return 0
-    fi
-
-    # --- DEBUGGING: Print raw exiftool output ---
-    log $LOG_DEBUG "Raw exiftool output for '$album_dir':\n$exiftool_output"
-
-    # Determine album metadata using the metadata module
-    local album_metadata
-    album_metadata=$(determine_album_metadata "$exiftool_output" "$(basename "$album_dir")")
-    
-    if [[ -z "$album_metadata" ]]; then
-        log $LOG_WARNING "WARN: Could not determine album metadata for '$album_dir'. Moving to unsorted."
-        move_to_unsorted "$album_dir" "Could not determine album metadata."
-        return 0
-    fi
-
-    # Extract album information from metadata JSON
-    local album_artist=$(echo "$album_metadata" | jq -r '.artist')
-    local album_title=$(echo "$album_metadata" | jq -r '.title')
-    local album_year=$(echo "$album_metadata" | jq -r '.year')
-    
-    log $LOG_DEBUG "Determined Album Artist: $album_artist"
-    log $LOG_DEBUG "Determined Album Title: $album_title"
-    [[ -n "$album_year" && "$album_year" != "null" ]] && log $LOG_DEBUG "Determined Album Year: $album_year"
-
-    # Validate essential metadata
-    if ! validate_album_metadata "$album_metadata"; then
-        log $LOG_WARNING "WARN: Missing essential album tags (Album Artist or Album Title) for '$album_dir'. Moving to unsorted."
-        move_to_unsorted "$album_dir" "Missing essential album tags."
-        return 0
-    fi
-
-    # Determine album quality using the metadata module
-    local album_quality
-    album_quality=$(determine_album_quality "$exiftool_output")
-    log $LOG_DEBUG "Determined Album Quality: $album_quality"
-
-    # Extract additional metadata for debugging
-    local all_titles=$(echo "$exiftool_output" | jq -r '.[] | .Title // empty')
-    local all_track_numbers=$(echo "$exiftool_output" | jq -r '.[].Track // empty')
-    local all_disc_numbers=$(echo "$exiftool_output" | jq -r '.[].DiscNumber // empty')
-
-    # --- DEBUGGING: Print collected metadata arrays ---
-    log $LOG_DEBUG "Collected Titles: $(echo "$all_titles" | tr '\n' ';')"
-    log $LOG_DEBUG "Collected Track Numbers: $(echo "$all_track_numbers" | tr '\n' ';')"
-    log $LOG_DEBUG "Collected Disc Numbers: $(echo "$all_disc_numbers" | tr '\n' ';')"
-
-    # --- Enrich Metadata with Discogs ---
-    local discogs_metadata="{}"
-    local catalog_number=""
-    
-    # Resolve artist aliases if enabled
-    local resolved_artist="$album_artist"
-    if [[ $GROUP_ARTIST_ALIASES -eq 1 ]]; then
-        log $LOG_DEBUG "Attempting to resolve artist alias for: '$album_artist'"
-        log $LOG_DEBUG "GROUP_ARTIST_ALIASES=$GROUP_ARTIST_ALIASES"
-        log $LOG_DEBUG "ARTIST_ALIAS_GROUPS='$ARTIST_ALIAS_GROUPS'"
-        resolved_artist=$(resolve_artist_alias "$album_artist")
-        if [[ "$resolved_artist" != "$album_artist" ]]; then
-            log $LOG_INFO "Resolved artist alias: '$album_artist' -> '$resolved_artist'"
-        else
-            log $LOG_DEBUG "No alias resolution for '$album_artist' (returned same value)"
-        fi
-    fi
-    
-    local enhanced_artist="$resolved_artist"
-    local enhanced_title="$album_title"
-    local enhanced_year="$album_year"
-    
-    if [[ $DISCOGS_ENABLED -eq 1 ]]; then
-        log $LOG_DEBUG "Attempting to enrich metadata with Discogs for: $resolved_artist - $album_title (was: $album_artist)"
-        # Note: enrich_metadata_with_discogs from metadata module requires discogs_search_releases and discogs_get_release functions
-        discogs_metadata=$(enrich_metadata_with_discogs "$resolved_artist" "$album_title" "$album_year")
-        
-        if [[ "$discogs_metadata" != "{}" ]]; then
-            local confidence=$(echo "$discogs_metadata" | jq -r '.confidence // 0.0')
-            local confidence_threshold=$(echo "$DISCOGS_CONFIDENCE_THRESHOLD" | bc -l 2>/dev/null || echo "0.7")
-            
-            log $LOG_DEBUG "Discogs metadata confidence: $confidence (threshold: $confidence_threshold)"
-            
-            # Use Discogs metadata if confidence is above threshold
-            if [[ $(echo "$confidence >= $confidence_threshold" | bc -l 2>/dev/null) -eq 1 ]]; then
-                log $LOG_INFO "Using Discogs metadata (high confidence: $confidence)"
-                
-                local discogs_artist=$(echo "$discogs_metadata" | jq -r '.artist // empty')
-                local discogs_title=$(echo "$discogs_metadata" | jq -r '.title // empty')
-                local discogs_year=$(echo "$discogs_metadata" | jq -r '.year // empty')
-                
-                # Override with Discogs data if available and non-empty
-                if [[ -n "$discogs_artist" ]]; then
-                    enhanced_artist="$discogs_artist"
-                    log $LOG_DEBUG "Enhanced artist from Discogs: $enhanced_artist"
-                fi
-                
-                if [[ -n "$discogs_title" ]]; then
-                    enhanced_title="$discogs_title"
-                    log $LOG_DEBUG "Enhanced title from Discogs: $enhanced_title"
-                fi
-                
-                if [[ -n "$discogs_year" ]]; then
-                    enhanced_year="$discogs_year"
-                    log $LOG_DEBUG "Enhanced year from Discogs: $enhanced_year"
-                fi
-                
-                # Extract catalog number if enabled
-                if [[ $DISCOGS_CATALOG_NUMBERS -eq 1 ]]; then
-                    catalog_number=$(echo "$discogs_metadata" | jq -r '.catalog_number // empty')
-                    if [[ -n "$catalog_number" ]]; then
-                        log $LOG_DEBUG "Found catalog number from Discogs: $catalog_number"
-                    fi
-                fi
-                
-                # Log additional metadata for electronic music enthusiasts
-                local label=$(echo "$discogs_metadata" | jq -r '.label // empty')
-                local genre=$(echo "$discogs_metadata" | jq -r '.genre // empty')
-                local style=$(echo "$discogs_metadata" | jq -r '.style // empty')
-                local remix_artists=$(echo "$discogs_metadata" | jq -r '.remix_artists // empty')
-                local label_series=$(echo "$discogs_metadata" | jq -r '.label_series // empty')
-                
-                [[ -n "$label" ]] && log $LOG_DEBUG "Discogs label: $label"
-                [[ -n "$genre" ]] && log $LOG_DEBUG "Discogs genre: $genre"
-                [[ -n "$style" ]] && log $LOG_DEBUG "Discogs style: $style"
-                [[ -n "$remix_artists" ]] && log $LOG_DEBUG "Discogs remix artists: $remix_artists"
-                [[ -n "$label_series" ]] && log $LOG_DEBUG "Discogs label series: $label_series"
-            else
-                log $LOG_DEBUG "Discogs metadata available but confidence too low ($confidence < $confidence_threshold)"
-            fi
-        else
-            log $LOG_DEBUG "No Discogs metadata found for this release"
-        fi
-    fi
-
-    # --- Construct New Path with Electronic Organization ---
-    
-    # Extract additional metadata for electronic organization
-    local label=$(echo "$discogs_metadata" | jq -r '.label // empty')
-    local label_series=$(echo "$discogs_metadata" | jq -r '.label_series // empty')
-    local remix_artists=$(echo "$discogs_metadata" | jq -r '.remix_artists // empty')
-    local discogs_confidence=$(echo "$discogs_metadata" | jq -r '.confidence // 0.0')
-    
-    # Check for remixes
-    local remix_detected=0
-    if detect_remixes "$enhanced_title" "$remix_artists"; then
-        remix_detected=1
-    fi
-    
-    # Determine organization mode
-    local org_mode=$(determine_organization_mode "$enhanced_artist" "$enhanced_title" \
-        "$catalog_number" "$label" "$label_series" "$discogs_confidence" "$remix_detected" "$album_dir")
-    
-    log $LOG_DEBUG "Selected organization mode: $org_mode"
-    
-    # Build the proposed path based on organization mode
-    local proposed_album_path
-    
-    if [[ -n "$PROFILE_NAME" ]] && command -v apply_profile_organization >/dev/null 2>&1; then
-        # Use profile-specific organization if available
-        proposed_album_path=$(apply_profile_organization "$enhanced_artist" "$enhanced_title" "$enhanced_year" "$album_quality" "$catalog_number")
-    else
-        # Use electronic organization system
-        proposed_album_path=$(build_organization_path "$org_mode" "$album_quality" \
-            "$enhanced_artist" "$enhanced_title" "$enhanced_year" "$catalog_number" \
-            "$label" "$label_series")
-    fi
-
-    log $LOG_INFO "Proposed new album path for '$album_dir': $proposed_album_path"
-
-    # Placeholder for actual move/rename logic for the album directory and its files
-    # This will be implemented in a later step, after dry-run is fully functional.
-    if [[ $DRY_RUN -eq 1 ]]; then
-        log $LOG_INFO "(Dry Run) Would move album directory '$album_dir' to '$proposed_album_path'"
-        # In dry-run, we also want to show how individual files would be renamed
-        log $LOG_INFO "(Dry Run) Individual files within this album would be renamed as follows:"
-        echo "$exiftool_output" | jq -c '.[]' | while IFS= read -r track_json; do
-            local track_artist=$(echo "$track_json" | jq -r '.Artist // empty')
-            local track_title=$(echo "$track_json" | jq -r '.Title // empty')
-            local track_number=$(echo "$track_json" | jq -r '.Track // empty')
-            local track_disc_number=$(echo "$track_json" | jq -r '.DiscNumber // empty')
-            local track_ext=$(echo "$track_json" | jq -r '.FileTypeExtension // empty')
-            local original_filename=$(echo "$track_json" | jq -r '.FileName // empty')
-
-            # Check for vinyl side position if enabled
-            local vinyl_position=""
-            if [[ $VINYL_SIDE_MARKERS -eq 1 ]] && [[ -n "$release_details" ]]; then
-                # Try to get vinyl position from Discogs tracklist
-                local track_position=$(echo "$release_details" | jq -r ".tracklist[] | select(.title == \"$track_title\") | .position // empty" 2>/dev/null | head -1)
-                if [[ -n "$track_position" ]] && echo "$track_position" | grep -E '^[A-Z][0-9]' >/dev/null 2>&1; then
-                    vinyl_position="${track_position} - "
-                    log $LOG_DEBUG "Found vinyl position for track: $vinyl_position"
-                fi
-            fi
-            
-            # Use profile-specific track naming if available
-            local new_track_filename
-            if [[ -n "$PROFILE_NAME" ]] && command -v apply_profile_track_naming >/dev/null 2>&1; then
-                new_track_filename=$(apply_profile_track_naming "$track_number" "$track_title" "$track_disc_number" "$track_ext")
-            else
-                # Default track naming pattern with optional vinyl position
-                local sanitized_track_title=$(sanitize_filename "$track_title")
-                local formatted_track_number=""
-                
-                if [[ -n "$vinyl_position" ]]; then
-                    # Use vinyl position instead of track number
-                    formatted_track_number="$vinyl_position"
-                elif [[ -n "$track_number" ]]; then
-                    formatted_track_number=$(printf "%02d - " "$track_number")
-                fi
-                
-                new_track_filename="${formatted_track_number}${sanitized_track_title}.${track_ext}"
-            fi
-
-            # Handle disc subdirectories
-            local formatted_disc_number=""
-            if [[ -n "$track_disc_number" && "$track_disc_number" != "1" ]]; then
-                formatted_disc_number="Disc $(sanitize_filename "$track_disc_number")"
-            fi
-            local proposed_track_path="${proposed_album_path}"
-            if [[ -n "$formatted_disc_number" ]]; then
-                proposed_track_path="${proposed_track_path}/${formatted_disc_number}"
-            fi
-            proposed_track_path="${proposed_track_path}/${new_track_filename}"
-
-            log $LOG_INFO "  - '$original_filename' -> '$proposed_track_path'"
-        done
-    else
-        # Actual move logic - atomic operations with rollback capability
-        log $LOG_INFO "(Live Run) Moving album directory '$album_dir' to '$proposed_album_path'"
-        
-        # Check if source and destination are the same (album already in correct location)
-        if [ "$album_dir" = "$proposed_album_path" ]; then
-            log $LOG_INFO "Album already in correct location, skipping move: $album_dir"
-            return 0
-        fi
-        
-        if perform_album_move "$album_dir" "$proposed_album_path" "$exiftool_output"; then
-            log $LOG_INFO "Successfully moved album: $(basename "$album_dir")"
-        else
-            log $LOG_ERROR "Failed to move album: $(basename "$album_dir")"
-            return 1
-        fi
-    fi
-}
-
-# --- Argument Parsing ---
+# Parse command line arguments
 parse_arguments() {
-    while [[ "$#" -gt 0 ]]; do
+    while [[ $# -gt 0 ]]; do
         case "$1" in
             -s|--source)
-                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
-                    echo "ERROR: --source requires a directory path" >&2
-                    exit 1
-                fi
                 SOURCE_DIR="$2"
                 shift 2
                 ;;
             -d|--destination)
-                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
-                    echo "ERROR: --destination requires a directory path" >&2
-                    exit 1
-                fi
                 DEST_DIR="$2"
                 shift 2
                 ;;
-            -u|--unsorted)
-                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
-                    echo "ERROR: --unsorted requires a directory path" >&2
-                    exit 1
-                fi
-                UNSORTED_DIR_BASE="$2"
+            -c|--config)
+                CONFIG_FILE="$2"
                 shift 2
                 ;;
-            -l|--log-file)
-                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
-                    echo "ERROR: --log-file requires a file path" >&2
-                    exit 1
-                fi
-                LOG_FILE="$2"
+            -u|--unsorted)
+                UNSORTED_BASE_DIR="$2"
                 shift 2
+                ;;
+            --move)
+                DRY_RUN=0
+                shift
+                ;;
+            --dry-run)
+                DRY_RUN=1
+                shift
                 ;;
             -v|--verbose)
                 VERBOSITY=$LOG_DEBUG
                 shift
                 ;;
-            --move)
-                MOVE_FILES=1
-                DRY_RUN=0 # Disable dry run if --move is present
+            -q|--quiet)
+                VERBOSITY=$LOG_ERROR
                 shift
                 ;;
-            --dry-run)
-                DRY_RUN=1
-                MOVE_FILES=0 # Ensure no moves if --dry-run is present
-                shift
+            --log-file)
+                LOG_FILE="$2"
+                shift 2
                 ;;
             --incremental)
-                INCREMENTAL_MODE=1
+                INCREMENTAL=1
                 shift
                 ;;
-            --since)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --since requires a date (YYYY-MM-DD)" >&2
-                    exit 1
-                fi
-                SINCE_DATE="$2"
-                shift 2
-                ;;
-            --state-db)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --state-db requires a database file path" >&2
-                    exit 1
-                fi
-                STATE_DB="$2"
-                shift 2
-                ;;
-            --force-reprocess)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --force-reprocess requires a directory path" >&2
-                    exit 1
-                fi
-                FORCE_REPROCESS_DIR="$2"
-                shift 2
-                ;;
-            --parallel)
-                PARALLEL_PROCESSING=1
+            --duplicates)
+                DUPLICATE_DETECTION=1
                 shift
                 ;;
-            --parallel-workers)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --parallel-workers requires a number (1-16)" >&2
-                    exit 1
-                fi
-                if ! [[ "$2" =~ ^[0-9]+$ ]] || [[ "$2" -lt 1 ]] || [[ "$2" -gt 16 ]]; then
-                    echo "ERROR: --parallel-workers must be a number between 1 and 16" >&2
-                    exit 1
-                fi
-                PARALLEL_WORKERS="$2"
-                shift 2
-                ;;
-            --find-duplicates)
-                FIND_DUPLICATES=1
+            --enable-electronic)
+                ENABLE_ELECTRONIC_ORGANIZATION=1
                 shift
-                ;;
-            --resolve-duplicates)
-                RESOLVE_DUPLICATES=1
-                shift
-                ;;
-            --duplicates-db)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --duplicates-db requires a database file path" >&2
-                    exit 1
-                fi
-                DUPLICATES_DB="$2"
-                shift 2
-                ;;
-            --scan-duplicates)
-                SCAN_DUPLICATES=1
-                shift
-                ;;
-            --detect-duplicates)
-                DETECT_DUPLICATES=1
-                shift
-                ;;
-            --duplicate-report)
-                DUPLICATE_REPORT=1
-                shift
-                ;;
-            --cleanup-duplicates)
-                CLEANUP_DUPLICATES=1
-                shift
-                ;;
-            --duplicate-threshold)
-                DUPLICATE_THRESHOLD="$2"
-                shift 2
-                ;;
-            --profile)
-                PROFILE_NAME="$2"
-                shift 2
-                ;;
-            --list-profiles)
-                LIST_PROFILES=1
-                shift
-                ;;
-            --profiles-dir)
-                PROFILES_DIR="$2"
-                shift 2
-                ;;
-            --batch)
-                BATCH_MODE=1
-                VERBOSITY=$LOG_QUIET  # Reduce output in batch mode
-                shift
-                ;;
-            --validate-config)
-                VALIDATE_CONFIG=1
-                shift
-                ;;
-            --notify-email)
-                NOTIFY_EMAIL="$2"
-                shift 2
-                ;;
-            --notify-webhook)
-                NOTIFY_WEBHOOK="$2"
-                shift 2
-                ;;
-            --lock-file)
-                LOCK_FILE="$2"
-                shift 2
                 ;;
             --discogs)
                 DISCOGS_ENABLED=1
                 shift
                 ;;
-            --no-discogs)
-                DISCOGS_ENABLED=0
-                shift
-                ;;
-            --discogs-token)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --discogs-token requires a Discogs API token" >&2
-                    exit 1
-                fi
-                DISCOGS_USER_TOKEN="$2"
-                DISCOGS_ENABLED=1
-                shift 2
-                ;;
-            --discogs-key)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --discogs-key requires a Discogs consumer key" >&2
-                    exit 1
-                fi
-                DISCOGS_CONSUMER_KEY="$2"
-                DISCOGS_ENABLED=1
-                shift 2
-                ;;
-            --discogs-secret)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --discogs-secret requires a Discogs consumer secret" >&2
-                    exit 1
-                fi
-                DISCOGS_CONSUMER_SECRET="$2"
-                shift 2
-                ;;
-            --discogs-cache-dir)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --discogs-cache-dir requires a directory path" >&2
-                    exit 1
-                fi
-                DISCOGS_CACHE_DIR="$2"
-                shift 2
-                ;;
-            --discogs-confidence)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --discogs-confidence requires a number (0.0-1.0)" >&2
-                    exit 1
-                fi
-                # Validate confidence threshold is a valid number between 0 and 1
-                if ! [[ "$2" =~ ^[0-1](\.[0-9]+)?$ ]]; then
-                    echo "ERROR: --discogs-confidence must be a number between 0.0 and 1.0" >&2
-                    exit 1
-                fi
-                DISCOGS_CONFIDENCE_THRESHOLD="$2"
-                shift 2
-                ;;
             --organization-mode)
-                if [[ -z "$2" ]]; then
-                    echo "ERROR: --organization-mode requires a mode (artist, label, hybrid)" >&2
-                    exit 1
-                fi
-                if [[ "$2" != "artist" && "$2" != "label" && "$2" != "hybrid" ]]; then
-                    echo "ERROR: --organization-mode must be 'artist', 'label', or 'hybrid'" >&2
-                    exit 1
-                fi
                 ORGANIZATION_MODE="$2"
                 shift 2
                 ;;
-            --enable-remixes)
-                SEPARATE_REMIXES=1
-                shift
-                ;;
-            --enable-compilations)
-                SEPARATE_COMPILATIONS=1
-                shift
-                ;;
-            --enable-vinyl-markers)
-                VINYL_SIDE_MARKERS=1
-                shift
-                ;;
-            --enable-underground)
-                UNDERGROUND_DETECTION=1
-                shift
-                ;;
-            --enable-electronic)
-                # Convenience flag to enable all electronic features
-                ORGANIZATION_MODE="hybrid"
-                SEPARATE_REMIXES=1
-                SEPARATE_COMPILATIONS=1
-                VINYL_SIDE_MARKERS=1
-                UNDERGROUND_DETECTION=1
-                shift
-                ;;
-            --group-aliases)
-                GROUP_ARTIST_ALIASES=1
-                shift
-                ;;
-            --alias-groups)
-                ARTIST_ALIAS_GROUPS="$2"
-                GROUP_ARTIST_ALIASES=1
-                shift 2
-                ;;
-            --list-operations)
-                list_move_operations
-                exit 0
-                ;;
-            --undo)
-                if [[ -z "$2" ]] || [[ "$2" == -* ]]; then
-                    echo "ERROR: --undo requires an operation ID" >&2
-                    echo "Use --list-operations to see available operations" >&2
-                    exit 1
+            --parallel)
+                ENABLE_PARALLEL=1
+                if [[ -n "$2" ]] && [[ "$2" =~ ^[0-9]+$ ]]; then
+                    PARALLEL_JOBS="$2"
+                    shift 2
+                else
+                    shift
                 fi
-                undo_move_operation "$2"
-                exit $?
                 ;;
-            --undo-last)
-                undo_last_move_operation
-                exit $?
+            --cleanup-empty)
+                CLEANUP_EMPTY_DIRS=1
+                shift
+                ;;
+            --cleanup-preview)
+                CLEANUP_EMPTY_DIRS=1
+                CLEANUP_DRY_RUN=1
+                shift
+                ;;
+            --cleanup-artifacts)
+                CLEANUP_ARTIFACTS=1
+                shift
+                ;;
+            --preserve-structure)
+                CLEANUP_PRESERVE_STRUCTURE=1
+                shift
                 ;;
             -h|--help)
-                show_help
+                usage
+                exit 0
+                ;;
+            -V|--version)
+                echo "ordr.fm version $VERSION"
                 exit 0
                 ;;
             *)
-                log $LOG_INFO "Unknown option: $1"
-                show_help
+                log $LOG_ERROR "Unknown option: $1"
+                usage
                 exit 1
                 ;;
         esac
     done
 }
 
-show_help() {
-    echo "Usage: $(basename "$0") [OPTIONS]"
-    echo "Organizes music files based on metadata."
-    echo ""
-    echo "Options:"
-    echo "  -s, --source DIR        Source directory to scan for music (default: $SOURCE_DIR)"
-    echo "  -d, --destination DIR   Destination directory for organized music (default: $DEST_DIR)"
-    echo "  -u, --unsorted DIR      Base directory for unsorted/problematic music (default: $UNSORTED_DIR_BASE)"
-    echo "  -l, --log-file FILE     Path to the log file (default: $LOG_FILE)"
-    echo "  -v, --verbose           Enable verbose output (DEBUG level logging)"
-    echo "  --move                  Execute file moves/renames (default: dry-run only)"
-    echo "  --dry-run               Simulate operations without moving files (default)"
-    echo ""
-    echo "Incremental Processing:"
-    echo "  --incremental           Enable incremental processing mode"
-    echo "  --since DATE            Process only files newer than DATE (YYYY-MM-DD format)"
-    echo "  --state-db FILE         Path to state database (default: ordr.fm.state.db)"
-    echo "  --force-reprocess DIR   Force reprocessing of specific directory"
-    echo ""
-    echo "Advanced Duplicate Detection:"
-    echo "  --scan-duplicates       Scan collection and generate audio fingerprints"
-    echo "  --detect-duplicates     Detect duplicate groups from fingerprints" 
-    echo "  --duplicate-report      Generate comprehensive duplicate analysis report"
-    echo "  --cleanup-duplicates    Clean up duplicate albums (requires --move for actual deletion)"
-    echo "  --duplicate-threshold N Minimum similarity score to consider duplicates (default: 0.85)"
-    echo "  --duplicates-db FILE    Path to duplicates database (default: ordr.fm.duplicates.db)"
-    echo ""
-    echo "Legacy Duplicate Detection:"
-    echo "  --find-duplicates       Find and report duplicate albums (legacy analysis)"
-    echo "  --resolve-duplicates    Automatically resolve duplicates (legacy method)"
-    echo ""
-    echo "Configuration Profiles:"
-    echo "  --profile NAME          Use configuration profile NAME"
-    echo "  --list-profiles         List available configuration profiles"
-    echo "  --profiles-dir DIR      Directory containing profile configurations"
-    echo ""
-    echo "Performance & Parallel Processing:"
-    echo "  --parallel              Enable parallel processing for large collections"
-    echo "  --parallel-workers N    Number of parallel workers (default: auto-detected)"
-    echo ""
-    echo "Automation & Batch Processing:"
-    echo "  --batch                 Enable batch mode (fully automated, minimal output)"
-    echo "  --validate-config       Validate configuration and exit"
-    echo "  --notify-email EMAIL    Send email notifications to EMAIL"
-    echo "  --notify-webhook URL    Send webhook notifications to URL"
-    echo "  --lock-file FILE        Path to lock file (prevents concurrent runs)"
-    echo ""
-    echo "Discogs API Integration:"
-    echo "  --discogs               Enable Discogs metadata enrichment"
-    echo "  --no-discogs            Disable Discogs metadata enrichment"
-    echo "  --discogs-token TOKEN   Discogs user token for authentication"
-    echo "  --discogs-key KEY       Discogs consumer key for authentication"
-    echo "  --discogs-secret SECRET Discogs consumer secret"
-    echo "  --discogs-cache-dir DIR Directory for API response cache"
-    echo "  --discogs-confidence N  Confidence threshold for accepting metadata (0.0-1.0)"
-    echo ""
-    echo "Electronic Music Organization:"
-    echo "  --organization-mode MODE    Set organization mode (artist|label|series|hybrid)"
-    echo "  --enable-remixes           Separate organization for remixes"
-    echo "  --enable-compilations      Special handling for compilations/VA releases"
-    echo "  --enable-vinyl-markers     Add vinyl side markers (A1, B2, etc.) to tracks"
-    echo "  --enable-underground       Special handling for white labels/promos"
-    echo "  --enable-electronic        Enable ALL electronic music features (hybrid mode)"
-    echo "  --group-aliases            Enable artist alias grouping"
-    echo "  --alias-groups GROUPS      Set artist alias groups (see config for format)"
-    echo ""
-    echo "Undo/Rollback Operations:"
-    echo "  --list-operations          List all move operations with status"
-    echo "  --undo OPERATION_ID        Undo a specific move operation by ID"
-    echo "  --undo-last                Undo the most recent successful move operation"
-    echo ""
-    echo "  -h|--help              Display this help message"
-    echo ""
-    echo "Configuration can also be set in $CONFIG_FILE"
-}
-
-# --- Main Logic ---
+# Main function
 main() {
+    # Parse arguments
     parse_arguments "$@"
-
-    # Handle profiles directory setup
-    if [[ -z "$PROFILES_DIR" ]]; then
-        PROFILES_DIR="$(dirname "$CONFIG_FILE")/profiles"
-    fi
-
-    # Handle --list-profiles command
-    if [[ $LIST_PROFILES -eq 1 ]]; then
-        list_profiles "$PROFILES_DIR"
-        exit 0
-    fi
-
-    # Load configuration profile if specified
-    if [[ -n "$PROFILE_NAME" ]]; then
-        # Initialize profiles directory if it doesn't exist
-        init_profiles "$PROFILES_DIR"
-        
-        # Load the specified profile
-        load_profile "$PROFILE_NAME" "$PROFILES_DIR" || exit_with_code 2 "Failed to load profile: $PROFILE_NAME"
-    fi
-
-    # Setup automation features
-    if [[ $BATCH_MODE -eq 1 ]]; then
-        setup_signal_handlers
-        
-        # Set default lock file if not specified
-        if [[ -z "$LOCK_FILE" ]]; then
-            LOCK_FILE="$(dirname "$LOG_FILE")/ordr.fm.lock"
-        fi
-        
-        # Acquire lock to prevent concurrent runs
-        acquire_lock "$LOCK_FILE" || exit_with_code 1 "Could not acquire lock file"
-    fi
-
-    # Handle --validate-config command
-    if [[ $VALIDATE_CONFIG -eq 1 ]]; then
-        validate_configuration || exit_with_code 2 "Configuration validation failed"
-        echo "Configuration validation passed"
-        exit 0
-    fi
-
-    # Create log file directory if it doesn't exist
-    mkdir -p "$(dirname "$LOG_FILE")" || { echo "FATAL: Could not create log directory: $(dirname "$LOG_FILE")"; exit 1; }
-
-    # Initialize log file (clear previous content for new run)
-    > "$LOG_FILE"
     
-    # Initialize alias system after configuration is loaded
-    init_alias_system
+    # Load configuration
+    if [[ -n "$CONFIG_FILE" ]]; then
+        load_config "$CONFIG_FILE"
+    else
+        load_config "ordr.fm.conf" || true
+    fi
+    
+    # Restore verbosity after config load (config may override it)
+    # This ensures command line flags take precedence
+    for arg in "$@"; do
+        case "$arg" in
+            -v|--verbose) VERBOSITY=$LOG_DEBUG ;;
+            -q|--quiet) VERBOSITY=$LOG_ERROR ;;
+        esac
+    done
+    
+    # Set defaults if not configured
+    DEST_DIR="${DEST_DIR:-${SOURCE_DIR}/sorted_music}"
+    UNSORTED_BASE_DIR="${UNSORTED_BASE_DIR:-${SOURCE_DIR}/unsorted}"
+    
+    # Setup signal handlers
+    setup_signal_handlers
+    
+    # Acquire lock
+    if ! acquire_lock; then
+        log $LOG_ERROR "Another instance is already running"
+        exit 1
+    fi
+    
+    # Print configuration
     log $LOG_INFO "--- ordr.fm Script Started ---"
     log $LOG_INFO "Configuration:"
     log $LOG_INFO "  Source Directory: $SOURCE_DIR"
     log $LOG_INFO "  Destination Directory: $DEST_DIR"
-    log $LOG_INFO "  Unsorted Directory Base: $UNSORTED_DIR_BASE"
+    log $LOG_INFO "  Unsorted Directory Base: $UNSORTED_BASE_DIR"
     log $LOG_INFO "  Log File: $LOG_FILE"
     log $LOG_INFO "  Verbosity: $(get_log_level_name $VERBOSITY)"
-    log $LOG_INFO "  Mode: $([[ $DRY_RUN -eq 1 ]] && echo "Dry Run" || echo "Live Run")"
-    log $LOG_INFO "  Incremental Mode: $([[ $INCREMENTAL_MODE -eq 1 ]] && echo "Enabled" || echo "Disabled")"
-    [[ -n "$SINCE_DATE" ]] && log $LOG_INFO "  Since Date: $SINCE_DATE"
-    log $LOG_INFO "  Duplicate Detection: $([[ $FIND_DUPLICATES -eq 1 || $RESOLVE_DUPLICATES -eq 1 ]] && echo "Enabled" || echo "Disabled")"
-    [[ -n "$PROFILE_NAME" ]] && log $LOG_INFO "  Active Profile: $PROFILE_NAME"
-
-    check_dependencies
-
-    # Initialize state database for incremental processing
-    if [[ $INCREMENTAL_MODE -eq 1 ]]; then
-        if [[ -z "$STATE_DB" ]]; then
-            STATE_DB="$(dirname "$LOG_FILE")/ordr.fm.state.db"
-        fi
-        log $LOG_INFO "  State Database: $STATE_DB"
-        init_state_db "$STATE_DB"
-    fi
-
-    # Initialize duplicates database for duplicate detection
-    if [[ $FIND_DUPLICATES -eq 1 || $RESOLVE_DUPLICATES -eq 1 || $SCAN_DUPLICATES -eq 1 || $DETECT_DUPLICATES -eq 1 || $DUPLICATE_REPORT -eq 1 || $CLEANUP_DUPLICATES -eq 1 ]]; then
-        if [[ -z "$DUPLICATES_DB" ]]; then
-            DUPLICATES_DB="$(dirname "$LOG_FILE")/ordr.fm.duplicates.db"
-        fi
-        log $LOG_INFO "  Duplicates Database: $DUPLICATES_DB"
-        
-        # Initialize the advanced duplicate detection database
-        init_duplicate_detection "$DUPLICATES_DB"
+    log $LOG_INFO "  Mode: $([ $DRY_RUN -eq 1 ] && echo "Dry Run" || echo "Live Run")"
+    log $LOG_INFO "  Incremental Mode: $([ $INCREMENTAL -eq 1 ] && echo "Enabled" || echo "Disabled")"
+    log $LOG_INFO "  Duplicate Detection: $([ $DUPLICATE_DETECTION -eq 1 ] && echo "Enabled" || echo "Disabled")"
+    
+    # Check dependencies
+    if ! check_dependencies; then
+        exit_with_code 1 "Missing required dependencies"
     fi
     
-    # Handle duplicate detection workflow
-    if [[ $SCAN_DUPLICATES -eq 1 ]]; then
-        log $LOG_INFO "Starting duplicate collection scan..."
-        scan_for_duplicates "$SOURCE_DIR" "$DUPLICATES_DB"
-        log $LOG_INFO "Duplicate scan completed. Use --detect-duplicates to find duplicate groups."
-        exit 0
+    # Initialize databases
+    if [[ $INCREMENTAL -eq 1 ]] || [[ $DRY_RUN -eq 0 ]]; then
+        init_state_db
+        init_metadata_db
     fi
     
-    if [[ $DETECT_DUPLICATES -eq 1 ]]; then
-        log $LOG_INFO "Detecting duplicate groups from fingerprints..."
-        detect_duplicate_groups "$DUPLICATES_DB"
-        log $LOG_INFO "Duplicate detection completed. Use --duplicate-report to see results."
-        exit 0
+    if [[ $DUPLICATE_DETECTION -eq 1 ]]; then
+        init_duplicates_db
     fi
     
-    if [[ $DUPLICATE_REPORT -eq 1 ]]; then
-        log $LOG_INFO "Generating duplicate analysis report..."
-        local report_file
-        report_file=$(generate_duplicate_report "$DUPLICATES_DB")
-        log $LOG_INFO "Duplicate report generated: $report_file"
-        echo "Duplicate report saved to: $report_file"
-        exit 0
-    fi
-    
-    if [[ $CLEANUP_DUPLICATES -eq 1 ]]; then
-        local dry_run_mode="true"
-        if [[ $MOVE_FILES -eq 1 ]]; then
-            dry_run_mode="false"
-        fi
-        log $LOG_INFO "Starting duplicate cleanup (dry_run: $dry_run_mode)..."
-        cleanup_duplicates "$DUPLICATES_DB" "$dry_run_mode"
-        exit 0
-    fi
-
-    # Initialize Discogs API integration
-    if [[ $DISCOGS_ENABLED -eq 1 ]]; then
+    # Initialize Discogs if enabled
+    if [[ "$DISCOGS_ENABLED" == "1" ]] && command -v init_discogs &>/dev/null; then
         log $LOG_INFO "  Discogs Integration: Enabled"
         init_discogs
-    else
-        log $LOG_DEBUG "  Discogs Integration: Disabled"
     fi
     
-    # Initialize parallel processing if enabled
-    if [[ $PARALLEL_PROCESSING -eq 1 ]]; then
-        log $LOG_INFO "  Parallel Processing: Enabled ($PARALLEL_WORKERS workers)"
-        if ! source "$SCRIPT_DIR/lib/parallel_processor.sh"; then
-            log $LOG_ERROR "Failed to load parallel processing module"
-            exit 1
+    # Create unsorted directory
+    if [[ $DRY_RUN -eq 0 ]]; then
+        local unsorted_dir="${UNSORTED_BASE_DIR}/unsorted_${DATE_NOW}"
+        if create_directory_safe "$unsorted_dir"; then
+            log $LOG_INFO "Created unsorted directory for this run: $unsorted_dir"
         fi
-        init_parallel_processing "auto" "$PARALLEL_WORKERS"
     else
-        log $LOG_DEBUG "  Parallel Processing: Disabled"
+        log $LOG_INFO "(Dry Run) Would create unsorted directory: ${UNSORTED_BASE_DIR}/unsorted_${DATE_NOW}"
     fi
-
-    # Create timestamped unsorted directory for this run
-    local TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-    UNSORTED_DIR="${UNSORTED_DIR_BASE}/unsorted_${TIMESTAMP}"
-    if [[ $MOVE_FILES -eq 1 ]]; then
-        mkdir -p "$UNSORTED_DIR" || { log $LOG_FATAL "FATAL: Could not create unsorted directory: $UNSORTED_DIR"; exit 1; }
-        log $LOG_INFO "Created unsorted directory for this run: $UNSORTED_DIR"
-    else
-        log $LOG_INFO "(Dry Run) Would create unsorted directory: $UNSORTED_DIR"
-    fi
-
-    # Check if source directory exists
-    if [[ ! -d "$SOURCE_DIR" ]]; then
-        log $LOG_FATAL "FATAL: Source directory not found: $SOURCE_DIR"
-        exit 1
-    fi
-
-    log $LOG_INFO "Scanning for album directories in $SOURCE_DIR..."
-
-    # Check if the source directory itself is an album (contains audio files)
-    local source_is_album=false
-    local audio_count=$(find "$SOURCE_DIR" -maxdepth 1 -type f \( -iname "*.mp3" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.aac" -o -iname "*.ogg" -o -iname "*.wav" -o -iname "*.aiff" -o -iname "*.alac" \) 2>/dev/null | wc -l)
     
-    if [[ $audio_count -gt 0 ]]; then
-        source_is_album=true
-        log $LOG_INFO "Source directory itself appears to be an album with $audio_count audio files"
-    fi
-
+    # Find and process album directories
     local album_dirs=()
+    while IFS= read -r dir; do
+        [[ -n "$dir" ]] && album_dirs+=("$dir")
+    done < <(find_album_directories "$SOURCE_DIR")
     
-    if [[ "$source_is_album" == "true" ]]; then
-        # If source is an album, process only the source directory
-        album_dirs+=("$SOURCE_DIR")
-    else
-        # Otherwise, find all subdirectories
-        while IFS= read -r -d '' album_dir; do
-            album_dirs+=("$album_dir")
-        done < <(find "$SOURCE_DIR" \( -type d -o -type l \) -print0)
-    fi
-
-    if [[ ${#album_dirs[@]} -eq 0 ]]; then
-        log $LOG_INFO "No album directories found in $SOURCE_DIR."
-        exit 0
-    fi
-
-    log $LOG_INFO "Found ${#album_dirs[@]} potential album directories. Processing..."
+    local total_albums=${#album_dirs[@]}
+    local processed=0
+    local skipped=0
     
-    local processed_count=0
-    local skipped_count=0
+    log $LOG_INFO "Found $total_albums potential album directories. Processing..."
     
-    # Filter albums that need processing
-    local albums_to_process=()
-    for album_dir in "${album_dirs[@]}"; do
-        # Skip the source directory itself (unless it's an album)
-        if [[ "$album_dir" == "$SOURCE_DIR" ]] && [[ "$source_is_album" != "true" ]]; then
-            continue
+    # Choose processing method based on collection size
+    if [[ $total_albums -gt 1000 ]] && [[ -n "$(type -t process_large_collection_parallel)" ]]; then
+        # Use optimized processing for large collections
+        log $LOG_INFO "Large collection detected. Using optimized processing..."
+        
+        # Build index cache for faster lookups
+        if [[ $INDEX_CACHE_ENABLED -eq 1 ]]; then
+            build_album_index_cache "$SOURCE_DIR"
         fi
         
-        # Skip if --since date filter doesn't match
-        if [[ -n "$SINCE_DATE" ]] && ! should_process_since_date "$album_dir" "$SINCE_DATE"; then
-            ((skipped_count++))
-            continue
-        fi
-        
-        # Skip if incremental mode and directory doesn't need processing (unless force reprocessing)
-        if [[ $INCREMENTAL_MODE -eq 1 ]] && [[ "$album_dir" != "$FORCE_REPROCESS_DIR"* ]] && ! directory_needs_processing "$album_dir" "$STATE_DB"; then
-            ((skipped_count++))
-            continue
-        fi
-        
-        albums_to_process+=("$album_dir")
-    done
-    
-    # Process albums (either parallel or sequential)
-    if [[ $PARALLEL_PROCESSING -eq 1 ]] && [[ ${#albums_to_process[@]} -gt 1 ]]; then
-        log $LOG_INFO "Processing ${#albums_to_process[@]} albums in parallel..."
-        if process_albums_parallel_dispatcher "${albums_to_process[@]}"; then
-            processed_count=${#albums_to_process[@]}
+        # Initialize parallel processing with optimizations
+        if [[ $PARALLEL_JOBS -eq 0 ]]; then
+            init_parallel_processing "auto"
         else
-            log $LOG_ERROR "Parallel processing failed"
+            init_parallel_processing "auto" "$PARALLEL_JOBS"
         fi
+        
+        # Process with large collection optimizations
+        process_large_collection_parallel "${album_dirs[@]}"
+        
+        # Get statistics
+        processed=$JOBS_COMPLETED
+        skipped=$JOBS_FAILED
+        
+        # Cleanup
+        cleanup_orphaned_data
+    elif [[ $ENABLE_PARALLEL -eq 1 ]] && [[ $total_albums -gt 1 ]]; then
+        # Standard parallel processing
+        if [[ $PARALLEL_JOBS -eq 0 ]]; then
+            init_parallel_processing "auto"
+        else
+            init_parallel_processing "auto" "$PARALLEL_JOBS"
+        fi
+        
+        # Process albums in parallel
+        process_albums_parallel_dispatcher "${album_dirs[@]}"
+        
+        # Get statistics from parallel processing
+        processed=$JOBS_COMPLETED
+        skipped=$JOBS_FAILED
     else
-        # Sequential processing (original logic)
-        for album_dir in "${albums_to_process[@]}"; do
-            log $LOG_DEBUG "Processing directory: $album_dir"
-            
-            # For duplicate detection mode, analyze album instead of processing
-            if [[ $FIND_DUPLICATES -eq 1 || $RESOLVE_DUPLICATES -eq 1 ]]; then
-                if analyze_album_for_duplicates "$album_dir" "$DUPLICATES_DB"; then
-                    ((processed_count++))
-                else
-                    ((skipped_count++))
-                fi
+        # Sequential processing
+        for album_dir in "${album_dirs[@]}"; do
+            if process_album_directory "$album_dir"; then
+                ((processed++))
             else
-                # Normal album processing
-                if process_album_directory "$album_dir"; then
-                    # Record successful processing
-                    if [[ $INCREMENTAL_MODE -eq 1 ]]; then
-                        record_directory_processing "$album_dir" "success" "$STATE_DB"
-                    fi
-                    ((processed_count++))
-                else
-                    # Record failed processing
-                    if [[ $INCREMENTAL_MODE -eq 1 ]]; then
-                        record_directory_processing "$album_dir" "failed" "$STATE_DB"
-                    fi
-                    log $LOG_WARNING "Failed to process directory: $album_dir"
-                fi
+                ((skipped++))
             fi
         done
     fi
     
-    log $LOG_INFO "Processing complete. Processed: $processed_count, Skipped: $skipped_count"
-
-    # Handle duplicate detection workflow
-    if [[ $FIND_DUPLICATES -eq 1 || $RESOLVE_DUPLICATES -eq 1 ]]; then
-        log $LOG_INFO "Starting duplicate detection analysis..."
+    # Update statistics
+    if [[ $DRY_RUN -eq 0 ]]; then
+        update_organization_stats
+    fi
+    
+    log $LOG_INFO "Processing complete. Processed: $processed, Skipped: $skipped"
+    
+    # Cleanup phase
+    if [[ $CLEANUP_EMPTY_DIRS -eq 1 ]] || [[ $CLEANUP_ARTIFACTS -eq 1 ]]; then
+        log $LOG_INFO "Starting cleanup phase..."
         
-        find_duplicate_groups "$DUPLICATES_DB"
-        
-        if [[ $FIND_DUPLICATES -eq 1 ]]; then
-            local report_file="$(dirname "$LOG_FILE")/duplicate_report_$(date +%Y%m%d_%H%M%S).md"
-            generate_duplicate_report "$DUPLICATES_DB" "$report_file"
-            log $LOG_INFO "Duplicate detection complete. Report saved to: $report_file"
+        if [[ $CLEANUP_EMPTY_DIRS -eq 1 ]]; then
+            local cleanup_opts=""
+            [[ $DRY_RUN -eq 1 ]] && cleanup_opts="preview"
+            [[ $CLEANUP_PRESERVE_STRUCTURE -eq 1 ]] && cleanup_opts="$cleanup_opts preserve-structure"
+            
+            cleanup_empty_source_directories "$SOURCE_DIR" "$cleanup_opts"
         fi
         
-        if [[ $RESOLVE_DUPLICATES -eq 1 ]]; then
-            local backup_dir="$(dirname "$LOG_FILE")/duplicate_backups_$(date +%Y%m%d_%H%M%S)"
-            resolve_duplicates "$DUPLICATES_DB" "$backup_dir"
-            log $LOG_INFO "Duplicate resolution complete. Removed albums backed up to: $backup_dir"
+        if [[ $CLEANUP_ARTIFACTS -eq 1 ]]; then
+            cleanup_artifacts "$SOURCE_DIR"
         fi
     fi
-
+    
     log $LOG_INFO "--- ordr.fm Script Finished ---"
     
-    # Send completion notification in batch mode
-    if [[ $BATCH_MODE -eq 1 ]]; then
-        local notification_message="Processing completed successfully.
-Processed: $processed_count albums
-Skipped: $skipped_count albums
-Profile: ${PROFILE_NAME:-default}
-Duration: $SECONDS seconds"
-        
-        send_notification "ordr.fm Processing Complete" "$notification_message" "success"
-    fi
-    
-    # Exit with success code
-    exit_with_code 0 "Processing completed successfully"
-} 
+    exit_with_code 0 "Script completed successfully: Processing completed successfully"
+}
 
-# Execute main function
+# Export functions for parallel processing
+if [[ -f "$SCRIPT_DIR/lib/parallel_wrapper.sh" ]]; then
+    source "$SCRIPT_DIR/lib/parallel_wrapper.sh"
+    export_parallel_functions
+fi
+
+# Handle source-only mode for parallel workers
+if [[ "$1" == "--source-only" ]]; then
+    return 0 2>/dev/null || exit 0
+fi
+
+# Run main function
 main "$@"
