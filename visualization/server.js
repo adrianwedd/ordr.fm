@@ -5,10 +5,23 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const WebSocket = require('ws');
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
+const helmet = require('helmet');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || 'development';
+
+// Security and Authentication Configuration
+const JWT_SECRET = process.env.JWT_SECRET || 'ordr-fm-default-secret-change-in-production';
+const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
+const BCRYPT_ROUNDS = 12;
+
+// Security: Warn about default JWT secret in production
+if (NODE_ENV === 'production' && JWT_SECRET === 'ordr-fm-default-secret-change-in-production') {
+    console.warn('⚠️  WARNING: Using default JWT secret in production! Set JWT_SECRET environment variable.');
+}
 
 // Performance monitoring and caching
 const cache = new Map();
@@ -363,15 +376,47 @@ const generalLimiter = rateLimit({
     }
 });
 
+// Security Headers
+app.use(helmet({
+    contentSecurityPolicy: {
+        directives: {
+            defaultSrc: ["'self'"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+            imgSrc: ["'self'", "data:", "https:"],
+            connectSrc: ["'self'", "ws:", "wss:"],
+            fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+            objectSrc: ["'none'"],
+            mediaSrc: ["'self'"],
+            frameSrc: ["'none'"],
+        },
+    },
+    crossOriginEmbedderPolicy: false // Allow for local development
+}));
+
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
 app.use(express.static('public'));
 
-// CORS headers for development
+// Enhanced CORS handling with security considerations
 app.use((req, res, next) => {
-    res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept');
-    next();
+    const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'];
+    const origin = req.headers.origin;
+    
+    if (allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+        res.header('Access-Control-Allow-Origin', origin || '*');
+    }
+    
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.header('Access-Control-Allow-Credentials', 'true');
+    
+    if (req.method === 'OPTIONS') {
+        res.sendStatus(200);
+    } else {
+        next();
+    }
 });
 
 // Apply rate limiting to API routes (exclude export which has its own limiter)
@@ -475,6 +520,221 @@ function releaseDb(db) {
     }
 }
 
+// Authentication and User Management Functions
+function initializeUserDatabase() {
+    const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE, (err) => {
+        if (err) {
+            console.error('Error opening database for user initialization:', err);
+            return;
+        }
+    });
+    
+    console.log('🔐 Initializing user authentication system...');
+    
+    const userTables = [
+        `CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT UNIQUE NOT NULL,
+            email TEXT UNIQUE,
+            password_hash TEXT NOT NULL,
+            role TEXT DEFAULT 'user' CHECK(role IN ('admin', 'user')),
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_login DATETIME,
+            is_active BOOLEAN DEFAULT 1,
+            failed_login_attempts INTEGER DEFAULT 0,
+            locked_until DATETIME
+        )`,
+        
+        `CREATE TABLE IF NOT EXISTS user_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            token_hash TEXT NOT NULL,
+            expires_at DATETIME NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            user_agent TEXT,
+            ip_address TEXT,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )`,
+        
+        `CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            action TEXT NOT NULL,
+            resource TEXT,
+            ip_address TEXT,
+            user_agent TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            details TEXT,
+            FOREIGN KEY (user_id) REFERENCES users (id)
+        )`,
+        
+        // Indexes for performance
+        'CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)',
+        'CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)',
+        'CREATE INDEX IF NOT EXISTS idx_users_role ON users(role)',
+        'CREATE INDEX IF NOT EXISTS idx_sessions_token ON user_sessions(token_hash)',
+        'CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_log(user_id)',
+        'CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)'
+    ];
+    
+    let tablesCreated = 0;
+    let tableErrors = 0;
+    
+    const createNextTable = (i) => {
+        if (i >= userTables.length) {
+            db.close();
+            console.log(`✅ User database complete: ${tablesCreated} created, ${tableErrors} errors`);
+            
+            // Create default admin user if none exists
+            createDefaultAdminUser();
+            return;
+        }
+        
+        db.run(userTables[i], (err) => {
+            if (err) {
+                console.warn(`⚠️ User table creation failed: ${err.message}`);
+                tableErrors++;
+            } else {
+                tablesCreated++;
+            }
+            createNextTable(i + 1);
+        });
+    };
+    
+    createNextTable(0);
+}
+
+// Create default admin user if none exists
+async function createDefaultAdminUser() {
+    const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE);
+    
+    db.get('SELECT COUNT(*) as count FROM users WHERE role = ?', ['admin'], async (err, row) => {
+        if (err || row.count > 0) {
+            db.close();
+            return;
+        }
+        
+        // Create default admin user
+        const defaultPassword = process.env.ADMIN_DEFAULT_PASSWORD || 'ordr-fm-admin-change-me';
+        const passwordHash = await bcrypt.hash(defaultPassword, BCRYPT_ROUNDS);
+        
+        db.run(
+            'INSERT INTO users (username, password_hash, role, is_active) VALUES (?, ?, ?, ?)',
+            ['admin', passwordHash, 'admin', 1],
+            function(err) {
+                db.close();
+                if (err) {
+                    console.error('Failed to create default admin user:', err.message);
+                } else {
+                    console.log('🔐 Created default admin user (username: admin)');
+                    if (defaultPassword === 'ordr-fm-admin-change-me') {
+                        console.warn('⚠️  WARNING: Using default admin password! Change it immediately.');
+                    }
+                    
+                    // Log admin user creation
+                    logAuditEvent(this.lastID, 'user_created', 'users', '127.0.0.1', 'system', {
+                        username: 'admin',
+                        role: 'admin',
+                        created_by: 'system'
+                    });
+                }
+            }
+        );
+    });
+}
+
+// Authentication middleware
+function authenticateToken(req, res, next) {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+    
+    if (!token) {
+        return res.status(401).json({ 
+            error: 'Access denied. No token provided.',
+            code: 'NO_TOKEN'
+        });
+    }
+    
+    jwt.verify(token, JWT_SECRET, (err, decoded) => {
+        if (err) {
+            return res.status(403).json({ 
+                error: 'Invalid or expired token.',
+                code: 'INVALID_TOKEN'
+            });
+        }
+        
+        // Check if user is active and not locked
+        const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READONLY);
+        db.get(
+            'SELECT id, username, role, is_active, locked_until FROM users WHERE id = ?',
+            [decoded.userId],
+            (err, user) => {
+                db.close();
+                
+                if (err || !user) {
+                    return res.status(403).json({ 
+                        error: 'User not found.',
+                        code: 'USER_NOT_FOUND'
+                    });
+                }
+                
+                if (!user.is_active) {
+                    return res.status(403).json({ 
+                        error: 'Account is disabled.',
+                        code: 'ACCOUNT_DISABLED'
+                    });
+                }
+                
+                if (user.locked_until && new Date(user.locked_until) > new Date()) {
+                    return res.status(403).json({ 
+                        error: 'Account is temporarily locked.',
+                        code: 'ACCOUNT_LOCKED'
+                    });
+                }
+                
+                req.user = user;
+                next();
+            }
+        );
+    });
+}
+
+// Role-based access control middleware
+function requireRole(role) {
+    return (req, res, next) => {
+        if (!req.user) {
+            return res.status(401).json({ error: 'Authentication required.' });
+        }
+        
+        if (req.user.role !== role && req.user.role !== 'admin') {
+            return res.status(403).json({ 
+                error: `Access denied. ${role} role required.`,
+                code: 'INSUFFICIENT_PRIVILEGES'
+            });
+        }
+        
+        next();
+    };
+}
+
+// Audit logging function
+function logAuditEvent(userId, action, resource, ipAddress, userAgent, details = {}) {
+    const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE);
+    
+    db.run(
+        'INSERT INTO audit_log (user_id, action, resource, ip_address, user_agent, details) VALUES (?, ?, ?, ?, ?, ?)',
+        [userId, action, resource, ipAddress, userAgent, JSON.stringify(details)],
+        (err) => {
+            db.close();
+            if (err) {
+                console.error('Audit log error:', err.message);
+            }
+        }
+    );
+}
+
 // Performance optimization: Create database indexes for frequently queried columns
 function createPerformanceIndexes() {
     const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE, (err) => {
@@ -531,6 +791,228 @@ function createPerformanceIndexes() {
     
     createNextIndex(0);
 }
+
+// Authentication API Routes
+app.post('/api/auth/login', async (req, res) => {
+    const { username, password } = req.body;
+    const ip = req.ip || req.connection.remoteAddress;
+    const userAgent = req.headers['user-agent'];
+    
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Username and password required.' });
+    }
+    
+    const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE);
+    
+    db.get(
+        'SELECT * FROM users WHERE username = ? AND is_active = 1',
+        [username],
+        async (err, user) => {
+            if (err) {
+                db.close();
+                console.error('Database error during login:', err);
+                return res.status(500).json({ error: 'Internal server error.' });
+            }
+            
+            if (!user) {
+                db.close();
+                logAuditEvent(null, 'login_failed', 'auth', ip, userAgent, { username, reason: 'user_not_found' });
+                return res.status(401).json({ error: 'Invalid credentials.' });
+            }
+            
+            // Check if account is locked
+            if (user.locked_until && new Date(user.locked_until) > new Date()) {
+                db.close();
+                logAuditEvent(user.id, 'login_failed', 'auth', ip, userAgent, { username, reason: 'account_locked' });
+                return res.status(423).json({ error: 'Account is temporarily locked.' });
+            }
+            
+            // Check password
+            const passwordMatch = await bcrypt.compare(password, user.password_hash);
+            
+            if (!passwordMatch) {
+                // Increment failed login attempts
+                const newFailedAttempts = user.failed_login_attempts + 1;
+                let lockUntil = null;
+                
+                // Lock account after 5 failed attempts for 15 minutes
+                if (newFailedAttempts >= 5) {
+                    lockUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+                }
+                
+                db.run(
+                    'UPDATE users SET failed_login_attempts = ?, locked_until = ? WHERE id = ?',
+                    [newFailedAttempts, lockUntil, user.id],
+                    () => {
+                        db.close();
+                        logAuditEvent(user.id, 'login_failed', 'auth', ip, userAgent, { 
+                            username, 
+                            reason: 'wrong_password',
+                            failed_attempts: newFailedAttempts
+                        });
+                        
+                        if (lockUntil) {
+                            return res.status(423).json({ error: 'Too many failed attempts. Account locked for 15 minutes.' });
+                        } else {
+                            return res.status(401).json({ error: 'Invalid credentials.' });
+                        }
+                    }
+                );
+                return;
+            }
+            
+            // Successful login - reset failed attempts and update last login
+            db.run(
+                'UPDATE users SET failed_login_attempts = 0, locked_until = NULL, last_login = CURRENT_TIMESTAMP WHERE id = ?',
+                [user.id],
+                (err) => {
+                    if (err) {
+                        db.close();
+                        console.error('Error updating user login info:', err);
+                        return res.status(500).json({ error: 'Internal server error.' });
+                    }
+                    
+                    // Generate JWT token
+                    const token = jwt.sign(
+                        { 
+                            userId: user.id, 
+                            username: user.username, 
+                            role: user.role 
+                        },
+                        JWT_SECRET,
+                        { expiresIn: JWT_EXPIRES_IN }
+                    );
+                    
+                    // Store session
+                    const tokenHash = bcrypt.hashSync(token, 10);
+                    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000); // 24 hours
+                    
+                    db.run(
+                        'INSERT INTO user_sessions (user_id, token_hash, expires_at, user_agent, ip_address) VALUES (?, ?, ?, ?, ?)',
+                        [user.id, tokenHash, expiresAt, userAgent, ip],
+                        function(sessionErr) {
+                            db.close();
+                            
+                            if (sessionErr) {
+                                console.error('Error creating session:', sessionErr);
+                                // Continue anyway, just log the error
+                            }
+                            
+                            logAuditEvent(user.id, 'login_success', 'auth', ip, userAgent, { username });
+                            
+                            res.json({
+                                token,
+                                user: {
+                                    id: user.id,
+                                    username: user.username,
+                                    email: user.email,
+                                    role: user.role,
+                                    last_login: user.last_login
+                                },
+                                expires_in: JWT_EXPIRES_IN
+                            });
+                        }
+                    );
+                }
+            );
+        }
+    );
+});
+
+app.post('/api/auth/logout', authenticateToken, (req, res) => {
+    const token = req.headers.authorization?.split(' ')[1];
+    
+    if (token) {
+        const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE);
+        const tokenHash = bcrypt.hashSync(token, 10);
+        
+        db.run('DELETE FROM user_sessions WHERE token_hash = ?', [tokenHash], () => {
+            db.close();
+        });
+    }
+    
+    logAuditEvent(req.user.id, 'logout', 'auth', req.ip, req.headers['user-agent'], {
+        username: req.user.username
+    });
+    
+    res.json({ message: 'Logged out successfully' });
+});
+
+app.get('/api/auth/profile', authenticateToken, (req, res) => {
+    res.json({
+        user: {
+            id: req.user.id,
+            username: req.user.username,
+            role: req.user.role
+        }
+    });
+});
+
+// User Management API (Admin only)
+app.get('/api/users', authenticateToken, requireRole('admin'), (req, res) => {
+    const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READONLY);
+    
+    db.all(
+        'SELECT id, username, email, role, created_at, last_login, is_active FROM users ORDER BY created_at DESC',
+        (err, users) => {
+            db.close();
+            
+            if (err) {
+                console.error('Error fetching users:', err);
+                return res.status(500).json({ error: 'Database error' });
+            }
+            
+            res.json({ users });
+        }
+    );
+});
+
+app.post('/api/users', authenticateToken, requireRole('admin'), async (req, res) => {
+    const { username, email, password, role = 'user' } = req.body;
+    
+    if (!username || !password) {
+        return res.status(400).json({ error: 'Username and password are required' });
+    }
+    
+    if (!['admin', 'user'].includes(role)) {
+        return res.status(400).json({ error: 'Invalid role. Must be admin or user' });
+    }
+    
+    try {
+        const passwordHash = await bcrypt.hash(password, BCRYPT_ROUNDS);
+        const db = new sqlite3.Database(DB_PATH, sqlite3.OPEN_READWRITE);
+        
+        db.run(
+            'INSERT INTO users (username, email, password_hash, role) VALUES (?, ?, ?, ?)',
+            [username, email, passwordHash, role],
+            function(err) {
+                db.close();
+                
+                if (err) {
+                    if (err.message.includes('UNIQUE constraint failed')) {
+                        return res.status(409).json({ error: 'Username or email already exists' });
+                    }
+                    console.error('Error creating user:', err);
+                    return res.status(500).json({ error: 'Database error' });
+                }
+                
+                logAuditEvent(req.user.id, 'user_created', 'users', req.ip, req.headers['user-agent'], {
+                    created_username: username,
+                    created_role: role,
+                    created_by: req.user.username
+                });
+                
+                res.status(201).json({ 
+                    message: 'User created successfully',
+                    userId: this.lastID 
+                });
+            }
+        );
+    } catch (err) {
+        console.error('Error hashing password:', err);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+});
 
 // API Routes
 
@@ -2645,6 +3127,9 @@ server.listen(PORT, '0.0.0.0', () => {
     // Initialize performance indexes on startup for large music collections
     createPerformanceIndexes();
     
+    // Initialize user authentication system
+    initializeUserDatabase();
+    
     // Get local IP address for network access
     const os = require('os');
     const interfaces = os.networkInterfaces();
@@ -2680,8 +3165,8 @@ server.listen(PORT, '0.0.0.0', () => {
 
 // Action API Endpoints
 
-// Start music processing with real-time progress tracking
-app.post('/api/actions/process', (req, res) => {
+// Start music processing with real-time progress tracking (requires authentication)
+app.post('/api/actions/process', authenticateToken, (req, res) => {
     const { sourceDirectory, dryRun = true, enableDiscogs = true, electronicMode = false } = req.body;
     
     if (!sourceDirectory) {
@@ -2969,7 +3454,7 @@ app.get('/api/system/status', (req, res) => {
 });
 
 // Start database backup
-app.post('/api/actions/backup-database', (req, res) => {
+app.post('/api/actions/backup-database', authenticateToken, (req, res) => {
     const { exec } = require('child_process');
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = `./backups/metadata-backup-${timestamp}.db`;
@@ -3064,7 +3549,7 @@ app.get('/api/actions/backup-status', (req, res) => {
 });
 
 // Cancel backup
-app.post('/api/actions/backup-cancel', async (req, res) => {
+app.post('/api/actions/backup-cancel', authenticateToken, async (req, res) => {
     const { backupId, killAll = false } = req.body;
     
     let cancelledCount = 0;
@@ -3135,7 +3620,7 @@ app.post('/api/actions/backup-cancel', async (req, res) => {
 });
 
 // Start cloud backup
-app.post('/api/actions/backup-cloud', (req, res) => {
+app.post('/api/actions/backup-cloud', authenticateToken, requireRole('admin'), (req, res) => {
     const { target = 'gdrive', force = false } = req.body;
     const { spawn } = require('child_process');
     
@@ -3274,7 +3759,7 @@ app.get('/api/system/activity', (req, res) => {
 });
 
 // Enhance existing metadata with Discogs
-app.post('/api/actions/enhance-metadata', (req, res) => {
+app.post('/api/actions/enhance-metadata', authenticateToken, (req, res) => {
     const { force = false } = req.body;
     const { spawn } = require('child_process');
     
