@@ -418,14 +418,14 @@ app.get('/api/artists', (req, res) => {
     
     const db = getDb();
     
-    // Get all artists with their release counts
+    // Get all artists with their release counts - Fixed schema compatibility
     const artistQuery = `
-        SELECT artist as name, 
+        SELECT COALESCE(album_artist, artist) as name, 
                COUNT(*) as release_count,
                COUNT(DISTINCT label) as label_count
         FROM albums 
-        WHERE artist IS NOT NULL
-        GROUP BY artist
+        WHERE COALESCE(album_artist, artist) IS NOT NULL
+        GROUP BY COALESCE(album_artist, artist)
         ORDER BY release_count DESC
         LIMIT 100
     `;
@@ -1308,15 +1308,15 @@ app.get('/api/health', (req, res) => {
     
     const healthMetrics = {};
     
-    // Quality distribution
+    // Quality distribution - Fixed schema compatibility
     db.get(`
         SELECT 
             COUNT(*) as total_albums,
-            SUM(CASE WHEN quality = 'Lossless' THEN 1 ELSE 0 END) as lossless,
-            SUM(CASE WHEN quality = 'Mixed' THEN 1 ELSE 0 END) as mixed,
-            SUM(CASE WHEN quality = 'Lossy' THEN 1 ELSE 0 END) as lossy,
+            SUM(CASE WHEN COALESCE(quality_type, quality) = 'Lossless' THEN 1 ELSE 0 END) as lossless,
+            SUM(CASE WHEN COALESCE(quality_type, quality) = 'Mixed' THEN 1 ELSE 0 END) as mixed,
+            SUM(CASE WHEN COALESCE(quality_type, quality) = 'Lossy' THEN 1 ELSE 0 END) as lossy,
             0 as avg_tracks_per_album,
-            COUNT(DISTINCT artist) as unique_artists,
+            COUNT(DISTINCT COALESCE(album_artist, artist)) as unique_artists,
             COUNT(DISTINCT label) as unique_labels
         FROM albums
     `, (err, stats) => {
@@ -1457,10 +1457,10 @@ app.get('/api/insights', (req, res) => {
     const db = getDb();
     const insights = {};
     
-    // Artist productivity analysis
+    // Artist productivity analysis - Fixed schema compatibility
     db.all(`
         SELECT 
-            artist,
+            COALESCE(album_artist, artist) as artist,
             COUNT(*) as release_count,
             MIN(year) as first_release,
             MAX(year) as latest_release,
@@ -1469,8 +1469,8 @@ app.get('/api/insights', (req, res) => {
             GROUP_CONCAT(DISTINCT label) as label_list,
             0 as avg_tracks_per_album
         FROM albums
-        WHERE artist IS NOT NULL
-        GROUP BY artist
+        WHERE COALESCE(album_artist, artist) IS NOT NULL
+        GROUP BY COALESCE(album_artist, artist)
         HAVING release_count >= 3
         ORDER BY release_count DESC, latest_release DESC
         LIMIT 50
@@ -1516,7 +1516,7 @@ app.get('/api/insights', (req, res) => {
                     COUNT(DISTINCT artist) as new_artists,
                     COUNT(DISTINCT label) as labels_active,
                     0 as avg_tracks,
-                    SUM(CASE WHEN quality = 'Lossless' THEN 1 ELSE 0 END) as lossless_count
+                    SUM(CASE WHEN COALESCE(quality_type, quality) = 'Lossless' THEN 1 ELSE 0 END) as lossless_count
                 FROM albums
                 WHERE year IS NOT NULL AND year >= 1990
                 GROUP BY year
@@ -1853,7 +1853,7 @@ app.get('/api/search/albums', generalLimiter, (req, res) => {
     }
     
     if (quality) {
-        query += ` AND a.quality = ?`;
+        query += ` AND COALESCE(a.quality_type, a.quality) = ?`;
         params.push(quality);
     }
     
@@ -1914,7 +1914,7 @@ app.get('/api/search/albums', generalLimiter, (req, res) => {
         }
         
         if (quality) {
-            countQuery += ` AND a.quality = ?`;
+            countQuery += ` AND COALESCE(a.quality_type, a.quality) = ?`;
             countParams.push(quality);
         }
         
