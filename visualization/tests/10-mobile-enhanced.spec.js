@@ -449,9 +449,9 @@ test.describe('Enhanced Mobile Responsiveness and Touch Gestures', () => {
             
             // Get initial memory if available
             const initialMetrics = await page.evaluate(() => {
-                return (performance as any).memory ? {
-                    usedJSHeapSize: (performance as any).memory.usedJSHeapSize,
-                    totalJSHeapSize: (performance as any).memory.totalJSHeapSize
+                return performance.memory ? {
+                    usedJSHeapSize: performance.memory.usedJSHeapSize,
+                    totalJSHeapSize: performance.memory.totalJSHeapSize
                 } : null;
             });
             
@@ -466,9 +466,9 @@ test.describe('Enhanced Mobile Responsiveness and Touch Gestures', () => {
             
             // Check memory after operations
             const finalMetrics = await page.evaluate(() => {
-                return (performance as any).memory ? {
-                    usedJSHeapSize: (performance as any).memory.usedJSHeapSize,
-                    totalJSHeapSize: (performance as any).memory.totalJSHeapSize
+                return performance.memory ? {
+                    usedJSHeapSize: performance.memory.usedJSHeapSize,
+                    totalJSHeapSize: performance.memory.totalJSHeapSize
                 } : null;
             });
             

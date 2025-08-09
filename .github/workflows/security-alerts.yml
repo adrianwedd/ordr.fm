@@ -6,7 +6,7 @@ on:
   
   # Run on schedule to check for new alerts
   schedule:
-    - cron: '0 */6 * * *'  # Every 6 hours
+    - cron: '0 2 * * *'  # Daily at 2 AM UTC only
   
   # Run when security alerts are found
   workflow_run:

@@ -6,13 +6,13 @@ module.exports = {
     // Production environment
     env: {
       NODE_ENV: 'production',
-      PORT: 3001
+      PORT: 3847
     },
     
     // Development environment  
     env_development: {
       NODE_ENV: 'development',
-      PORT: 3001,
+      PORT: 3847,
       watch: true
     },
     
@@ -38,7 +38,7 @@ module.exports = {
     // Health monitoring
     health_check_http: {
       path: '/api/health',
-      port: 3001
+      port: 3847
     },
     
     // Environment variables

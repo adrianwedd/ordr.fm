@@ -94,6 +94,10 @@ backup_directory() {
     log "   ⬆️  Syncing to Google Drive..."
     if rclone sync "$source_dir" "$gdrive_path" \
         --progress \
+        --stats 30s \
+        --stats-one-line \
+        --log-level INFO \
+        --log-file "$LOG_FILE" \
         --exclude "*.log" \
         --exclude "**/.*" \
         --exclude "**/*.tmp" \
@@ -101,7 +105,7 @@ backup_directory() {
         --checkers 8 \
         --contimeout 60s \
         --timeout 300s \
-        --retries 3; then
+        --retries 3 2>&1 | tee -a "$LOG_FILE"; then
         log "   ✅ Successfully backed up $dir_name"
         
         # Create backup manifest

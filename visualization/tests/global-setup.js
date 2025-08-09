@@ -12,7 +12,7 @@ async function globalSetup(config) {
   try {
     // Ensure the server is responding
     console.log('📡 Checking server connectivity...');
-    await page.goto('http://192.168.1.100:3001', { waitUntil: 'networkidle' });
+    await page.goto('http://127.0.0.1:3847', { waitUntil: 'networkidle' });
     
     // Wait for the app to initialize
     await page.waitForSelector('#status', { timeout: 30000 });

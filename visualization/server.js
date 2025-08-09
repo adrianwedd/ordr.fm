@@ -10,7 +10,7 @@ const bcrypt = require('bcrypt');
 const helmet = require('helmet');
 
 const app = express();
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3847;
 const NODE_ENV = process.env.NODE_ENV || 'development';
 
 // Security and Authentication Configuration
@@ -1053,17 +1053,22 @@ app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net"],
+            scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers
             imgSrc: ["'self'", "data:", "https:"],
             connectSrc: ["'self'", "ws:", "wss:"],
-            fontSrc: ["'self'", "https://cdnjs.cloudflare.com"],
+            fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net"],
             objectSrc: ["'none'"],
             mediaSrc: ["'self'"],
             frameSrc: ["'none'"],
+            upgradeInsecureRequests: null, // Disable HTTPS upgrade for local development
         },
     },
-    crossOriginEmbedderPolicy: false // Allow for local development
+    crossOriginEmbedderPolicy: false, // Allow for local development
+    crossOriginOpenerPolicy: false,   // Fix COOP header warning
+    originAgentCluster: false,        // Disable Origin-Agent-Cluster header from helmet
+    hsts: false                       // Disable HSTS for local HTTP development
 }));
 
 // Middleware
@@ -1083,6 +1088,16 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
     res.header('Access-Control-Allow-Credentials', 'true');
+    
+    // Fix Origin-Agent-Cluster header consistency
+    res.header('Origin-Agent-Cluster', '?0');
+    
+    // Add cache-busting headers for development
+    if (NODE_ENV !== 'production') {
+        res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+        res.header('Pragma', 'no-cache');
+        res.header('Expires', '0');
+    }
     
     if (req.method === 'OPTIONS') {
         res.sendStatus(200);

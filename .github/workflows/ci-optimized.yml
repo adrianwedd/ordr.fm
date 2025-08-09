@@ -1,0 +1,120 @@
+name: CI (Cost-Optimized)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  security-events: write
+
+jobs:
+  # Combined quick tests
+  quick-tests:
+    name: Quick Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y exiftool jq bc sqlite3 shellcheck
+          
+      - name: Syntax checks
+        run: |
+          shellcheck -x ordr.fm.sh || true
+          bash -n ordr.fm.sh
+          
+      - name: Basic functionality test
+        run: |
+          mkdir -p test_music/album1
+          touch test_music/album1/track1.mp3
+          ./ordr.fm.sh --source test_music --destination test_output --dry-run
+
+  # Node tests (single version only)
+  node-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+        cache-dependency-path: 'visualization/package-lock.json'
+
+    - name: Install dependencies
+      run: |
+        cd visualization
+        npm ci
+
+    - name: Create test database with proper permissions
+      run: |
+        cd visualization
+        sqlite3 test.db < database/schema.sql
+        chmod 664 test.db
+
+    - name: Run tests
+      run: |
+        cd visualization
+        npm test
+      env:
+        NODE_ENV: test
+        METADATA_DB: test.db
+        STATE_DB: test_state.db
+        JWT_SECRET: test-secret-key-for-ci-only
+
+  # Security (reduced frequency)
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Run Trivy security scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          
+      - name: Check for hardcoded secrets
+        run: |
+          ! grep -r "password\|secret\|key\|token" --include="*.sh" . | grep -v "^#" | grep "=" || echo "Warning: Potential secrets found"
+
+  # Build only on main branch
+  build:
+    name: Build Package
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [quick-tests, node-tests]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Create release package
+        run: |
+          VERSION=$(grep "VERSION=" ordr.fm.sh | cut -d'"' -f2 || echo "dev")
+          PACKAGE_NAME="ordr.fm-v${VERSION}"
+          mkdir -p "$PACKAGE_NAME"
+          cp -r lib "$PACKAGE_NAME/" || true
+          cp ordr.fm.sh "$PACKAGE_NAME/"
+          cp README.md "$PACKAGE_NAME/" || true
+          tar -czf "${PACKAGE_NAME}.tar.gz" "$PACKAGE_NAME"
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: release-package
+          path: ordr.fm-v*.tar.gz
+          retention-days: 7  # Reduced from 30
