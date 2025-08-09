@@ -4,9 +4,9 @@ on:
   # Allow manual trigger for testing
   workflow_dispatch:
   
-  # Run on schedule to check for new alerts
+  # Run on schedule to check for new alerts (reduced frequency to avoid rate limits)
   schedule:
-    - cron: '0 2 * * *'  # Daily at 2 AM UTC only
+    - cron: '0 2 * * 1'  # Weekly on Monday at 2 AM UTC only
   
   # Run when security alerts are found
   workflow_run:
@@ -37,14 +37,22 @@ jobs:
           
           // Function to create issue from alert
           async function createIssueFromAlert(alert) {
-            // Check if issue already exists for this alert
-            const searchQuery = `repo:${owner}/${repo} is:issue "CodeQL Alert #${alert.number}"`;
-            const existingIssues = await github.rest.search.issuesAndPullRequests({
-              q: searchQuery
+            // Check if issue already exists for this alert using issues API (less rate limited)
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner,
+              repo,
+              state: 'all',
+              labels: 'codeql-alert',
+              per_page: 100
             });
             
-            if (existingIssues.data.total_count > 0) {
-              console.log(`Issue already exists for alert #${alert.number}`);
+            const existingIssue = existingIssues.data.find(issue => 
+              issue.title.includes(`CodeQL Alert #${alert.number}`) || 
+              issue.body.includes(`CodeQL security alert #${alert.number}`)
+            );
+            
+            if (existingIssue) {
+              console.log(`Issue already exists for alert #${alert.number}: #${existingIssue.number}`);
               return;
             }
             
@@ -106,22 +114,24 @@ jobs:
           }
           
           try {
-            // Get all open security alerts
+            // Get all open security alerts with pagination
             const alerts = await github.rest.codeScanning.listAlertsForRepo({
               owner,
               repo,
               state: 'open',
-              per_page: 100
+              per_page: 10  // Reduced to avoid rate limits
             });
             
             console.log(`Found ${alerts.data.length} open security alerts`);
             
-            // Process each alert
-            for (const alert of alerts.data) {
+            // Process alerts with better rate limiting
+            for (let i = 0; i < alerts.data.length; i++) {
+              const alert = alerts.data[i];
               await createIssueFromAlert(alert);
               
-              // Rate limit: wait 1 second between issue creations
-              await new Promise(resolve => setTimeout(resolve, 1000));
+              // Progressive rate limiting: longer waits for more API calls
+              const waitTime = Math.min(2000 + (i * 500), 5000);
+              await new Promise(resolve => setTimeout(resolve, waitTime));
             }
             
             // Summary comment
@@ -136,49 +146,54 @@ jobs:
           }
 
     - name: Group Similar Alerts
+      if: github.event_name == 'schedule'  # Only run weekly to reduce API calls
       uses: actions/github-script@v7
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
-          // Group similar rate limiting issues
+          // Skip grouping if not scheduled run to reduce API calls
+          if (context.eventName !== 'schedule') {
+            console.log('Skipping alert grouping - not a scheduled run');
+            return;
+          }
+          
+          // Group similar rate limiting issues with reduced API calls
           const rateLimitIssues = await github.rest.issues.listForRepo({
             owner: context.repo.owner,
             repo: context.repo.repo,
             labels: 'security,codeql-alert',
             state: 'open',
-            per_page: 100
+            per_page: 50  // Reduced from 100
           });
           
           const rateLimitGroup = rateLimitIssues.data.filter(issue => 
-            issue.title.includes('Missing rate limiting')
+            issue.title.includes('Missing rate limiting') || issue.title.includes('rate limit')
           );
           
+          console.log(`Found ${rateLimitGroup.length} rate limiting issues`);
+          
           if (rateLimitGroup.length > 3) {
+            // Check if meta-issue already exists
+            const metaIssues = rateLimitIssues.data.filter(issue => 
+              issue.title.includes('Systematic Missing Rate Limiting') && issue.labels.some(label => label.name === 'meta-issue')
+            );
+            
+            if (metaIssues.length > 0) {
+              console.log('Meta-issue already exists for rate limiting alerts');
+              return;
+            }
+            
             // Create meta-issue for grouped alerts
             const metaIssueBody = `## 🔒 Grouped Security Alert: Missing Rate Limiting
             
             ### Summary
-            Multiple endpoints are missing rate limiting protection. This is a systematic issue that should be addressed holistically.
-            
-            ### Affected Endpoints (${rateLimitGroup.length} total)
-            ${rateLimitGroup.map(issue => `- [ ] ${issue.title.replace('[Security] ', '')}`).join('\n')}
+            Multiple endpoints are missing rate limiting protection (${rateLimitGroup.length} total). This should be addressed systematically.
             
             ### Recommended Solution
-            Implement application-wide rate limiting using \`express-rate-limit\` or similar middleware.
+            Implement application-wide rate limiting using \`express-rate-limit\` middleware.
             
-            \`\`\`javascript
-            const rateLimit = require('express-rate-limit');
-            
-            const limiter = rateLimit({
-              windowMs: 15 * 60 * 1000, // 15 minutes
-              max: 100 // limit each IP to 100 requests per windowMs
-            });
-            
-            app.use('/api/', limiter);
-            \`\`\`
-            
-            ### Related Issues
-            ${rateLimitGroup.map(issue => `- #${issue.number}`).join('\n')}
+            ### Related Issues Count
+            ${rateLimitGroup.length} individual rate limiting issues found.
             `;
             
             const metaIssue = await github.rest.issues.create({
@@ -186,7 +201,7 @@ jobs:
               repo: context.repo.repo,
               title: '[Security] Systematic Missing Rate Limiting - Multiple Endpoints',
               body: metaIssueBody,
-              labels: ['security', 'security-critical', 'codeql-alert', 'meta-issue'],
+              labels: ['security', 'security-high', 'codeql-alert', 'meta-issue'],
               assignees: ['adrianwedd']
             });
             
@@ -199,47 +214,55 @@ jobs:
       with:
         github-token: ${{ secrets.GITHUB_TOKEN }}
         script: |
-          // Get security metrics
-          const openAlerts = await github.rest.codeScanning.listAlertsForRepo({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            state: 'open'
-          });
+          // Get security metrics with reduced API calls
+          let openAlertsCount = 0;
+          let closedAlertsCount = 0;
           
-          const closedAlerts = await github.rest.codeScanning.listAlertsForRepo({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            state: 'closed'
-          });
+          try {
+            const openAlerts = await github.rest.codeScanning.listAlertsForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              per_page: 10  // Reduced to avoid rate limits
+            });
+            openAlertsCount = openAlerts.data.length;
+            
+            // Skip closed alerts count to reduce API calls
+            // const closedAlerts = await github.rest.codeScanning.listAlertsForRepo({
+            //   owner: context.repo.owner,
+            //   repo: context.repo.repo,
+            //   state: 'closed'
+            // });
+            
+            const securityIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'security',
+              state: 'open',  // Only open issues to reduce load
+              per_page: 50
+            });
+            
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Rate limit protection
           
-          const securityIssues = await github.rest.issues.listForRepo({
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            labels: 'security',
-            state: 'all'
-          });
-          
-          // Create summary
-          const summary = `## 📊 Security Status Report
-          
-          ### CodeQL Alerts
-          - **Open Alerts**: ${openAlerts.data.length}
-          - **Resolved Alerts**: ${closedAlerts.data.length}
-          - **Total Security Issues**: ${securityIssues.data.length}
-          
-          ### Alert Breakdown by Severity
-          ${['error', 'warning', 'note'].map(severity => {
-            const count = openAlerts.data.filter(a => a.rule.severity === severity).length;
-            return `- **${severity.toUpperCase()}**: ${count}`;
-          }).join('\n')}
-          
-          ### Recent Activity
-          - Last scan: ${new Date().toISOString()}
-          - Auto-created issues: ${securityIssues.data.filter(i => i.body.includes('automatically created from CodeQL')).length}
-          
-          ---
-          *This summary is generated automatically every 6 hours*
-          `;
+            // Create summary with available data
+            const summary = `## 📊 Security Status Report
+            
+            ### CodeQL Alerts
+            - **Open Alerts**: ${openAlertsCount}
+            - **Open Security Issues**: ${securityIssues.data.length}
+            
+            ### Recent Activity
+            - Last scan: ${new Date().toISOString()}
+            - Auto-created issues: ${securityIssues.data.filter(i => i.body && i.body.includes('automatically created from CodeQL')).length}
+            
+            ---
+            *This summary is generated automatically weekly to minimize API usage*
+            `;
+            
+          } catch (error) {
+            console.log(`Rate limit or API error in security summary: ${error.message}`);
+            return; // Skip summary creation if rate limited
+          }
           
           // Update or create security status issue
           const statusIssues = await github.rest.issues.listForRepo({

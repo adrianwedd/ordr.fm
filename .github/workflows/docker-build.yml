@@ -104,9 +104,12 @@ jobs:
 
     - name: Test Docker image
       run: |
+        # Use the first tag from the metadata output
+        IMAGE_TAG=$(echo '${{ steps.meta.outputs.tags }}' | head -n1)
+        echo "Testing Docker image: $IMAGE_TAG"
         docker run --rm \
           -v $PWD/visualization/database/schema.sql:/tmp/schema.sql \
-          ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }} \
+          $IMAGE_TAG \
           bash -c "sqlite3 /tmp/test.db < /tmp/schema.sql && echo 'Database test passed'"
 
   security-scan:
