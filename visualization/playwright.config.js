@@ -34,7 +34,7 @@ module.exports = defineConfig({
     screenshot: 'only-on-failure',
     
     /* Record video on failure */
-    video: 'retain-on-failure',
+    video: 'retain-on-failure'
   },
 
   /* Configure projects - ULTRA LEAN CI: Just Chromium for smoke tests, comprehensive local testing */
@@ -46,7 +46,7 @@ module.exports = defineConfig({
         ...devices['Desktop Chrome'],
         permissions: ['notifications'],
         serviceWorkers: 'allow'
-      },
+      }
     }
   ] : [
     // Local development: Full browser matrix for comprehensive testing
@@ -56,7 +56,7 @@ module.exports = defineConfig({
         ...devices['Desktop Chrome'],
         permissions: ['notifications', 'camera', 'microphone'],
         serviceWorkers: 'allow'
-      },
+      }
     },
     {
       name: 'firefox',
@@ -64,7 +64,7 @@ module.exports = defineConfig({
         ...devices['Desktop Firefox'],
         permissions: ['notifications'],
         serviceWorkers: 'allow'
-      },
+      }
     },
     {
       name: 'webkit',
@@ -72,7 +72,7 @@ module.exports = defineConfig({
         ...devices['Desktop Safari'],
         permissions: ['notifications'],
         serviceWorkers: 'allow'
-      },
+      }
     },
     {
       name: 'Mobile Chrome',
@@ -80,7 +80,7 @@ module.exports = defineConfig({
         ...devices['Pixel 5'],
         permissions: ['notifications'],
         serviceWorkers: 'allow'
-      },
+      }
     },
     {
       name: 'Mobile Safari',
@@ -88,7 +88,7 @@ module.exports = defineConfig({
         ...devices['iPhone 12'],
         permissions: ['notifications'],
         serviceWorkers: 'allow'
-      },
+      }
     },
     {
       name: 'PWA Desktop',
@@ -125,6 +125,6 @@ module.exports = defineConfig({
     command: 'ORDRFM_DB=test-metadata.db JWT_SECRET=test-playwright-secret npm start',
     url: 'http://127.0.0.1:3847',
     reuseExistingServer: !process.env.CI,
-    timeout: 120 * 1000, // 2 minutes
-  },
+    timeout: 120 * 1000 // 2 minutes
+  }
 });

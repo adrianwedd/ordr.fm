@@ -364,7 +364,7 @@ test.describe('Error Handling Scenarios in UI', () => {
             // Remove a key element and see if app handles it
             await page.evaluate(() => {
                 const status = document.getElementById('status');
-                if (status) status.remove();
+                if (status) {status.remove();}
             });
             
             // App should continue to function

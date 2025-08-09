@@ -48,7 +48,7 @@ function setCache(key, data) {
 
 function getCache(key) {
     const cached = cache.get(key);
-    if (!cached) return null;
+    if (!cached) {return null;}
     
     if (Date.now() - cached.timestamp > CACHE_TTL) {
         cache.delete(key);
@@ -218,7 +218,7 @@ function createJob(type, totalItems = 0, details = {}) {
 
 function updateJobProgress(jobId, processedItems, status = 'running', details = {}) {
     const job = activeJobs.get(jobId);
-    if (!job || job.cancelled) return false;
+    if (!job || job.cancelled) {return false;}
     
     job.processedItems = processedItems;
     job.progress = job.totalItems > 0 ? Math.round((processedItems / job.totalItems) * 100) : 0;
@@ -254,7 +254,7 @@ function addJobWarning(jobId, warning) {
 
 function completeJob(jobId, status = 'completed', summary = {}) {
     const job = activeJobs.get(jobId);
-    if (!job) return;
+    if (!job) {return;}
     
     job.status = status;
     job.endTime = new Date().toISOString();
@@ -268,7 +268,7 @@ function completeJob(jobId, status = 'completed', summary = {}) {
     
     // Move to history and clean up
     jobHistory.push({ ...job });
-    if (jobHistory.length > 50) jobHistory.shift(); // Keep last 50 jobs
+    if (jobHistory.length > 50) {jobHistory.shift();} // Keep last 50 jobs
     
     activeJobs.delete(jobId);
     broadcastJobUpdate(job, true);
@@ -306,8 +306,8 @@ function trackSearchQuery(query, userId, resultCount, searchType, responseTime, 
 function levenshteinDistance(str1, str2) {
     const matrix = Array(str2.length + 1).fill().map(() => Array(str1.length + 1).fill(0));
     
-    for (let i = 0; i <= str1.length; i++) matrix[0][i] = i;
-    for (let j = 0; j <= str2.length; j++) matrix[j][0] = j;
+    for (let i = 0; i <= str1.length; i++) {matrix[0][i] = i;}
+    for (let j = 0; j <= str2.length; j++) {matrix[j][0] = j;}
     
     for (let j = 1; j <= str2.length; j++) {
         for (let i = 1; i <= str1.length; i++) {
@@ -325,14 +325,14 @@ function levenshteinDistance(str1, str2) {
 
 function calculateSimilarity(str1, str2) {
     const maxLength = Math.max(str1.length, str2.length);
-    if (maxLength === 0) return 1.0;
+    if (maxLength === 0) {return 1.0;}
     
     const distance = levenshteinDistance(str1.toLowerCase(), str2.toLowerCase());
     return (maxLength - distance) / maxLength;
 }
 
 function fuzzyMatch(query, text, threshold = 0.6) {
-    if (!query || !text) return { matches: false, similarity: 0 };
+    if (!query || !text) {return { matches: false, similarity: 0 };}
     
     const queryLower = query.toLowerCase().trim();
     const textLower = text.toLowerCase().trim();
@@ -396,7 +396,7 @@ function fuzzyMatch(query, text, threshold = 0.6) {
 function rankSearchResults(results, query) {
     return results.map(item => {
         let totalScore = 0;
-        let matchDetails = {};
+        const matchDetails = {};
         
         // Artist matching (weight: 0.4)
         if (item.album_artist) {
@@ -473,8 +473,8 @@ app.get('/api/search/fuzzy', async (req, res) => {
                 WHERE album_artist IS NOT NULL OR album_title IS NOT NULL
                 LIMIT 2000
             `, (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows || []);
+                if (err) {reject(err);}
+                else {resolve(rows || []);}
             });
         });
         
@@ -485,7 +485,7 @@ app.get('/api/search/fuzzy', async (req, res) => {
         
         // Filter results based on relevance
         let filteredResults = rankedResults.filter(item => {
-            if (include_low_relevance === 'true') return item.searchScore > 0.1;
+            if (include_low_relevance === 'true') {return item.searchScore > 0.1;}
             return item.searchScore >= searchThreshold;
         });
         
@@ -557,7 +557,7 @@ app.get('/api/search/suggestions', (req, res) => {
         ORDER BY count DESC 
         LIMIT ?
     `, [queryTerm, Math.ceil(limit / 3)], (err, artists) => {
-        if (!err && artists) suggestions.push(...artists);
+        if (!err && artists) {suggestions.push(...artists);}
         
         db.all(`
             SELECT DISTINCT album_title as suggestion, 'album' as type, COUNT(*) as count
@@ -567,7 +567,7 @@ app.get('/api/search/suggestions', (req, res) => {
             ORDER BY count DESC 
             LIMIT ?
         `, [queryTerm, Math.ceil(limit / 3)], (err, albums) => {
-            if (!err && albums) suggestions.push(...albums);
+            if (!err && albums) {suggestions.push(...albums);}
             
             db.all(`
                 SELECT DISTINCT label as suggestion, 'label' as type, COUNT(*) as count
@@ -579,7 +579,7 @@ app.get('/api/search/suggestions', (req, res) => {
             `, [queryTerm, Math.ceil(limit / 3)], (err, labels) => {
                 db.close();
                 
-                if (!err && labels) suggestions.push(...labels);
+                if (!err && labels) {suggestions.push(...labels);}
                 
                 // Sort by relevance and limit
                 const sortedSuggestions = suggestions
@@ -751,40 +751,40 @@ app.get('/api/search/advanced', async (req, res) => {
     
     // Specific field filters
     if (artist && artist.trim()) {
-        sqlQuery += ` AND album_artist LIKE ?`;
+        sqlQuery += ' AND album_artist LIKE ?';
         params.push(`%${artist.trim()}%`);
     }
     
     if (album && album.trim()) {
-        sqlQuery += ` AND album_title LIKE ?`;
+        sqlQuery += ' AND album_title LIKE ?';
         params.push(`%${album.trim()}%`);
     }
     
     if (label && label.trim()) {
-        sqlQuery += ` AND label LIKE ?`;
+        sqlQuery += ' AND label LIKE ?';
         params.push(`%${label.trim()}%`);
     }
     
     // Year range filter
     if (year_min && !isNaN(year_min)) {
-        sqlQuery += ` AND album_year >= ?`;
+        sqlQuery += ' AND album_year >= ?';
         params.push(parseInt(year_min));
     }
     
     if (year_max && !isNaN(year_max)) {
-        sqlQuery += ` AND album_year <= ?`;
+        sqlQuery += ' AND album_year <= ?';
         params.push(parseInt(year_max));
     }
     
     // Quality filter
     if (quality && ['Lossless', 'Lossy', 'Mixed'].includes(quality)) {
-        sqlQuery += ` AND quality_type = ?`;
+        sqlQuery += ' AND quality_type = ?';
         params.push(quality);
     }
     
     // Organization mode filter
     if (organization_mode) {
-        sqlQuery += ` AND organization_mode = ?`;
+        sqlQuery += ' AND organization_mode = ?';
         params.push(organization_mode);
     }
     
@@ -825,19 +825,19 @@ app.get('/api/search/advanced', async (req, res) => {
         
         const results = await new Promise((resolve, reject) => {
             db.all(sqlQuery, params, (err, rows) => {
-                if (err) reject(err);
-                else resolve(rows || []);
+                if (err) {reject(err);}
+                else {resolve(rows || []);}
             });
         });
         
         // Get total count with same filters (without LIMIT/OFFSET)
-        let countQuery = sqlQuery.replace(/ORDER BY.*$/, '').replace(/LIMIT.*$/, '');
+        const countQuery = sqlQuery.replace(/ORDER BY.*$/, '').replace(/LIMIT.*$/, '');
         const countParams = params.slice(0, -2); // Remove limit and offset params
         
         const totalCount = await new Promise((resolve, reject) => {
             db.get(countQuery.replace(/SELECT.*?FROM/, 'SELECT COUNT(*) as total FROM'), countParams, (err, row) => {
-                if (err) reject(err);
-                else resolve(row?.total || 0);
+                if (err) {reject(err);}
+                else {resolve(row?.total || 0);}
             });
         });
         
@@ -912,7 +912,7 @@ app.get('/api/search/facets', (req, res) => {
         GROUP BY quality_type 
         ORDER BY count DESC
     `, (err, qualityFacets) => {
-        if (!err && qualityFacets) facets.quality = qualityFacets;
+        if (!err && qualityFacets) {facets.quality = qualityFacets;}
         
         // Get organization modes
         db.all(`
@@ -922,7 +922,7 @@ app.get('/api/search/facets', (req, res) => {
             GROUP BY organization_mode 
             ORDER BY count DESC
         `, (err, modeFacets) => {
-            if (!err && modeFacets) facets.organization_mode = modeFacets;
+            if (!err && modeFacets) {facets.organization_mode = modeFacets;}
             
             // Get year range
             db.get(`
@@ -933,7 +933,7 @@ app.get('/api/search/facets', (req, res) => {
                 FROM albums 
                 WHERE album_year IS NOT NULL AND album_year > 1900
             `, (err, yearStats) => {
-                if (!err && yearStats) facets.year_range = yearStats;
+                if (!err && yearStats) {facets.year_range = yearStats;}
                 
                 // Get top labels
                 db.all(`
@@ -946,7 +946,7 @@ app.get('/api/search/facets', (req, res) => {
                 `, (err, labelFacets) => {
                     db.close();
                     
-                    if (!err && labelFacets) facets.top_labels = labelFacets;
+                    if (!err && labelFacets) {facets.top_labels = labelFacets;}
                     
                     res.json({
                         facets,
@@ -960,13 +960,13 @@ app.get('/api/search/facets', (req, res) => {
 
 // Send periodic stats updates to subscribers
 setInterval(async () => {
-    if (clients.size === 0) return;
+    if (clients.size === 0) {return;}
     
     try {
         // Get quick stats for real-time updates
         const db = getDbSync();
         db.get('SELECT COUNT(*) as albums FROM albums', (err, albumRow) => {
-            if (err) return;
+            if (err) {return;}
             
             db.get('SELECT COUNT(*) as tracks FROM tracks', (err, trackRow) => {
                 if (!err) {
@@ -1018,7 +1018,7 @@ const exportLimiter = rateLimit({
         retryAfter: 3600
     },
     standardHeaders: true,
-    legacyHeaders: false,
+    legacyHeaders: false
 });
 
 // Health check has higher limits for monitoring
@@ -1026,7 +1026,7 @@ const healthLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 1000, // Allow many health checks for monitoring systems
     standardHeaders: true,
-    legacyHeaders: false,
+    legacyHeaders: false
 });
 
 // General API limiter for search and other endpoints
@@ -1053,17 +1053,17 @@ app.use(helmet({
     contentSecurityPolicy: {
         directives: {
             defaultSrc: ["'self'"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net"],
+            styleSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'],
+            scriptSrc: ["'self'", "'unsafe-inline'", 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'],
             scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers
-            imgSrc: ["'self'", "data:", "https:"],
-            connectSrc: ["'self'", "ws:", "wss:"],
-            fontSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net"],
+            imgSrc: ["'self'", 'data:', 'https:'],
+            connectSrc: ["'self'", 'ws:', 'wss:'],
+            fontSrc: ["'self'", 'https://cdnjs.cloudflare.com', 'https://cdn.jsdelivr.net'],
             objectSrc: ["'none'"],
             mediaSrc: ["'self'"],
             frameSrc: ["'none'"],
-            upgradeInsecureRequests: null, // Disable HTTPS upgrade for local development
-        },
+            upgradeInsecureRequests: null // Disable HTTPS upgrade for local development
+        }
     },
     crossOriginEmbedderPolicy: false, // Allow for local development
     crossOriginOpenerPolicy: false,   // Fix COOP header warning
@@ -1835,7 +1835,7 @@ app.get('/api/albums', async (req, res) => {
         FROM albums 
         WHERE 1=1
     `;
-    let params = [];
+    const params = [];
     
     // Add optimized filters with index usage
     if (artist) {
@@ -1875,7 +1875,7 @@ app.get('/api/albums', async (req, res) => {
         
         // Get total count for pagination (optimized with same filters)
         let countQuery = 'SELECT COUNT(*) as total FROM albums WHERE 1=1';
-        let countParams = [];
+        const countParams = [];
         
         if (artist) {
             countQuery += ' AND (album_artist = ? OR album_artist LIKE ?)';
@@ -2303,7 +2303,7 @@ app.get('/api/audio/:albumId/:trackId', (req, res) => {
         
         if (range) {
             // Handle range requests for streaming
-            const parts = range.replace(/bytes=/, "").split("-");
+            const parts = range.replace(/bytes=/, '').split('-');
             const start = parseInt(parts[0], 10);
             const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
             const chunksize = (end - start) + 1;
@@ -2312,7 +2312,7 @@ app.get('/api/audio/:albumId/:trackId', (req, res) => {
                 'Content-Range': `bytes ${start}-${end}/${fileSize}`,
                 'Accept-Ranges': 'bytes',
                 'Content-Length': chunksize,
-                'Content-Type': contentType,
+                'Content-Type': contentType
             };
             res.writeHead(206, head);
             file.pipe(res);
@@ -2320,7 +2320,7 @@ app.get('/api/audio/:albumId/:trackId', (req, res) => {
             // Send entire file
             const head = {
                 'Content-Length': fileSize,
-                'Content-Type': contentType,
+                'Content-Type': contentType
             };
             res.writeHead(200, head);
             fs.createReadStream(filePath).pipe(res);
@@ -2500,8 +2500,8 @@ app.get('/api/enrichment/discogs/search', async (req, res) => {
     try {
         // Construct search query
         let query = `${artist} - ${album}`;
-        if (year) query += ` year:${year}`;
-        if (label) query += ` label:"${label}"`;
+        if (year) {query += ` year:${year}`;}
+        if (label) {query += ` label:"${label}"`;}
         
         const response = await fetch(`https://api.discogs.com/database/search?q=${encodeURIComponent(query)}&type=release&format=album`, {
             headers: {
@@ -2920,7 +2920,7 @@ app.get('/api/duplicates', (req, res) => {
     if (!fs.existsSync(duplicateDbPath)) {
         return res.json({
             analysis_available: false,
-            message: "No duplicate analysis available. Run duplicate detection first."
+            message: 'No duplicate analysis available. Run duplicate detection first.'
         });
     }
     
@@ -3372,42 +3372,42 @@ app.get('/api/search/albums', generalLimiter, (req, res) => {
     
     // Build dynamic WHERE conditions
     if (album) {
-        query += ` AND a.album_title LIKE ?`;
+        query += ' AND a.album_title LIKE ?';
         params.push(`%${album}%`);
     }
     
     if (artist) {
-        query += ` AND a.album_artist LIKE ?`;
+        query += ' AND a.album_artist LIKE ?';
         params.push(`%${artist}%`);
     }
     
     if (label) {
-        query += ` AND a.label LIKE ?`;
+        query += ' AND a.label LIKE ?';
         params.push(`%${label}%`);
     }
     
     if (year_from) {
-        query += ` AND a.year >= ?`;
+        query += ' AND a.year >= ?';
         params.push(parseInt(year_from));
     }
     
     if (year_to) {
-        query += ` AND a.year <= ?`;
+        query += ' AND a.year <= ?';
         params.push(parseInt(year_to));
     }
     
     if (quality) {
-        query += ` AND COALESCE(a.quality_type, a.quality) = ?`;
+        query += ' AND COALESCE(a.quality_type, a.quality) = ?';
         params.push(quality);
     }
     
     if (org_mode) {
-        query += ` AND a.organization_mode = ?`;
+        query += ' AND a.organization_mode = ?';
         params.push(org_mode);
     }
     
     // Add ordering and pagination
-    query += ` ORDER BY a.id DESC LIMIT ? OFFSET ?`;
+    query += ' ORDER BY a.id DESC LIMIT ? OFFSET ?';
     params.push(parseInt(limit), parseInt(offset));
     
     console.log('Executing search query:', query);
@@ -3433,37 +3433,37 @@ app.get('/api/search/albums', generalLimiter, (req, res) => {
         
         // Apply same filters for count
         if (album) {
-            countQuery += ` AND a.album_title LIKE ?`;
+            countQuery += ' AND a.album_title LIKE ?';
             countParams.push(`%${album}%`);
         }
         
         if (artist) {
-            countQuery += ` AND a.album_artist LIKE ?`;
+            countQuery += ' AND a.album_artist LIKE ?';
             countParams.push(`%${artist}%`);
         }
         
         if (label) {
-            countQuery += ` AND a.label LIKE ?`;
+            countQuery += ' AND a.label LIKE ?';
             countParams.push(`%${label}%`);
         }
         
         if (year_from) {
-            countQuery += ` AND a.year >= ?`;
+            countQuery += ' AND a.year >= ?';
             countParams.push(parseInt(year_from));
         }
         
         if (year_to) {
-            countQuery += ` AND a.year <= ?`;
+            countQuery += ' AND a.year <= ?';
             countParams.push(parseInt(year_to));
         }
         
         if (quality) {
-            countQuery += ` AND COALESCE(a.quality_type, a.quality) = ?`;
+            countQuery += ' AND COALESCE(a.quality_type, a.quality) = ?';
             countParams.push(quality);
         }
         
         if (org_mode) {
-            countQuery += ` AND a.organization_mode = ?`;
+            countQuery += ' AND a.organization_mode = ?';
             countParams.push(org_mode);
         }
         
@@ -3680,7 +3680,7 @@ app.get('/api/audio/stream/:trackId', (req, res) => {
         
         if (range) {
             // Handle range requests for seeking
-            const parts = range.replace(/bytes=/, "").split("-");
+            const parts = range.replace(/bytes=/, '').split('-');
             const start = parseInt(parts[0], 10);
             const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
             const chunksize = (end - start) + 1;
@@ -3847,13 +3847,13 @@ server.listen(PORT, '0.0.0.0', () => {
                 break;
             }
         }
-        if (localIP !== 'localhost') break;
+        if (localIP !== 'localhost') {break;}
     }
     
-    console.log(`🎵 ordr.fm visualization server running on:`);
+    console.log('🎵 ordr.fm visualization server running on:');
     console.log(`   • Local:    http://localhost:${PORT}`);
     console.log(`   • Network:  http://${localIP}:${PORT}`);
-    console.log(`🔌 WebSocket server ready for real-time updates`);
+    console.log('🔌 WebSocket server ready for real-time updates');
     console.log(`💾 Database path: ${DB_PATH}`);
     
     // Check if database exists
@@ -4199,7 +4199,7 @@ app.post('/api/actions/backup-database', authenticateToken, (req, res) => {
 });
 
 // Global backup state tracking
-let activeBackups = new Map(); // Map<backupId, {process, target, startTime, pid}>
+const activeBackups = new Map(); // Map<backupId, {process, target, startTime, pid}>
 let backupCounter = 0;
 
 // Check if backup is already running
@@ -4469,7 +4469,7 @@ app.post('/api/actions/enhance-metadata', authenticateToken, (req, res) => {
     const { spawn } = require('child_process');
     
     // Build command to re-process existing organized music with Discogs enhancement
-    let command = `cd .. && find "/home/plex/Music/sorted_music" -type d -name "*(*)" | head -10 | while read dir; do echo "Enhancing: $dir"; ./ordr.fm.sh --source "$dir" --discogs --move; done`;
+    let command = 'cd .. && find "/home/plex/Music/sorted_music" -type d -name "*(*)" | head -10 | while read dir; do echo "Enhancing: $dir"; ./ordr.fm.sh --source "$dir" --discogs --move; done';
     
     if (force) {
         command += ' --force-refresh';
@@ -5016,7 +5016,7 @@ async function initMetadataHistoryTable() {
         });
     } catch (err) {
         console.error('Failed to initialize metadata history table:', err);
-        if (db) releaseDb(db);
+        if (db) {releaseDb(db);}
     }
 }
 

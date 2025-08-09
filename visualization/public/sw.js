@@ -91,10 +91,10 @@ self.addEventListener('fetch', event => {
   const url = new URL(request.url);
   
   // Skip non-GET requests
-  if (request.method !== 'GET') return;
+  if (request.method !== 'GET') {return;}
   
   // Skip chrome-extension and other non-http requests
-  if (!request.url.startsWith('http')) return;
+  if (!request.url.startsWith('http')) {return;}
   
   event.respondWith(handleFetch(request, url));
 });

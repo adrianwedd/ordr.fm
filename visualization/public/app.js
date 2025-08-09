@@ -1,11 +1,11 @@
 // Global variables
-let charts = {};
-let data = {};
+const charts = {};
+const data = {};
 let deferredPrompt = null;
 let isInstalled = false;
 let ws = null;
 let wsReconnectAttempts = 0;
-let wsMaxReconnectAttempts = 5;
+const wsMaxReconnectAttempts = 5;
 
 // API base URL (adjust if running on different port)
 const API_BASE = '';
@@ -168,7 +168,7 @@ function updateRealTimeStats(stats) {
 // Update connection status indicator
 function updateConnectionStatus(status) {
     const statusEl = document.getElementById('status');
-    if (!statusEl) return;
+    if (!statusEl) {return;}
     
     statusEl.classList.remove('connected', 'disconnected', 'error');
     
@@ -458,7 +458,7 @@ async function initPushNotifications(registration) {
     
     try {
         // Check current permission
-        let permission = Notification.permission;
+        const permission = Notification.permission;
         
         if (permission === 'default') {
             // Show permission request UI
@@ -706,11 +706,11 @@ async function fetchAPI(endpoint, options = {}) {
             case 409:
                 throw new Error(`Conflict: ${errorMessage}`);
             case 429:
-                throw new Error(`Rate limited: Please try again later`);
+                throw new Error('Rate limited: Please try again later');
             case 500:
                 throw new Error(`Server error: ${errorMessage}`);
             case 502:
-                throw new Error(`Bad gateway: Server temporarily unavailable`);
+                throw new Error('Bad gateway: Server temporarily unavailable');
             case 503:
                 throw new Error(`Service unavailable: ${errorMessage}`);
             default:
@@ -789,7 +789,7 @@ function dismissError(errorId) {
 }
 
 // Enhanced connection status monitoring
-let connectionMonitor = {
+const connectionMonitor = {
     isOnline: navigator.onLine,
     lastHeartbeat: Date.now(),
     heartbeatInterval: 30000, // 30 seconds
@@ -800,7 +800,7 @@ let connectionMonitor = {
 // Update connection status UI
 function updateConnectionStatus(isConnected, details = '') {
     const statusElement = document.getElementById('status');
-    if (!statusElement) return;
+    if (!statusElement) {return;}
     
     connectionMonitor.isOnline = isConnected;
     
@@ -920,7 +920,7 @@ async function loadOverview() {
         document.getElementById('stat-labels').textContent = stats.totalLabels || 0;
         
         // Quality distribution chart
-        if (charts.quality) charts.quality.destroy();
+        if (charts.quality) {charts.quality.destroy();}
         const qualityCtx = document.getElementById('quality-chart').getContext('2d');
         charts.quality = new Chart(qualityCtx, {
             type: 'doughnut',
@@ -948,7 +948,7 @@ async function loadOverview() {
         });
         
         // Organization mode chart
-        if (charts.mode) charts.mode.destroy();
+        if (charts.mode) {charts.mode.destroy();}
         const modeCtx = document.getElementById('mode-chart').getContext('2d');
         charts.mode = new Chart(modeCtx, {
             type: 'bar',
@@ -1146,7 +1146,7 @@ function drawAliasNetwork(artistData) {
     
     // Drag functions
     function dragstarted(event, d) {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
+        if (!event.active) {simulation.alphaTarget(0.3).restart();}
         d.fx = d.x;
         d.fy = d.y;
     }
@@ -1157,7 +1157,7 @@ function drawAliasNetwork(artistData) {
     }
     
     function dragended(event, d) {
-        if (!event.active) simulation.alphaTarget(0);
+        if (!event.active) {simulation.alphaTarget(0);}
         d.fx = null;
         d.fy = null;
     }
@@ -1223,7 +1223,7 @@ async function loadTimeline() {
         ];
         
         // Create timeline chart
-        if (charts.timeline) charts.timeline.destroy();
+        if (charts.timeline) {charts.timeline.destroy();}
         const ctx = document.getElementById('timeline-chart').getContext('2d');
         charts.timeline = new Chart(ctx, {
             type: 'bar',
@@ -1301,7 +1301,7 @@ async function loadCollectionHealth() {
         document.getElementById('organization-efficiency').textContent = '95%'; // Mock for now
         
         // Metadata completeness chart
-        if (charts.metadata) charts.metadata.destroy();
+        if (charts.metadata) {charts.metadata.destroy();}
         const metadataCtx = document.getElementById('metadata-chart').getContext('2d');
         charts.metadata = new Chart(metadataCtx, {
             type: 'bar',
@@ -1388,7 +1388,7 @@ async function loadDuplicateAnalysis() {
         document.getElementById('duplicate-score').textContent = '87%'; // Mock average confidence
         
         // Quality distribution chart
-        if (charts.duplicateQuality) charts.duplicateQuality.destroy();
+        if (charts.duplicateQuality) {charts.duplicateQuality.destroy();}
         const qualityCtx = document.getElementById('duplicate-quality-chart').getContext('2d');
         charts.duplicateQuality = new Chart(qualityCtx, {
             type: 'pie',
@@ -1465,7 +1465,7 @@ async function loadAdvancedInsights() {
         `).join('');
         
         // Collection growth timeline chart
-        if (charts.collectionGrowth) charts.collectionGrowth.destroy();
+        if (charts.collectionGrowth) {charts.collectionGrowth.destroy();}
         const growthCtx = document.getElementById('collection-growth-chart').getContext('2d');
         
         const timelineData = insights.timeline_analysis.reverse(); // Show chronologically
@@ -1519,7 +1519,7 @@ async function loadAdvancedInsights() {
 
 // Utility function to format file sizes
 function formatBytes(bytes, decimals = 2) {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) {return '0 Bytes';}
     const k = 1024;
     const dm = decimals < 0 ? 0 : decimals;
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
@@ -2092,7 +2092,7 @@ function selectItem(path, type, name) {
 
 function navigateUp() {
     const upButton = document.getElementById('go-up');
-    if (upButton.disabled) return;
+    if (upButton.disabled) {return;}
     
     const parentPath = currentBrowsePath.substring(0, currentBrowsePath.lastIndexOf('/'));
     if (parentPath) {
@@ -2396,7 +2396,7 @@ function updateBackupUI() {
 // Create cancel button if it doesn't exist
 function createCancelButton() {
     const existing = document.getElementById('cancel-cloud-backup');
-    if (existing) return existing;
+    if (existing) {return existing;}
     
     const button = document.createElement('button');
     button.id = 'cancel-cloud-backup';
@@ -2424,7 +2424,7 @@ function createCancelButton() {
 // Create status div if it doesn't exist
 function createStatusDiv() {
     const existing = document.getElementById('backup-status-info');
-    if (existing) return existing;
+    if (existing) {return existing;}
     
     const div = document.createElement('div');
     div.id = 'backup-status-info';
@@ -2446,12 +2446,12 @@ async function startCloudBackup() {
     const status = await checkBackupStatus();
     if (status && status.hasRunning) {
         const userChoice = confirm(
-            `⚠️ Backup Already Running!\n\n` +
+            '⚠️ Backup Already Running!\n\n' +
             `Active backups: ${status.activeBackups.length}\n` +
             `System processes: ${status.systemProcesses.length}\n\n` +
-            `Do you want to:\n` +
-            `• Cancel existing backups and start new one? (OK)\n` +
-            `• Keep existing backups running? (Cancel)`
+            'Do you want to:\n' +
+            '• Cancel existing backups and start new one? (OK)\n' +
+            '• Keep existing backups running? (Cancel)'
         );
         
         if (userChoice) {
@@ -2750,7 +2750,7 @@ async function loadRecentActivity() {
 
 // Format bytes to human readable
 function formatBytes(bytes) {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) {return '0 Bytes';}
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
@@ -2938,8 +2938,8 @@ async function searchDiscogs() {
     
     try {
         const params = new URLSearchParams({ artist, album });
-        if (label) params.append('label', label);
-        if (year) params.append('year', year);
+        if (label) {params.append('label', label);}
+        if (year) {params.append('year', year);}
         
         const response = await fetch(`/api/enrichment/discogs/search?${params}`);
         const data = await response.json();
@@ -3041,7 +3041,7 @@ async function selectSearchResult(source, id) {
 function displayEnrichmentPreview(data, source) {
     const previewContainer = document.getElementById('preview-content');
     
-    let html = `<div class="enrichment-data">`;
+    let html = '<div class="enrichment-data">';
     
     if (source === 'discogs') {
         html += `
@@ -3124,7 +3124,7 @@ function displayEnrichmentPreview(data, source) {
         }
     }
     
-    html += `</div>`;
+    html += '</div>';
     previewContainer.innerHTML = html;
 }
 
@@ -3181,7 +3181,7 @@ async function applyEnrichment() {
 let currentSearchFilters = {};
 let currentSortOrder = 'recent';
 let currentViewMode = 'table';
-let searchCache = {};
+const searchCache = {};
 let allAlbumsData = [];
 
 // Toggle Albums Search Interface
@@ -3221,13 +3221,13 @@ async function performAlbumSearch() {
     try {
         // Build API query parameters
         const params = new URLSearchParams();
-        if (currentSearchFilters.album) params.append('album', currentSearchFilters.album);
-        if (currentSearchFilters.artist) params.append('artist', currentSearchFilters.artist);
-        if (currentSearchFilters.label) params.append('label', currentSearchFilters.label);
-        if (currentSearchFilters.yearFrom) params.append('year_from', currentSearchFilters.yearFrom);
-        if (currentSearchFilters.yearTo) params.append('year_to', currentSearchFilters.yearTo);
-        if (currentSearchFilters.quality) params.append('quality', currentSearchFilters.quality);
-        if (currentSearchFilters.orgMode) params.append('org_mode', currentSearchFilters.orgMode);
+        if (currentSearchFilters.album) {params.append('album', currentSearchFilters.album);}
+        if (currentSearchFilters.artist) {params.append('artist', currentSearchFilters.artist);}
+        if (currentSearchFilters.label) {params.append('label', currentSearchFilters.label);}
+        if (currentSearchFilters.yearFrom) {params.append('year_from', currentSearchFilters.yearFrom);}
+        if (currentSearchFilters.yearTo) {params.append('year_to', currentSearchFilters.yearTo);}
+        if (currentSearchFilters.quality) {params.append('quality', currentSearchFilters.quality);}
+        if (currentSearchFilters.orgMode) {params.append('org_mode', currentSearchFilters.orgMode);}
         
         // Make search request
         const response = await fetchAPI(`/api/search/albums?${params.toString()}`);
@@ -3282,7 +3282,7 @@ function saveAlbumSearch() {
     }
     
     const searchName = prompt('Enter a name for this search preset:');
-    if (!searchName) return;
+    if (!searchName) {return;}
     
     if (searchName.trim() === '') {
         showToast('Please enter a valid name', 'error');
@@ -3536,7 +3536,7 @@ function importPresets() {
     const input = document.getElementById('import-presets');
     const file = input.files[0];
     
-    if (!file) return;
+    if (!file) {return;}
     
     const reader = new FileReader();
     reader.onload = function(e) {
@@ -3724,9 +3724,9 @@ function formatRelativeTime(timestamp) {
     const hours = Math.floor(minutes / 60);
     const days = Math.floor(hours / 24);
     
-    if (days > 0) return `${days}d ago`;
-    if (hours > 0) return `${hours}h ago`;
-    if (minutes > 0) return `${minutes}m ago`;
+    if (days > 0) {return `${days}d ago`;}
+    if (hours > 0) {return `${hours}h ago`;}
+    if (minutes > 0) {return `${minutes}m ago`;}
     return 'Just now';
 }
 
@@ -3750,7 +3750,7 @@ function sortAlbumResults() {
         return;
     }
     
-    let sortedData = [...allAlbumsData];
+    const sortedData = [...allAlbumsData];
     
     switch(sortBy) {
         case 'artist':
@@ -4025,7 +4025,7 @@ async function openMetadataEditor(albumId) {
 
 // Close metadata editor
 function closeMetadataEditor(event) {
-    if (event && event.target !== event.currentTarget) return;
+    if (event && event.target !== event.currentTarget) {return;}
     
     const modal = document.getElementById('metadata-editor-modal');
     if (modal) {
@@ -4056,7 +4056,7 @@ async function saveMetadata(event, albumId) {
         await fetchAPI(`/api/albums/${albumId}`, {
             method: 'PUT',
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(data)
         });
@@ -4080,7 +4080,7 @@ async function updateTrackField(trackId, field, value) {
         await fetchAPI(`/api/tracks/${trackId}`, {
             method: 'PUT',
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify(data)
         });
@@ -4107,7 +4107,7 @@ let touchEndX = 0;
 let touchEndY = 0;
 let currentTabIndex = 0;
 let tabs = [];
-let isSwipeEnabled = true;
+const isSwipeEnabled = true;
 let pullToRefreshY = 0;
 let isPullToRefresh = false;
 
@@ -4150,7 +4150,7 @@ function isMobile() {
 
 // Handle touch start
 function handleTouchStart(e) {
-    if (!isSwipeEnabled) return;
+    if (!isSwipeEnabled) {return;}
     
     touchStartX = e.touches[0].clientX;
     touchStartY = e.touches[0].clientY;
@@ -4166,7 +4166,7 @@ function handleTouchStart(e) {
 
 // Handle touch move
 function handleTouchMove(e) {
-    if (!isSwipeEnabled) return;
+    if (!isSwipeEnabled) {return;}
     
     touchEndX = e.touches[0].clientX;
     touchEndY = e.touches[0].clientY;
@@ -4190,7 +4190,7 @@ function handleTouchMove(e) {
 
 // Handle touch end
 function handleTouchEnd(e) {
-    if (!isSwipeEnabled) return;
+    if (!isSwipeEnabled) {return;}
     
     const deltaX = touchEndX - touchStartX;
     const deltaY = touchEndY - touchStartY;
@@ -4235,7 +4235,7 @@ function handleSwipeGesture(deltaX) {
 
 // Navigate between tabs
 function navigateToTab(direction) {
-    if (tabs.length === 0) return;
+    if (tabs.length === 0) {return;}
     
     let newTabIndex = currentTabIndex;
     
@@ -4838,7 +4838,7 @@ function resetConfig() {
 // Metadata Editing System
 let currentEditingAlbum = null;
 let originalMetadata = null;
-let selectedTracks = new Set();
+const selectedTracks = new Set();
 
 // Open metadata editor for a specific album
 async function openMetadataEditor(albumId) {
@@ -5051,27 +5051,27 @@ function applyBulkEdit() {
     let trackNumber = 1;
     
     selectedTracks.forEach(index => {
-        if (!currentEditingAlbum.tracks[index]) return;
+        if (!currentEditingAlbum.tracks[index]) {return;}
         
         // Apply bulk changes
-        if (artist) currentEditingAlbum.tracks[index].artist = artist;
-        if (genre) currentEditingAlbum.tracks[index].genre = genre;
-        if (year) currentEditingAlbum.tracks[index].year = year;
-        if (autoNumber) currentEditingAlbum.tracks[index].track_number = trackNumber++;
+        if (artist) {currentEditingAlbum.tracks[index].artist = artist;}
+        if (genre) {currentEditingAlbum.tracks[index].genre = genre;}
+        if (year) {currentEditingAlbum.tracks[index].year = year;}
+        if (autoNumber) {currentEditingAlbum.tracks[index].track_number = trackNumber++;}
         
         // Update form fields
         const trackContainer = document.querySelector(`[data-track-index="${index}"]`).closest('.track-edit-item');
         if (artist) {
             const artistField = trackContainer.querySelector('[data-field="artist"]');
-            if (artistField) artistField.value = artist;
+            if (artistField) {artistField.value = artist;}
         }
         if (genre) {
             const genreField = trackContainer.querySelector('[data-field="genre"]');
-            if (genreField) genreField.value = genre;
+            if (genreField) {genreField.value = genre;}
         }
         if (autoNumber) {
             const numberField = trackContainer.querySelector('[data-field="track_number"]');
-            if (numberField) numberField.value = currentEditingAlbum.tracks[index].track_number;
+            if (numberField) {numberField.value = currentEditingAlbum.tracks[index].track_number;}
         }
     });
     
@@ -5097,19 +5097,19 @@ function resetTrackNumbers() {
 
 // Calculate metadata quality score
 function calculateMetadataQuality() {
-    let totalScore = 0;
-    let maxScore = 0;
+    const totalScore = 0;
+    const maxScore = 0;
     
     // Basic album info (40% of score)
     let basicScore = 0;
-    let basicMax = 6;
+    const basicMax = 6;
     
-    if (document.getElementById('edit-album-title').value.trim()) basicScore++;
-    if (document.getElementById('edit-album-artist').value.trim()) basicScore++;
-    if (document.getElementById('edit-release-year').value.trim()) basicScore++;
-    if (document.getElementById('edit-genre').value.trim()) basicScore++;
-    if (document.getElementById('edit-label').value.trim()) basicScore++;
-    if (document.getElementById('edit-catalog-number').value.trim()) basicScore++;
+    if (document.getElementById('edit-album-title').value.trim()) {basicScore++;}
+    if (document.getElementById('edit-album-artist').value.trim()) {basicScore++;}
+    if (document.getElementById('edit-release-year').value.trim()) {basicScore++;}
+    if (document.getElementById('edit-genre').value.trim()) {basicScore++;}
+    if (document.getElementById('edit-label').value.trim()) {basicScore++;}
+    if (document.getElementById('edit-catalog-number').value.trim()) {basicScore++;}
     
     // Track info (50% of score)
     let trackScore = 0;
@@ -5119,16 +5119,16 @@ function calculateMetadataQuality() {
         currentEditingAlbum.tracks.forEach(track => {
             trackMax += 4; // title, artist, track_number, duration
             
-            if (track.title && track.title.trim()) trackScore++;
-            if (track.artist && track.artist.trim()) trackScore++;
-            if (track.track_number) trackScore++;
-            if (track.duration && track.duration.trim()) trackScore++;
+            if (track.title && track.title.trim()) {trackScore++;}
+            if (track.artist && track.artist.trim()) {trackScore++;}
+            if (track.track_number) {trackScore++;}
+            if (track.duration && track.duration.trim()) {trackScore++;}
         });
     }
     
     // Extended info (10% of score)
     let extendedScore = 0;
-    let extendedMax = 2;
+    const extendedMax = 2;
     
     // Add points for consistency and completeness
     const genres = new Set();
@@ -5136,13 +5136,13 @@ function calculateMetadataQuality() {
     
     if (currentEditingAlbum.tracks) {
         currentEditingAlbum.tracks.forEach(track => {
-            if (track.genre) genres.add(track.genre);
-            if (track.artist) artists.add(track.artist);
+            if (track.genre) {genres.add(track.genre);}
+            if (track.artist) {artists.add(track.artist);}
         });
         
         // Consistency points
-        if (genres.size <= 2) extendedScore++; // Genre consistency
-        if (artists.size <= 3 || artists.has(document.getElementById('edit-album-artist').value)) extendedScore++; // Artist consistency
+        if (genres.size <= 2) {extendedScore++;} // Genre consistency
+        if (artists.size <= 3 || artists.has(document.getElementById('edit-album-artist').value)) {extendedScore++;} // Artist consistency
     }
     
     // Calculate percentages
@@ -5166,9 +5166,9 @@ function calculateMetadataQuality() {
 
 // Get quality class based on score
 function getQualityClass(score) {
-    if (score >= 90) return 'excellent';
-    if (score >= 80) return 'good';
-    if (score >= 60) return 'fair';
+    if (score >= 90) {return 'excellent';}
+    if (score >= 80) {return 'good';}
+    if (score >= 60) {return 'fair';}
     return 'poor';
 }
 
@@ -5241,7 +5241,7 @@ function collectFormData() {
         const index = parseInt(field.dataset.index);
         const fieldName = field.dataset.field;
         
-        if (!tracksData[index]) tracksData[index] = {};
+        if (!tracksData[index]) {tracksData[index] = {};}
         tracksData[index][fieldName] = field.value.trim();
     });
     
@@ -5455,7 +5455,7 @@ function closeMetadataPreview() {
 // =============================================================================
 
 // Audio Player Global State
-let audioPlayer = {
+const audioPlayer = {
     audio: null,
     audioSource: null, // Web Audio API source
     playlist: [],
@@ -5544,7 +5544,7 @@ function setupEqualizerControls() {
 // Search Tracks
 async function searchTracks() {
     const searchTerm = document.getElementById('track-search').value.trim();
-    if (!searchTerm) return;
+    if (!searchTerm) {return;}
     
     try {
         const response = await fetchAPI(`/api/search/tracks?q=${encodeURIComponent(searchTerm)}`);
@@ -5626,7 +5626,7 @@ function playNext(track) {
 // Load and Play Current Track
 async function loadAndPlayCurrentTrack() {
     const track = audioPlayer.playlist[audioPlayer.currentTrack];
-    if (!track) return;
+    if (!track) {return;}
     
     // Validate track data
     if (!track.id || !track.title) {
@@ -5803,7 +5803,7 @@ function handleLoadError(error) {
 // Setup Audio Event Listeners with comprehensive error handling
 function setupAudioEventListeners() {
     const audio = audioPlayer.audio;
-    if (!audio) return;
+    if (!audio) {return;}
     
     // Loading events
     audio.addEventListener('loadstart', () => {
@@ -5955,7 +5955,7 @@ function handleTrackEnd() {
 
 // Audio Control Functions
 function togglePlayPause() {
-    if (!audioPlayer.audio) return;
+    if (!audioPlayer.audio) {return;}
     
     if (audioPlayer.isPlaying) {
         audioPlayer.audio.pause();
@@ -5986,7 +5986,7 @@ function nextTrack() {
 }
 
 function seekToPosition(event) {
-    if (!audioPlayer.audio) return;
+    if (!audioPlayer.audio) {return;}
     
     const progressBar = event.currentTarget;
     const rect = progressBar.getBoundingClientRect();
@@ -6010,7 +6010,7 @@ function setVolume(event) {
 }
 
 function toggleMute() {
-    if (!audioPlayer.audio) return;
+    if (!audioPlayer.audio) {return;}
     
     audioPlayer.isMuted = !audioPlayer.isMuted;
     audioPlayer.audio.muted = audioPlayer.isMuted;
@@ -6041,7 +6041,7 @@ function toggleShuffle() {
         audioPlayer.currentTrack = audioPlayer.playlist.findIndex(track => 
             track.id === currentTrack.id
         );
-        if (audioPlayer.currentTrack === -1) audioPlayer.currentTrack = 0;
+        if (audioPlayer.currentTrack === -1) {audioPlayer.currentTrack = 0;}
     }
     
     updateShuffleButton();
@@ -6062,7 +6062,7 @@ function updatePlayButton() {
 }
 
 function updateProgress() {
-    if (!audioPlayer.audio) return;
+    if (!audioPlayer.audio) {return;}
     
     const current = audioPlayer.audio.currentTime;
     const duration = audioPlayer.audio.duration;
@@ -6077,7 +6077,7 @@ function updateProgress() {
 }
 
 function updateDuration() {
-    if (!audioPlayer.audio) return;
+    if (!audioPlayer.audio) {return;}
     
     const duration = audioPlayer.audio.duration;
     document.getElementById('audio-duration').textContent = formatTime(duration);
@@ -6111,7 +6111,7 @@ function updatePlaylistDisplay() {
     if (audioPlayer.playlist.length === 0) {
         const emptyMessage = '<div class="empty-playlist">No tracks in playlist</div>';
         container.innerHTML = emptyMessage;
-        if (tabContainer) tabContainer.innerHTML = '<div class="empty-playlist">No tracks in playlist. Search and add tracks above.</div>';
+        if (tabContainer) {tabContainer.innerHTML = '<div class="empty-playlist">No tracks in playlist. Search and add tracks above.</div>';}
         return;
     }
     
@@ -6164,7 +6164,7 @@ function clearPlaylist() {
 }
 
 function shufflePlaylist() {
-    if (audioPlayer.playlist.length <= 1) return;
+    if (audioPlayer.playlist.length <= 1) {return;}
     
     const currentTrack = audioPlayer.playlist[audioPlayer.currentTrack];
     const otherTracks = audioPlayer.playlist.filter((_, index) => index !== audioPlayer.currentTrack);
@@ -6184,7 +6184,7 @@ function savePlaylist() {
     }
     
     const playlistName = prompt('Enter playlist name:');
-    if (!playlistName) return;
+    if (!playlistName) {return;}
     
     // TODO: Implement playlist saving to backend
     showNotification(`Playlist "${playlistName}" saved (feature coming soon)`);
@@ -6217,7 +6217,7 @@ function resetEqualizer() {
 
 function saveEqualizerPreset() {
     const presetName = prompt('Enter preset name:');
-    if (!presetName) return;
+    if (!presetName) {return;}
     
     // TODO: Implement equalizer preset saving
     showNotification(`Equalizer preset "${presetName}" saved (feature coming soon)`);
@@ -6273,7 +6273,7 @@ function initAudioKeyboardShortcuts() {
                 if (event.ctrlKey) {
                     event.preventDefault();
                     audioPlayer.volume = Math.min(1, audioPlayer.volume + 0.1);
-                    if (audioPlayer.audio) audioPlayer.audio.volume = audioPlayer.volume;
+                    if (audioPlayer.audio) {audioPlayer.audio.volume = audioPlayer.volume;}
                     updateVolumeDisplay();
                 }
                 break;
@@ -6281,7 +6281,7 @@ function initAudioKeyboardShortcuts() {
                 if (event.ctrlKey) {
                     event.preventDefault();
                     audioPlayer.volume = Math.max(0, audioPlayer.volume - 0.1);
-                    if (audioPlayer.audio) audioPlayer.audio.volume = audioPlayer.volume;
+                    if (audioPlayer.audio) {audioPlayer.audio.volume = audioPlayer.volume;}
                     updateVolumeDisplay();
                 }
                 break;
@@ -6318,7 +6318,7 @@ function shuffleArray(array) {
 }
 
 function formatTime(seconds) {
-    if (isNaN(seconds) || seconds < 0) return '0:00';
+    if (isNaN(seconds) || seconds < 0) {return '0:00';}
     
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
@@ -6326,7 +6326,7 @@ function formatTime(seconds) {
 }
 
 function formatDuration(seconds) {
-    if (!seconds || seconds <= 0) return '0:00';
+    if (!seconds || seconds <= 0) {return '0:00';}
     return formatTime(seconds);
 }
 
@@ -6342,7 +6342,7 @@ function escapeHtml(text) {
 
 // Play current track (used by event listeners)
 async function playCurrentTrack() {
-    if (!audioPlayer.audio) return;
+    if (!audioPlayer.audio) {return;}
     
     try {
         // Resume audio context for user-initiated playback
@@ -6477,7 +6477,7 @@ function throttle(func, limit) {
             inThrottle = true;
             setTimeout(() => inThrottle = false, limit);
         }
-    }
+    };
 }
 
 // Enhanced notification function with duration
@@ -6536,7 +6536,7 @@ function showError(message, duration = 5000) {
 // Add accessibility features
 function addAccessibilityFeatures() {
     const audioPlayer = document.getElementById('audio-player-container');
-    if (!audioPlayer) return;
+    if (!audioPlayer) {return;}
     
     // Add ARIA labels
     const playButton = document.getElementById('audio-play-pause');
@@ -6608,7 +6608,7 @@ function addAccessibilityFeatures() {
 
 // Seek relative to current position
 function seekRelative(seconds) {
-    if (!audioPlayer.audio) return;
+    if (!audioPlayer.audio) {return;}
     
     const newTime = Math.max(0, Math.min(audioPlayer.audio.duration, audioPlayer.audio.currentTime + seconds));
     audioPlayer.audio.currentTime = newTime;
@@ -6870,7 +6870,7 @@ async function viewLogContent(filename) {
 
 // Close log modal
 function closeLogModal(event) {
-    if (event && event.target !== event.currentTarget) return;
+    if (event && event.target !== event.currentTarget) {return;}
     
     const modal = document.querySelector('.modal-overlay');
     if (modal) {
@@ -6883,7 +6883,7 @@ function closeLogModal(event) {
 
 // Format bytes helper function
 function formatBytes(bytes) {
-    if (bytes === 0) return '0 Bytes';
+    if (bytes === 0) {return '0 Bytes';}
     const k = 1024;
     const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));

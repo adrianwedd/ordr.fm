@@ -1,0 +1,62 @@
+name: CI (Ultra Lean)
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  smoke-tests:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+          cache-dependency-path: 'visualization/package-lock.json'
+
+      - name: Install dependencies
+        run: |
+          cd visualization
+          npm ci --production
+
+      - name: Create test database
+        run: |
+          cd visualization
+          sqlite3 test.db < database/schema.sql
+          chmod 664 test.db
+
+      - name: Run ultra-lean smoke tests (4 tests only)
+        run: |
+          cd visualization
+          npm run test:e2e
+        env:
+          NODE_ENV: test
+          METADATA_DB: test.db
+          ORDRFM_DB: test.db
+          JWT_SECRET: test-secret-key-for-ci-only
+          CI: true
+
+  syntax-check:
+    name: Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+          
+      - name: Syntax checks
+        run: |
+          shellcheck -x ordr.fm.sh || echo "Shellcheck warnings found but not failing build"
+          bash -n ordr.fm.sh

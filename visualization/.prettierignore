@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+build/
+*.min.js
+
+# Logs and databases
+*.log
+*.db
+*.sqlite
+
+# Test output
+coverage/
+test-results/
+playwright-report/
+
+# Temporary files
+*.tmp
+*.temp
+
+# Documentation that shouldn't be auto-formatted
+CHANGELOG.md
+LICENSE.md

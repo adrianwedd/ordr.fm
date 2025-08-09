@@ -158,7 +158,7 @@ test.describe('File Browser Functionality', () => {
     // Navigate to a music directory that likely has audio files
     // Try to navigate to /home/plex/Music if it exists
     const currentPath = page.locator('#current-path');
-    let currentPathText = await currentPath.textContent();
+    const currentPathText = await currentPath.textContent();
     
     // If not already in music directory, try to navigate there
     if (!currentPathText.includes('Music')) {

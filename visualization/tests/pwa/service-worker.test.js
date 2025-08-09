@@ -96,7 +96,7 @@ test.describe('Service Worker', () => {
 
   test('should support background sync', async ({ page, browserName }) => {
     // Skip on Safari as it has limited service worker support
-    if (browserName === 'webkit') return;
+    if (browserName === 'webkit') {return;}
     
     await page.goto('/');
     

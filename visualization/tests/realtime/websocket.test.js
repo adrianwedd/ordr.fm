@@ -56,7 +56,7 @@ test.describe('WebSocket Connection', () => {
     await page.waitForSelector('#status.connected', { timeout: 15000 });
     
     // Wait for potential statistics update (server sends every 30 seconds)
-    let statsUpdated = false;
+    const statsUpdated = false;
     let initialAlbumCount = '';
     
     // Get initial album count
@@ -74,7 +74,7 @@ test.describe('WebSocket Connection', () => {
         window.ws.onmessage = (event) => {
           const data = JSON.parse(event.data);
           window.wsMessages.push(data);
-          if (originalOnMessage) originalOnMessage(event);
+          if (originalOnMessage) {originalOnMessage(event);}
         };
       }
     });

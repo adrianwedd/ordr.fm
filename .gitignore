@@ -26,6 +26,7 @@ secrets*
 *.db
 *.db-journal
 *.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 *.sqlite-journal
@@ -234,3 +235,15 @@ TODO.local
 NOTES.local
 scratch/
 temp/
+
+# Legacy and Backup Files
+# ------------------------
+*.pre_*
+*.backup_*
+*backup*.log
+backup_logs/
+CLEANUP_PLAN.md
+SESSION_*_SUMMARY.md
+TEST_REPORT.md
+TEST_SUMMARY.md
+ARCHITECTURE_ANALYSIS.md

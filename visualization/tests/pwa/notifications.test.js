@@ -40,7 +40,7 @@ test.describe('Push Notifications', () => {
 
   test('should handle push subscription', async ({ page, context, browserName }) => {
     // Skip on Safari as it has different push notification handling
-    if (browserName === 'webkit') return;
+    if (browserName === 'webkit') {return;}
     
     // Grant permissions
     await context.grantPermissions(['notifications']);

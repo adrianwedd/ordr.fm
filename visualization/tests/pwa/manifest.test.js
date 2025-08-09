@@ -62,7 +62,7 @@ test.describe('PWA Manifest', () => {
 test.describe('PWA Installation', () => {
   test('should support installation prompt', async ({ page, browserName }) => {
     // Skip on Safari as it doesn't support beforeinstallprompt
-    if (browserName === 'webkit') return;
+    if (browserName === 'webkit') {return;}
     
     await page.goto('/');
     
@@ -85,7 +85,7 @@ test.describe('PWA Installation', () => {
   });
 
   test('should handle app installation lifecycle', async ({ page, browserName }) => {
-    if (browserName === 'webkit') return;
+    if (browserName === 'webkit') {return;}
     
     await page.goto('/');
     
