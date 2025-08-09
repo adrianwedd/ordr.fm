@@ -707,6 +707,257 @@ app.get('/api/search/analytics', authenticateToken, requireRole('admin'), (req, 
     });
 });
 
+// Advanced Multi-Field Search with Filters
+app.get('/api/search/advanced', async (req, res) => {
+    const { 
+        q: query, 
+        artist, 
+        album, 
+        label, 
+        year_min, 
+        year_max, 
+        quality, 
+        organization_mode,
+        limit = 50, 
+        offset = 0,
+        sort_by = 'relevance',
+        sort_order = 'desc'
+    } = req.query;
+    
+    const startTime = Date.now();
+    const safeLimit = Math.min(parseInt(limit) || 50, 200);
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
+    
+    // Build dynamic query with filters
+    let sqlQuery = `
+        SELECT id, album_artist, album_title, album_year as year, label, 
+               quality_type as quality, organization_mode, catalog_number, 
+               processed_date as created_at
+        FROM albums WHERE 1=1
+    `;
+    const params = [];
+    
+    // Text search filters
+    if (query && query.trim()) {
+        sqlQuery += ` AND (
+            album_artist LIKE ? OR 
+            album_title LIKE ? OR 
+            label LIKE ? OR 
+            catalog_number LIKE ?
+        )`;
+        const searchTerm = `%${query.trim()}%`;
+        params.push(searchTerm, searchTerm, searchTerm, searchTerm);
+    }
+    
+    // Specific field filters
+    if (artist && artist.trim()) {
+        sqlQuery += ` AND album_artist LIKE ?`;
+        params.push(`%${artist.trim()}%`);
+    }
+    
+    if (album && album.trim()) {
+        sqlQuery += ` AND album_title LIKE ?`;
+        params.push(`%${album.trim()}%`);
+    }
+    
+    if (label && label.trim()) {
+        sqlQuery += ` AND label LIKE ?`;
+        params.push(`%${label.trim()}%`);
+    }
+    
+    // Year range filter
+    if (year_min && !isNaN(year_min)) {
+        sqlQuery += ` AND album_year >= ?`;
+        params.push(parseInt(year_min));
+    }
+    
+    if (year_max && !isNaN(year_max)) {
+        sqlQuery += ` AND album_year <= ?`;
+        params.push(parseInt(year_max));
+    }
+    
+    // Quality filter
+    if (quality && ['Lossless', 'Lossy', 'Mixed'].includes(quality)) {
+        sqlQuery += ` AND quality_type = ?`;
+        params.push(quality);
+    }
+    
+    // Organization mode filter
+    if (organization_mode) {
+        sqlQuery += ` AND organization_mode = ?`;
+        params.push(organization_mode);
+    }
+    
+    // Sorting
+    let orderBy = 'processed_date DESC';
+    switch (sort_by) {
+        case 'artist':
+            orderBy = `album_artist ${sort_order.toUpperCase()}, album_title ASC`;
+            break;
+        case 'album':
+            orderBy = `album_title ${sort_order.toUpperCase()}, album_artist ASC`;
+            break;
+        case 'year':
+            orderBy = `album_year ${sort_order.toUpperCase()}, album_artist ASC`;
+            break;
+        case 'label':
+            orderBy = `label ${sort_order.toUpperCase()}, album_artist ASC`;
+            break;
+        case 'date_added':
+            orderBy = `processed_date ${sort_order.toUpperCase()}`;
+            break;
+        case 'relevance':
+        default:
+            if (query && query.trim()) {
+                // Use relevance scoring when there's a search query
+                orderBy = 'processed_date DESC'; // Will be overridden by fuzzy ranking
+            } else {
+                orderBy = 'processed_date DESC';
+            }
+            break;
+    }
+    
+    sqlQuery += ` ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
+    params.push(safeLimit, safeOffset);
+    
+    try {
+        const db = getDbSync();
+        
+        const results = await new Promise((resolve, reject) => {
+            db.all(sqlQuery, params, (err, rows) => {
+                if (err) reject(err);
+                else resolve(rows || []);
+            });
+        });
+        
+        // Get total count with same filters (without LIMIT/OFFSET)
+        let countQuery = sqlQuery.replace(/ORDER BY.*$/, '').replace(/LIMIT.*$/, '');
+        const countParams = params.slice(0, -2); // Remove limit and offset params
+        
+        const totalCount = await new Promise((resolve, reject) => {
+            db.get(countQuery.replace(/SELECT.*?FROM/, 'SELECT COUNT(*) as total FROM'), countParams, (err, row) => {
+                if (err) reject(err);
+                else resolve(row?.total || 0);
+            });
+        });
+        
+        db.close();
+        
+        // Apply fuzzy ranking if there's a search query
+        let finalResults = results;
+        if (query && query.trim() && sort_by === 'relevance') {
+            finalResults = rankSearchResults(results, query.trim());
+        }
+        
+        const response = {
+            query: query?.trim() || '',
+            filters: {
+                artist: artist?.trim() || '',
+                album: album?.trim() || '',
+                label: label?.trim() || '',
+                year_min: year_min ? parseInt(year_min) : null,
+                year_max: year_max ? parseInt(year_max) : null,
+                quality,
+                organization_mode
+            },
+            results: finalResults,
+            total: totalCount,
+            limit: safeLimit,
+            offset: safeOffset,
+            sort_by,
+            sort_order,
+            performance: {
+                queryTime: Date.now() - startTime,
+                sqlQuery: sqlQuery.substring(0, 100) + '...',
+                cacheHit: false
+            }
+        };
+        
+        // Track search analytics
+        trackSearchQuery(
+            JSON.stringify({
+                query: query?.trim() || '',
+                filters: response.filters
+            }),
+            req.user?.id || null,
+            finalResults.length,
+            'advanced',
+            Date.now() - startTime,
+            req.ip || req.connection.remoteAddress,
+            req.headers['user-agent']
+        );
+        
+        res.json(response);
+        
+    } catch (error) {
+        console.error('Advanced search error:', error);
+        res.status(500).json({
+            error: 'Advanced search operation failed',
+            code: 'ADVANCED_SEARCH_ERROR',
+            details: error.message
+        });
+    }
+});
+
+// Search facets for filter UI
+app.get('/api/search/facets', (req, res) => {
+    const db = getDbSync();
+    const facets = {};
+    
+    // Get quality distribution
+    db.all(`
+        SELECT quality_type as quality, COUNT(*) as count 
+        FROM albums 
+        WHERE quality_type IS NOT NULL 
+        GROUP BY quality_type 
+        ORDER BY count DESC
+    `, (err, qualityFacets) => {
+        if (!err && qualityFacets) facets.quality = qualityFacets;
+        
+        // Get organization modes
+        db.all(`
+            SELECT organization_mode, COUNT(*) as count 
+            FROM albums 
+            WHERE organization_mode IS NOT NULL 
+            GROUP BY organization_mode 
+            ORDER BY count DESC
+        `, (err, modeFacets) => {
+            if (!err && modeFacets) facets.organization_mode = modeFacets;
+            
+            // Get year range
+            db.get(`
+                SELECT 
+                    MIN(album_year) as min_year,
+                    MAX(album_year) as max_year,
+                    COUNT(DISTINCT album_year) as unique_years
+                FROM albums 
+                WHERE album_year IS NOT NULL AND album_year > 1900
+            `, (err, yearStats) => {
+                if (!err && yearStats) facets.year_range = yearStats;
+                
+                // Get top labels
+                db.all(`
+                    SELECT label, COUNT(*) as count 
+                    FROM albums 
+                    WHERE label IS NOT NULL 
+                    GROUP BY label 
+                    ORDER BY count DESC 
+                    LIMIT 20
+                `, (err, labelFacets) => {
+                    db.close();
+                    
+                    if (!err && labelFacets) facets.top_labels = labelFacets;
+                    
+                    res.json({
+                        facets,
+                        generated_at: new Date().toISOString()
+                    });
+                });
+            });
+        });
+    });
+});
+
 // Send periodic stats updates to subscribers
 setInterval(async () => {
     if (clients.size === 0) return;
