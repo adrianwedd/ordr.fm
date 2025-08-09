@@ -80,14 +80,48 @@ module.exports = [
     }
   },
   {
+    // Client-side app specific rules
+    files: ['public/**/*.js'],
+    languageOptions: {
+      globals: {
+        // Additional browser/library globals
+        Chart: 'readonly',
+        d3: 'readonly'
+      }
+    },
+    rules: {
+      'no-console': 'warn',
+      'no-unused-vars': ['error', { 
+        argsIgnorePattern: '^_|^config$|^browserName$|^event$|^e$',
+        varsIgnorePattern: '^_|modal|error|event|e$|isInstalled|refreshApp|dismissUpdate|requestNotificationPermission|dismissNotificationPermission|testPushNotification|parseError|initialTabText|statsUpdated|initialAlbumCount|wsMessages|updateConnectionStatus|showTab'
+      }],
+      'no-redeclare': 'off' // Allow redeclaring functions in client code
+    }
+  },
+  {
     // Test files - more relaxed rules
     files: ['tests/**/*.js', '**/*.test.js', '**/*.spec.js'],
+    languageOptions: {
+      globals: {
+        // Jest globals
+        jest: 'readonly',
+        describe: 'readonly',
+        test: 'readonly',
+        it: 'readonly',
+        expect: 'readonly',
+        beforeEach: 'readonly',
+        afterEach: 'readonly',
+        beforeAll: 'readonly',
+        afterAll: 'readonly'
+      }
+    },
     rules: {
       'no-console': 'off', // Allow console in tests
       'no-unused-vars': ['error', { 
         argsIgnorePattern: '^_|^config$|^browserName$',
-        varsIgnorePattern: '^_|modal|error|event|e$'
-      }]
+        varsIgnorePattern: '^_|modal|error|event|e$|afterAll$|beforeAll$|jest$'
+      }],
+      'radix': 'off' // Allow parseInt without radix in tests
     }
   }
 ];

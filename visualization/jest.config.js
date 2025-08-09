@@ -50,7 +50,7 @@ module.exports = {
   transform: {},
   
   // Module paths
-  modulePaths: ['<rootDir>'],
+  modulePaths: ['<rootDir>']
   
   // Global setup/teardown (Jest-specific, not Playwright)
   // globalSetup: '<rootDir>/tests/jest-global-setup.js',
