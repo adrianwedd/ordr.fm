@@ -132,6 +132,8 @@ jobs:
         NODE_ENV: test
         METADATA_DB: test.db
         STATE_DB: test_state.db
+        ORDRFM_DB: test.db
+        JWT_SECRET: test-secret-key-for-ci-only
 
     - name: Test server startup
       run: |
@@ -141,6 +143,8 @@ jobs:
         NODE_ENV: test
         PORT: 3001
         METADATA_DB: test.db
+        ORDRFM_DB: test.db
+        JWT_SECRET: test-secret-key-for-ci-only
 
   integration-tests:
     runs-on: ubuntu-latest

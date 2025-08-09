@@ -70,6 +70,7 @@ jobs:
         NODE_ENV: test
         METADATA_DB: test.db
         STATE_DB: test_state.db
+        ORDRFM_DB: test.db
         JWT_SECRET: test-secret-key-for-ci-only
 
   # Security (reduced frequency)
