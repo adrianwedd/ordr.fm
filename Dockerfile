@@ -62,7 +62,7 @@ USER ordr
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:${PORT:-3000}/health || exit 1
+    CMD curl -f http://localhost:${PORT:-3000}/api/health || exit 1
 
 # Expose ports
 EXPOSE 3000
@@ -80,6 +80,6 @@ CMD ["server"]
 LABEL org.opencontainers.image.title="ordr.fm"
 LABEL org.opencontainers.image.description="The Ultimate Music Organization System"
 LABEL org.opencontainers.image.source="https://github.com/adrianwedd/ordr.fm"
-LABEL org.opencontainers.image.version="2.1.0"
+LABEL org.opencontainers.image.version="2.5.0"
 LABEL org.opencontainers.image.authors="ordr.fm team"
 LABEL org.opencontainers.image.licenses="MIT"

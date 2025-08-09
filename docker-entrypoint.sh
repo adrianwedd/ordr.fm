@@ -25,10 +25,12 @@ run_organize() {
 # Function to run web server
 run_server() {
     echo "🌐 Starting ordr.fm web server..."
-    cd /app/server
+    cd /app/visualization
+    export DB_PATH="/app/ordr.fm.metadata.db"
     export METADATA_DB="/app/ordr.fm.metadata.db"
     export STATE_DB="/app/ordr.fm.state.db" 
     export PORT="${PORT:-3000}"
+    export NODE_ENV="${NODE_ENV:-production}"
     exec node server.js
 }
 
