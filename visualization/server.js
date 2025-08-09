@@ -292,7 +292,7 @@ setInterval(async () => {
     
     try {
         // Get quick stats for real-time updates
-        const db = getDb();
+        const db = getDbSync();
         db.get('SELECT COUNT(*) as albums FROM albums', (err, albumRow) => {
             if (err) return;
             
@@ -1026,7 +1026,7 @@ app.get('/api/stats', (req, res) => {
         return res.json(cached);
     }
     
-    const db = getDb();
+    const db = getDbSync();
     
     // Use a single optimized query instead of multiple nested queries
     const query = `
@@ -1255,7 +1255,7 @@ app.get('/api/artists', (req, res) => {
         return res.json(cached);
     }
     
-    const db = getDb();
+    const db = getDbSync();
     
     // Get all artists with their release counts - Fixed schema compatibility
     const artistQuery = `
@@ -1307,7 +1307,7 @@ app.get('/api/labels', (req, res) => {
         return res.json(cached);
     }
     
-    const db = getDb();
+    const db = getDbSync();
     
     const query = `
         SELECT label,
@@ -1341,7 +1341,7 @@ app.get('/api/labels', (req, res) => {
 
 // Get move history for undo functionality
 app.get('/api/moves', (req, res) => {
-    const db = getDb();
+    const db = getDbSync();
     const { limit = 50 } = req.query;
     
     const query = `
@@ -1364,7 +1364,7 @@ app.get('/api/moves', (req, res) => {
 
 // Get processing timeline
 app.get('/api/timeline', (req, res) => {
-    const db = getDb();
+    const db = getDbSync();
     
     const query = `
         SELECT DATE(processed_date) as date,
@@ -1408,7 +1408,7 @@ app.get('/api/version', (req, res) => {
 // Metadata editing endpoints
 // Get single album details for editing
 app.get('/api/albums/:id', (req, res) => {
-    const db = getDb();
+    const db = getDbSync();
     const albumId = parseInt(req.params.id);
     
     if (isNaN(albumId)) {
@@ -1446,7 +1446,7 @@ app.get('/api/albums/:id', (req, res) => {
 
 // Update album metadata
 app.put('/api/albums/:id', (req, res) => {
-    const db = getDb();
+    const db = getDbSync();
     const albumId = parseInt(req.params.id);
     const { album_artist, album_title, album_year, label, catalog_number, genre } = req.body;
     
@@ -1501,7 +1501,7 @@ app.put('/api/albums/:id', (req, res) => {
 
 // Update track metadata
 app.put('/api/tracks/:id', (req, res) => {
-    const db = getDb();
+    const db = getDbSync();
     const trackId = parseInt(req.params.id);
     const { title, artist, track_number, disc_number } = req.body;
     
@@ -1545,7 +1545,7 @@ app.put('/api/tracks/:id', (req, res) => {
 // Audio playback endpoints
 // Serve audio files (with range support for streaming)
 app.get('/api/audio/:albumId/:trackId', (req, res) => {
-    const db = getDb();
+    const db = getDbSync();
     const albumId = parseInt(req.params.albumId);
     const trackId = parseInt(req.params.trackId);
     
@@ -1993,7 +1993,7 @@ app.post('/api/enrichment/apply', async (req, res) => {
         return res.status(400).json({ error: 'album_id, source, and enrichment_data are required' });
     }
     
-    const db = getDb();
+    const db = getDbSync();
     
     try {
         // Update album with enrichment data
@@ -2143,7 +2143,7 @@ function calculateMusicBrainzConfidence(release, searchTerms) {
 }
 
 app.get('/api/health', (req, res) => {
-    const db = getDb();
+    const db = getDbSync(); // Use sync version for health endpoint
     
     const healthMetrics = {};
     
@@ -2293,7 +2293,7 @@ app.get('/api/duplicates', (req, res) => {
 
 // Get advanced collection insights
 app.get('/api/insights', (req, res) => {
-    const db = getDb();
+    const db = getDbSync();
     const insights = {};
     
     // Artist productivity analysis - Fixed schema compatibility
@@ -2421,7 +2421,7 @@ app.get('/api/insights', (req, res) => {
 
 // Get performance metrics
 app.get('/api/performance', (req, res) => {
-    const db = getDb();
+    const db = getDbSync();
     
     // Processing performance analysis
     db.all(`
@@ -2451,7 +2451,7 @@ app.get('/api/performance', (req, res) => {
 
 // Export data as JSON
 app.get('/api/export', exportLimiter, (req, res) => {
-    const db = getDb();
+    const db = getDbSync();
     const exportData = {};
     
     db.all('SELECT * FROM albums', (err, albums) => {
@@ -2635,7 +2635,7 @@ function generateConfigFile(config) {
 // Advanced Search API
 app.get('/api/search/albums', generalLimiter, (req, res) => {
     console.log('=== SEARCH API CALLED ===');
-    const db = getDb();
+    const db = getDbSync();
     const {
         album,
         artist,
@@ -2801,7 +2801,7 @@ app.get('/api/health', healthLimiter, (req, res) => {
         }
         
         // Try to open database
-        const db = getDb();
+        const db = getDbSync();
         db.get('SELECT COUNT(*) as count FROM albums', (err, row) => {
             db.close();
             
@@ -2869,7 +2869,7 @@ app.get('/api/search/tracks', (req, res) => {
         return res.json({ tracks: [] });
     }
     
-    const db = getDb();
+    const db = getDbSync();
     const searchTerm = `%${sanitizedQuery}%`;
     
     // Search in tracks table with album and artist info
@@ -2947,7 +2947,7 @@ app.get('/api/audio/stream/:trackId', (req, res) => {
         return res.status(400).json({ error: 'Invalid track ID format' });
     }
     
-    const db = getDb();
+    const db = getDbSync();
     
     // Get track file path
     db.get('SELECT file_path, title, artist FROM tracks WHERE id = ?', [sanitizedTrackId], (err, track) => {
@@ -3010,7 +3010,7 @@ app.get('/api/audio/stream/:trackId', (req, res) => {
 // Get track metadata for audio player
 app.get('/api/tracks/:trackId/metadata', (req, res) => {
     const { trackId } = req.params;
-    const db = getDb();
+    const db = getDbSync();
     
     const sql = `
         SELECT 
@@ -3058,7 +3058,7 @@ app.get('/api/tracks/:trackId/metadata', (req, res) => {
 // Get album tracks for playlist building
 app.get('/api/albums/:albumId/tracks', (req, res) => {
     const { albumId } = req.params;
-    const db = getDb();
+    const db = getDbSync();
     
     const sql = `
         SELECT 
@@ -3941,7 +3941,7 @@ function hasAudioFiles(dirPath) {
 // Get album metadata for editing
 app.get('/api/metadata/album/:id', (req, res) => {
     const { id } = req.params;
-    const db = getDb();
+    const db = getDbSync();
     
     // Get album data
     db.get(`
@@ -4001,7 +4001,7 @@ app.get('/api/metadata/album/:id', (req, res) => {
 // Get metadata edit history
 app.get('/api/metadata/history/:albumId', (req, res) => {
     const { albumId } = req.params;
-    const db = getDb();
+    const db = getDbSync();
     
     db.all(`
         SELECT 
@@ -4040,7 +4040,7 @@ app.post('/api/metadata/save', (req, res) => {
         return res.status(400).json({ error: 'Album ID and metadata are required' });
     }
     
-    const db = getDb();
+    const db = getDbSync();
     
     // Begin transaction
     db.serialize(() => {
