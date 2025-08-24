@@ -49,6 +49,8 @@ if [[ -f "$SCRIPT_DIR/lib/cleanup.sh" ]]; then
     source "$SCRIPT_DIR/lib/cleanup.sh"
 fi
 
+# Note: Hybrid reconstruction is now implemented directly in main processing pipeline
+
 # Load environment variables from .env file if it exists
 if [[ -f "${SCRIPT_DIR}/.env" ]]; then
     set -a  # Automatically export all variables
@@ -341,12 +343,82 @@ process_album_directory() {
     # Validate required metadata after inference attempt
     if [[ -z "$album_artist" ]] || [[ -z "$album_title" ]]; then
         log $LOG_WARNING "Missing essential metadata for: $album_dir"
-        if [[ ${SKIP_PROBLEMATIC_ALBUMS:-1} -eq 1 ]]; then
-            skip_problematic_album "$album_dir" "missing metadata"
-        else
-            move_to_unsorted "$album_dir" "missing metadata"
+        
+        # Try simple hybrid metadata reconstruction as last resort
+        log $LOG_INFO "Attempting hybrid metadata reconstruction..."
+        local dirname=$(basename "$album_dir")
+        
+        # Enhanced pattern matching for scene releases and electronic music
+        local recon_artist="" recon_title="" recon_year=""
+        
+        # Pattern 1: Scene release - artist-title-catalog-year-group
+        if [[ "$dirname" =~ ^([a-z_]+).*-([a-z_]+.*)-([a-z0-9]+)-([0-9]{4})-[a-z]+$ ]]; then
+            recon_artist="${BASH_REMATCH[1]}"
+            recon_title="${BASH_REMATCH[2]}"
+            recon_year="${BASH_REMATCH[4]}"
+            
+            # Convert underscores to spaces and clean
+            recon_artist=$(echo "$recon_artist" | tr '_' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            recon_title=$(echo "$recon_title" | tr '_' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            log $LOG_DEBUG "Scene release pattern matched: '$recon_artist' - '$recon_title' ($recon_year)"
+            
+        # Pattern 2: [CATALOG] Artist - Title (Year)
+        elif [[ "$dirname" =~ ^\[([A-Z0-9]+)\][[:space:]]*([^-]+)[[:space:]]*-[[:space:]]*([^()]*)\(([0-9]{4})\)$ ]]; then
+            recon_artist="${BASH_REMATCH[2]}"
+            recon_title="${BASH_REMATCH[3]}"
+            recon_year="${BASH_REMATCH[4]}"
+            
+            recon_artist=$(echo "$recon_artist" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            recon_title=$(echo "$recon_title" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            log $LOG_DEBUG "Catalog pattern matched: '$recon_artist' - '$recon_title' ($recon_year)"
+            
+        # Pattern 3: Artist - Title (Year) [Label]
+        elif [[ "$dirname" =~ ^([^-]+)[[:space:]]*-[[:space:]]*([^()]*)\(([0-9]{4})\)[[:space:]]*\[(.+)\]$ ]]; then
+            recon_artist="${BASH_REMATCH[1]}"
+            recon_title="${BASH_REMATCH[2]}"
+            recon_year="${BASH_REMATCH[3]}"
+            
+            recon_artist=$(echo "$recon_artist" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            recon_title=$(echo "$recon_title" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            log $LOG_DEBUG "Standard pattern matched: '$recon_artist' - '$recon_title' ($recon_year)"
+            
+        # Pattern 4: (Year) Title
+        elif [[ "$dirname" =~ ^\(([0-9]{4})\)[[:space:]]*(.+) ]]; then
+            recon_year="${BASH_REMATCH[1]}"
+            recon_title="${BASH_REMATCH[2]}"
+            
+            # Clean title
+            recon_title=$(echo "$recon_title" | sed -E 's/[[:space:]]*\[[^\]]*\]//g' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            log $LOG_DEBUG "Year prefix pattern matched: '$recon_title' ($recon_year)"
         fi
-        return 1
+        
+        # Fill gaps with reconstructed data
+        [[ -z "$album_artist" && -n "$recon_artist" ]] && album_artist="$recon_artist"
+        [[ -z "$album_title" && -n "$recon_title" ]] && album_title="$recon_title"
+        [[ -z "$album_year" && -n "$recon_year" ]] && album_year="$recon_year"
+        
+        # Calculate confidence score
+        local confidence=50
+        [[ -n "$album_artist" ]] && confidence=$((confidence + 30))
+        [[ -n "$album_title" ]] && confidence=$((confidence + 20))
+        [[ -n "$album_year" ]] && confidence=$((confidence + 10))
+        
+        # Check if reconstruction was successful
+        if [[ $confidence -ge 70 ]] && [[ -n "$album_artist" ]] && [[ -n "$album_title" ]]; then
+            log $LOG_INFO "Hybrid reconstruction successful (confidence: $confidence/100): '$album_artist' - '$album_title' ($([ -n "$album_year" ] && echo "$album_year" || echo "no year"))"
+        else
+            log $LOG_WARNING "Hybrid reconstruction failed - insufficient metadata (confidence: $confidence/100)"
+            if [[ ${SKIP_PROBLEMATIC_ALBUMS:-1} -eq 1 ]]; then
+                skip_problematic_album "$album_dir" "reconstruction failed"
+            else
+                move_to_unsorted "$album_dir" "reconstruction failed"
+            fi
+            return 1
+        fi
     fi
     
     # Resolve artist aliases
