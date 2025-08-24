@@ -277,6 +277,26 @@ extract_artist_from_parent_dir() {
     local album_path="$1"
     local parent_dir=$(basename "$(dirname "$album_path")")
     
+    # List of common system/download directories to ignore
+    local system_dirs="!Incoming|Downloads|Unsorted|Music|Albums|tmp|temp|Desktop|Documents|Lossy|Lossless|Mixed|sorted|incoming|downloads|unsorted|albums"
+    
+    # Check if parent directory is a system directory
+    if echo "$parent_dir" | grep -qE "^($system_dirs)$"; then
+        log $LOG_DEBUG "Ignoring system directory as artist: $parent_dir"
+        # Try to extract from first audio file instead
+        local first_audio=$(find "$album_path" -type f \( -iname "*.mp3" -o -iname "*.flac" -o -iname "*.m4a" -o -iname "*.ogg" \) 2>/dev/null | head -1)
+        if [[ -n "$first_audio" ]]; then
+            local file_artist=$(exiftool -AlbumArtist -Artist -s3 "$first_audio" 2>/dev/null | head -1)
+            if [[ -n "$file_artist" ]] && [[ "$file_artist" != "Unknown Artist" ]]; then
+                echo "$file_artist"
+                return 0
+            fi
+        fi
+        # Final fallback: Unknown Artist
+        echo "Unknown Artist"
+        return 0
+    fi
+    
     # Clean catalog prefixes from parent dir name
     parent_dir=$(echo "$parent_dir" | sed -E 's/^[a-z]{2,5}[0-9]+[\)]\s*//i')
     parent_dir=$(echo "$parent_dir" | sed -E 's/^[0-9]+[\)]\s*//i')
