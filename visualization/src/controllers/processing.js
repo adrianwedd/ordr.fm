@@ -217,10 +217,20 @@ class ProcessingController {
 
             const diskUsage = this._getDiskUsage();
 
+            // Check system dependencies
+            const dependencies = {
+                exiftool: await this._checkDependency('exiftool'),
+                jq: await this._checkDependency('jq'),
+                rsync: await this._checkDependency('rsync'),
+                rclone: await this._checkDependency('rclone'),
+                ffmpeg: await this._checkDependency('ffmpeg')
+            };
+
             res.json({
                 system: systemStats,
                 database: dbStats[0] || {},
                 disk: diskUsage,
+                dependencies: dependencies,
                 timestamp: new Date().toISOString()
             });
 
@@ -471,6 +481,22 @@ class ProcessingController {
         } catch (error) {
             console.error('Get disk usage error:', error);
             return null;
+        }
+    }
+
+    /**
+     * Check if a system dependency is available
+     */
+    async _checkDependency(command) {
+        const { exec } = require('child_process');
+        const util = require('util');
+        const execAsync = util.promisify(exec);
+        
+        try {
+            await execAsync(`which ${command}`);
+            return true;
+        } catch (error) {
+            return false;
         }
     }
 }

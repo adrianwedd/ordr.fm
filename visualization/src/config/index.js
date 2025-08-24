@@ -3,7 +3,7 @@ const path = require('path');
 
 // Environment configuration
 const NODE_ENV = process.env.NODE_ENV || 'development';
-const PORT = process.env.PORT || 3847;
+const PORT = process.env.PORT || 3000;
 
 // Security configuration
 const JWT_SECRET = process.env.JWT_SECRET || 'ordr-fm-default-secret-change-in-production';

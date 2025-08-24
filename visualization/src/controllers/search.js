@@ -98,17 +98,17 @@ class SearchController {
             const searchTerm = `%${query.toLowerCase().trim()}%`;
             const maxResults = Math.min(parseInt(limit), 100);
 
-            // Search albums and tracks with fuzzy matching
+            // Search albums with fuzzy matching (tracks table not implemented yet)
             const results = await databaseService.query(`
                 SELECT 
                     'album' as type,
                     id,
                     album_title as title,
                     album_artist as artist,
-                    album_year as year,
+                    year as year,
                     genre,
                     quality,
-                    file_path,
+                    path,
                     CASE 
                         WHEN LOWER(album_title) LIKE ? THEN 10
                         WHEN LOWER(album_artist) LIKE ? THEN 8
@@ -119,37 +119,11 @@ class SearchController {
                 WHERE LOWER(album_title) LIKE ? 
                    OR LOWER(album_artist) LIKE ?
                    OR LOWER(genre) LIKE ?
-                
-                UNION ALL
-                
-                SELECT 
-                    'track' as type,
-                    t.id,
-                    t.track_title as title,
-                    COALESCE(t.track_artist, a.album_artist) as artist,
-                    a.album_year as year,
-                    a.genre,
-                    t.quality,
-                    t.file_path,
-                    CASE 
-                        WHEN LOWER(t.track_title) LIKE ? THEN 10
-                        WHEN LOWER(t.track_artist) LIKE ? THEN 8
-                        WHEN LOWER(a.album_title) LIKE ? THEN 6
-                        ELSE 1
-                    END as relevance_score
-                FROM tracks t
-                JOIN albums a ON t.album_id = a.id
-                WHERE LOWER(t.track_title) LIKE ?
-                   OR LOWER(t.track_artist) LIKE ?
-                   OR LOWER(a.album_title) LIKE ?
-                
                 ORDER BY relevance_score DESC, title
                 LIMIT ?
             `, [
                 searchTerm, searchTerm, searchTerm,  // Album scoring
                 searchTerm, searchTerm, searchTerm,  // Album matching
-                searchTerm, searchTerm, searchTerm,  // Track scoring
-                searchTerm, searchTerm, searchTerm,  // Track matching
                 maxResults
             ], true); // Use cache
 
@@ -306,12 +280,12 @@ class SearchController {
             }
 
             if (year_start) {
-                conditions.push('album_year >= ?');
+                conditions.push('year >= ?');
                 params.push(parseInt(year_start));
             }
 
             if (year_end) {
-                conditions.push('album_year <= ?');
+                conditions.push('year <= ?');
                 params.push(parseInt(year_end));
             }
 
@@ -348,12 +322,12 @@ class SearchController {
 
             const albums = await databaseService.query(`
                 SELECT 
-                    id, album_title, album_artist, album_year, genre,
+                    id, album_title, album_artist, year, genre,
                     quality, track_count, total_duration, label,
-                    catalog_number, file_path
+                    catalog_number, path
                 FROM albums 
                 ${whereClause}
-                ORDER BY album_artist, album_year DESC, album_title
+                ORDER BY album_artist, year DESC, album_title
                 LIMIT ? OFFSET ?
             `, [...params, maxResults, searchOffset]);
 
@@ -410,11 +384,11 @@ class SearchController {
                 
                 SELECT 
                     'year_decade' as facet_type,
-                    CAST((album_year / 10) * 10 AS TEXT) || 's' as value,
+                    CAST((year / 10) * 10 AS TEXT) || 's' as value,
                     COUNT(*) as count
                 FROM albums 
-                WHERE album_year IS NOT NULL AND album_year > 1950
-                GROUP BY (album_year / 10)
+                WHERE year IS NOT NULL AND year > 1950
+                GROUP BY (year / 10)
                 HAVING COUNT(*) > 2
                 
                 ORDER BY facet_type, count DESC
@@ -460,7 +434,7 @@ class SearchController {
 
             const albums = await databaseService.query(`
                 SELECT 
-                    id, album_title, album_artist, album_year, 
+                    id, album_title, album_artist, year, 
                     genre, quality, track_count
                 FROM albums 
                 WHERE LOWER(album_title) LIKE ? 
@@ -510,29 +484,9 @@ class SearchController {
             const searchTerm = `%${query.toLowerCase().trim()}%`;
             const maxResults = Math.min(parseInt(limit), 100);
 
-            const tracks = await databaseService.query(`
-                SELECT 
-                    t.id, t.track_title, t.track_artist, t.track_number,
-                    t.duration, t.file_format, t.quality,
-                    a.album_title, a.album_artist, a.album_year
-                FROM tracks t
-                JOIN albums a ON t.album_id = a.id
-                WHERE LOWER(t.track_title) LIKE ?
-                   OR LOWER(t.track_artist) LIKE ?
-                   OR LOWER(a.album_title) LIKE ?
-                ORDER BY 
-                    CASE 
-                        WHEN LOWER(t.track_title) LIKE ? THEN 1
-                        WHEN LOWER(t.track_artist) LIKE ? THEN 2
-                        ELSE 3
-                    END,
-                    a.album_artist, a.album_year, t.track_number
-                LIMIT ?
-            `, [
-                searchTerm, searchTerm, searchTerm,  // WHERE conditions
-                searchTerm, searchTerm,              // ORDER conditions
-                maxResults
-            ], true);
+            // Since we don't have a tracks table yet, return empty results
+            // TODO: Implement when tracks table is created
+            const tracks = [];
 
             res.json({
                 tracks,

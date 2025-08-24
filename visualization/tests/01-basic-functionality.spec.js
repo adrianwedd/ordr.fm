@@ -16,21 +16,21 @@ test.describe('Basic Application Functionality', () => {
     const manifest = await page.locator('link[rel="manifest"]');
     await expect(manifest).toHaveAttribute('href', 'manifest.json');
     
-    // Check for meta tags
-    await expect(page.locator('meta[name="theme-color"]')).toBeVisible();
-    await expect(page.locator('meta[name="apple-mobile-web-app-capable"]')).toBeVisible();
+    // Check for meta tags (they exist but aren't "visible" in Playwright terms)
+    await expect(page.locator('meta[name="theme-color"]')).toHaveAttribute('content', '#667eea');
+    await expect(page.locator('meta[name="apple-mobile-web-app-capable"]')).toHaveAttribute('content', 'yes');
   });
 
   test('navigation works correctly', async ({ page }) => {
-    // Test tab navigation
-    await page.click('[data-tab="overview"]');
-    await expect(page.locator('[data-section="overview"]')).toBeVisible();
+    // Test tab navigation using actual button selectors
+    await page.click('button:has-text("Overview")');
+    await expect(page.locator('#overview')).toBeVisible();
     
-    await page.click('[data-tab="analytics"]');
-    await expect(page.locator('[data-section="analytics"]')).toBeVisible();
+    await page.click('button:has-text("Actions")');
+    await expect(page.locator('#actions')).toBeVisible();
     
-    await page.click('[data-tab="actions"]');
-    await expect(page.locator('[data-section="actions"]')).toBeVisible();
+    await page.click('button:has-text("Albums")');
+    await expect(page.locator('#albums')).toBeVisible();
   });
 
   test('status indicator displays correctly', async ({ page }) => {
@@ -42,9 +42,11 @@ test.describe('Basic Application Functionality', () => {
   });
 
   test('database connection status is shown', async ({ page }) => {
-    // Wait for database status to load
-    const dbStatus = page.locator('.database-status, #database-status');
-    await expect(dbStatus).toBeVisible({ timeout: 10000 });
+    // Wait for status element to load
+    const status = page.locator('#status');
+    await expect(status).toBeVisible({ timeout: 10000 });
+    // Should show connection status
+    await expect(status).toContainText(/Connected|Connecting|Disconnected/);
   });
 });
 
@@ -55,7 +57,8 @@ test.describe('Responsive Design', () => {
     
     // Check mobile layout
     await expect(page.locator('h1')).toBeVisible();
-    await expect(page.locator('[data-tab="overview"]')).toBeVisible();
+    // Tabs should be visible in mobile
+    await expect(page.locator('.tabs')).toBeVisible();
   });
 
   test('works on tablet viewport', async ({ page }) => {
@@ -63,7 +66,7 @@ test.describe('Responsive Design', () => {
     await page.goto('/');
     
     await expect(page.locator('h1')).toBeVisible();
-    await expect(page.locator('.tab-nav')).toBeVisible();
+    await expect(page.locator('.tabs')).toBeVisible();
   });
 
   test('works on desktop viewport', async ({ page }) => {

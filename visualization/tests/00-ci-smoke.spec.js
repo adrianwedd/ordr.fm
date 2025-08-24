@@ -14,9 +14,9 @@ test.describe('CI Smoke Tests', () => {
         // Status check
         await expect(page.locator('#status')).toBeVisible({ timeout: 10000 });
         
-        // Navigation works
-        await page.click('text=Albums');
-        await expect(page.locator('#tab-albums')).toBeVisible({ timeout: 5000 });
+        // Navigation works - click actual Albums tab
+        await page.click('button:has-text("Albums")');
+        await expect(page.locator('#albums')).toBeVisible({ timeout: 5000 });
         
         // Basic API connectivity (don't fail if no data)
         const response = await page.request.get('/api/stats');

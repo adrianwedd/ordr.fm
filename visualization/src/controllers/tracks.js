@@ -83,7 +83,7 @@ class TracksController {
             }
 
             // Add timestamp and ID
-            updateFields.push('last_modified = CURRENT_TIMESTAMP');
+            updateFields.push('created_at = CURRENT_TIMESTAMP');
             params.push(id);
 
             await databaseService.run(`
@@ -113,8 +113,8 @@ class TracksController {
 
             // Get track and album information
             const track = await databaseService.queryOne(`
-                SELECT t.file_path, t.track_title, t.file_format,
-                       a.album_title, a.album_artist, a.file_path as album_path
+                SELECT t.path, t.track_title, t.file_format,
+                       a.album_title, a.album_artist, a.path as album_path
                 FROM tracks t
                 JOIN albums a ON t.album_id = a.id
                 WHERE t.id = ? AND a.id = ?
@@ -127,7 +127,7 @@ class TracksController {
             }
 
             // Construct full file path
-            const filePath = path.resolve(track.file_path);
+            const filePath = path.resolve(track.path);
 
             // Check if file exists
             if (!fs.existsSync(filePath)) {
@@ -185,7 +185,7 @@ class TracksController {
             const { trackId } = req.params;
 
             const track = await databaseService.queryOne(`
-                SELECT file_path, track_title, file_format, duration
+                SELECT path, track_title, file_format, duration
                 FROM tracks 
                 WHERE id = ?
             `, [trackId]);
@@ -196,7 +196,7 @@ class TracksController {
                 });
             }
 
-            const filePath = path.resolve(track.file_path);
+            const filePath = path.resolve(track.path);
 
             if (!fs.existsSync(filePath)) {
                 return res.status(404).json({
@@ -249,7 +249,7 @@ class TracksController {
             const { trackId } = req.params;
 
             const track = await databaseService.queryOne(`
-                SELECT t.*, a.album_title, a.album_artist, a.album_year
+                SELECT t.*, a.album_title, a.album_artist, a.year
                 FROM tracks t
                 JOIN albums a ON t.album_id = a.id
                 WHERE t.id = ?
@@ -273,7 +273,7 @@ class TracksController {
                     quality: track.quality,
                     albumTitle: track.album_title,
                     albumArtist: track.album_artist,
-                    albumYear: track.album_year
+                    albumYear: track.year
                 }
             });
 

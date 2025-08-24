@@ -30,7 +30,7 @@ class AlbumsController {
      *         name: sortBy
      *         schema:
      *           type: string
-     *           enum: [album_title, album_artist, album_year, genre, quality, track_count, total_duration, created_at]
+     *           enum: [album_title, album_artist, year, genre, quality, track_count, total_duration, created_at]
      *           default: album_title
      *         description: Field to sort by
      *       - in: query
@@ -139,7 +139,7 @@ class AlbumsController {
             }
 
             if (year) {
-                conditions.push('album_year = ?');
+                conditions.push('year = ?');
                 params.push(parseInt(year));
             }
 
@@ -160,7 +160,7 @@ class AlbumsController {
 
             // Validate sort column to prevent SQL injection
             const validSortColumns = [
-                'album_title', 'album_artist', 'album_year', 'genre', 
+                'album_title', 'album_artist', 'year', 'genre', 
                 'quality', 'track_count', 'total_duration', 'created_at'
             ];
             const sortColumn = validSortColumns.includes(sortBy) ? sortBy : 'album_title';
@@ -169,9 +169,9 @@ class AlbumsController {
             // Get albums
             const albums = await databaseService.query(`
                 SELECT 
-                    id, album_title, album_artist, album_year, genre, 
-                    quality, track_count, total_duration, file_path,
-                    created_at, last_modified
+                    id, album_title, album_artist, year, genre, 
+                    quality, track_count, total_duration, path,
+                    created_at, created_at
                 FROM albums 
                 ${whereClause}
                 ORDER BY ${sortColumn} ${sortDirection}
@@ -266,9 +266,9 @@ class AlbumsController {
 
             const album = await databaseService.queryOne(`
                 SELECT 
-                    id, album_title, album_artist, album_year, genre, 
-                    quality, track_count, total_duration, file_path,
-                    created_at, last_modified, catalog_number, label,
+                    id, album_title, album_artist, year, genre, 
+                    quality, track_count, total_duration, path,
+                    created_at, created_at, catalog_number, label,
                     discogs_id, discogs_confidence
                 FROM albums 
                 WHERE id = ?
@@ -327,7 +327,7 @@ class AlbumsController {
 
             // Build update query
             const allowedFields = [
-                'album_title', 'album_artist', 'album_year', 'genre',
+                'album_title', 'album_artist', 'year', 'genre',
                 'catalog_number', 'label'
             ];
 
@@ -348,7 +348,7 @@ class AlbumsController {
             }
 
             // Add timestamp and ID
-            updateFields.push('last_modified = CURRENT_TIMESTAMP');
+            updateFields.push('created_at = CURRENT_TIMESTAMP');
             params.push(id);
 
             await databaseService.run(`
@@ -385,7 +385,7 @@ class AlbumsController {
                     COUNT(DISTINCT genre) as total_genres,
                     SUM(track_count) as total_tracks,
                     SUM(CAST(total_duration AS INTEGER)) as total_duration_seconds,
-                    AVG(album_year) as average_year,
+                    AVG(year) as average_year,
                     quality,
                     COUNT(*) as quality_count
                 FROM albums
@@ -398,7 +398,7 @@ class AlbumsController {
                     COUNT(DISTINCT genre) as total_genres,
                     SUM(track_count) as total_tracks,
                     SUM(CAST(total_duration AS INTEGER)) as total_duration_seconds,
-                    AVG(album_year) as average_year,
+                    AVG(year) as average_year,
                     'ALL' as quality,
                     0 as quality_count
                 FROM albums
@@ -422,6 +422,13 @@ class AlbumsController {
                     qualityBreakdown[stat.quality] = stat.quality_count || 0;
                 }
             });
+
+            // Add losslessCount and lossyCount for compatibility
+            if (overallStats) {
+                overallStats.losslessCount = qualityBreakdown['Lossless'] || 0;
+                overallStats.lossyCount = qualityBreakdown['Lossy'] || 0;
+                overallStats.mixedCount = qualityBreakdown['Mixed'] || 0;
+            }
 
             res.json({
                 stats: overallStats,
@@ -447,8 +454,8 @@ class AlbumsController {
                 SELECT 
                     album_artist as name,
                     COUNT(*) as album_count,
-                    MIN(album_year) as first_year,
-                    MAX(album_year) as last_year,
+                    MIN(year) as first_year,
+                    MAX(year) as last_year,
                     GROUP_CONCAT(DISTINCT genre) as genres
                 FROM albums 
                 WHERE album_artist IS NOT NULL AND album_artist != ''

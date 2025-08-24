@@ -23,6 +23,22 @@ function configureSecurityHeaders() {
         helmetConfig.hsts = false; // Disable HSTS for local HTTP development
     }
 
+    // Configure CSP with nonces for inline scripts
+    helmetConfig.contentSecurityPolicy = {
+        directives: {
+            defaultSrc: ["'self'"],
+            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net"],
+            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+            fontSrc: ["'self'", "https://fonts.gstatic.com"],
+            imgSrc: ["'self'", "data:", "blob:"],
+            connectSrc: ["'self'", "ws:", "wss:"],
+            mediaSrc: ["'self'"],
+            objectSrc: ["'none'"],
+            frameAncestors: ["'none'"],
+            upgradeInsecureRequests: []
+        }
+    }
+
     return helmet(helmetConfig);
 }
 
@@ -152,7 +168,8 @@ function suspiciousActivityDetector(req, res, next) {
     const userContent = JSON.stringify({ body, query, params });
     
     // Check for suspicious patterns
-    for (const pattern of securityConfig.monitorPatterns) {
+    const patterns = securityConfig.security?.monitorPatterns || [];
+    for (const pattern of patterns) {
         if (pattern.test(userContent)) {
             console.warn(`[SECURITY] Suspicious activity detected from ${req.ip}`, {
                 timestamp: new Date().toISOString(),

@@ -156,9 +156,9 @@ class SystemController {
             // Get all albums with tracks
             const albums = await databaseService.query(`
                 SELECT 
-                    a.id, a.album_title, a.album_artist, a.album_year,
+                    a.id, a.album_title, a.album_artist, a.year,
                     a.genre, a.quality, a.track_count, a.total_duration,
-                    a.label, a.catalog_number, a.file_path,
+                    a.label, a.catalog_number, a.path,
                     GROUP_CONCAT(
                         t.track_number || '|' || 
                         COALESCE(t.track_title, '') || '|' || 
@@ -169,7 +169,7 @@ class SystemController {
                 FROM albums a
                 LEFT JOIN tracks t ON a.id = t.album_id
                 GROUP BY a.id
-                ORDER BY a.album_artist, a.album_year, a.album_title
+                ORDER BY a.album_artist, a.year, a.album_title
             `);
 
             let exportData;
@@ -208,7 +208,7 @@ class SystemController {
                 const csvRows = albums.map(album => [
                     this._escapeCsv(album.album_title),
                     this._escapeCsv(album.album_artist),
-                    album.album_year || '',
+                    album.year || '',
                     this._escapeCsv(album.genre),
                     album.quality || '',
                     album.track_count || '',
@@ -251,17 +251,17 @@ class SystemController {
             const yearStats = await databaseService.query(`
                 SELECT 
                     CASE 
-                        WHEN album_year < 1970 THEN 'Pre-1970'
-                        WHEN album_year < 1980 THEN '1970s'
-                        WHEN album_year < 1990 THEN '1980s'
-                        WHEN album_year < 2000 THEN '1990s'
-                        WHEN album_year < 2010 THEN '2000s'
-                        WHEN album_year < 2020 THEN '2010s'
+                        WHEN year < 1970 THEN 'Pre-1970'
+                        WHEN year < 1980 THEN '1970s'
+                        WHEN year < 1990 THEN '1980s'
+                        WHEN year < 2000 THEN '1990s'
+                        WHEN year < 2010 THEN '2000s'
+                        WHEN year < 2020 THEN '2010s'
                         ELSE '2020s+'
                     END as decade,
                     COUNT(*) as count
                 FROM albums 
-                WHERE album_year IS NOT NULL
+                WHERE year IS NOT NULL
                 GROUP BY decade
                 ORDER BY decade
             `);
@@ -380,8 +380,8 @@ class SystemController {
                     COUNT(*) as total_albums,
                     SUM(track_count) as total_tracks,
                     COUNT(DISTINCT genre) as unique_genres,
-                    MIN(album_year) as earliest_year,
-                    MAX(album_year) as latest_year,
+                    MIN(year) as earliest_year,
+                    MAX(year) as latest_year,
                     SUM(total_duration) as total_duration_seconds
                 FROM albums
             `);

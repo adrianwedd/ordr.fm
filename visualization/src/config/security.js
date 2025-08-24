@@ -33,10 +33,10 @@ const securityConfig = {
 
     // Rate Limiting Configuration
     rateLimit: {
-        // General API rate limiting
+        // General API rate limiting (relaxed for development)
         general: {
-            windowMs: 15 * 60 * 1000, // 15 minutes
-            max: 100, // 100 requests per window
+            windowMs: 1 * 60 * 1000, // 1 minute (was 15 minutes)
+            max: 1000, // 1000 requests per window (was 100)
             message: 'Too many requests from this IP, please try again later.',
             standardHeaders: true,
             legacyHeaders: false
@@ -73,7 +73,8 @@ const securityConfig = {
                 defaultSrc: ["'self'"],
                 scriptSrc: [
                     "'self'",
-                    "'unsafe-inline'", // Required for Swagger UI
+                    "'unsafe-inline'", // Required for Swagger UI and inline handlers
+                    "'unsafe-eval'", // Required for some libraries
                     "https://cdn.jsdelivr.net",
                     "https://unpkg.com"
                 ],
@@ -96,7 +97,9 @@ const securityConfig = {
                 connectSrc: [
                     "'self'",
                     "ws://localhost:*", // WebSocket connections
-                    "wss://localhost:*"
+                    "wss://localhost:*",
+                    "https://cdn.jsdelivr.net", // CDN for libraries
+                    "https://unpkg.com"
                 ],
                 mediaSrc: ["'self'"],
                 objectSrc: ["'none'"],

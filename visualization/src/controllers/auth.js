@@ -78,19 +78,18 @@ class AuthController {
                 });
             }
 
-            // Get user from database
+            // Get user from database (REAL authentication, no mocks!)
             const user = await databaseService.queryOne(
                 'SELECT * FROM users WHERE username = ?',
                 [username]
             );
-
+            
             if (!user) {
                 return res.status(401).json({
                     error: 'Invalid credentials'
                 });
             }
-
-            // Verify password
+            
             const isValidPassword = await verifyPassword(password, user.password_hash);
             
             if (!isValidPassword) {

@@ -1,9 +1,9 @@
 // ordr.fm Progressive Web App Service Worker
 // Version 2.0.0 - Advanced caching and offline support
 
-const CACHE_NAME = 'ordr-fm-v2.1.0';
-const RUNTIME_CACHE = 'ordr-fm-runtime-v2.1.0';
-const DATA_CACHE = 'ordr-fm-data-v2.1.0';
+const CACHE_NAME = 'ordr-fm-v2.2.0';  // Bump version to force cache update
+const RUNTIME_CACHE = 'ordr-fm-runtime-v2.2.0';
+const DATA_CACHE = 'ordr-fm-data-v2.2.0';
 
 // Resources to cache on install
 const STATIC_RESOURCES = [
@@ -104,7 +104,12 @@ async function handleFetch(request, url) {
   const pathname = url.pathname;
   
   try {
-    // Strategy 1: Cache First for static assets
+    // Special handling for app.js - always check for updates
+    if (pathname === '/app.js') {
+      return await networkFirst(request);  // Always try network first for app.js
+    }
+    
+    // Strategy 1: Cache First for other static assets
     if (isStaticAsset(pathname)) {
       return await cacheFirst(request);
     }

@@ -93,6 +93,8 @@ resolve_artist_alias() {
     [[ "$GROUP_ARTIST_ALIASES" != "1" ]] && { echo "$artist"; return; }
     [[ -z "$alias_groups" ]] && { echo "$artist"; return; }
     
+    log $LOG_DEBUG "resolve_artist_alias: processing '$artist'"
+    
     # Normalize artist name for comparison
     local normalized_artist=$(echo "$artist" | tr '[:upper:]' '[:lower:]' | sed 's/[[:space:]]*$//')
     
@@ -101,8 +103,12 @@ resolve_artist_alias() {
     for group in "${groups[@]}"; do
         IFS=',' read -ra aliases <<< "$group"
         
-        # Get primary artist (first in group)
+        # Get primary artist (first in group) - ensure it's not empty
         local primary_artist="${aliases[0]}"
+        if [[ -z "$primary_artist" ]]; then
+            log $LOG_WARNING "Empty primary artist in alias group, skipping"
+            continue
+        fi
         
         # Check if input artist matches any alias
         for alias in "${aliases[@]}"; do
@@ -244,6 +250,7 @@ build_organization_path() {
     local mode="$1"
     local album_data="$2"  # Pipe-delimited data
     local quality="$3"
+    local album_dir="${4:-}"  # Optional album directory path
     
     local artist=$(echo "$album_data" | cut -d'|' -f1)
     local title=$(echo "$album_data" | cut -d'|' -f2)
@@ -251,12 +258,30 @@ build_organization_path() {
     local catalog=$(echo "$album_data" | cut -d'|' -f4)
     local year=$(echo "$album_data" | cut -d'|' -f5)
     
+    # Detect disc number from directory path
+    local disc_suffix=""
+    if [[ -n "$album_dir" ]]; then
+        # Enhanced disc detection patterns
+        if [[ "$album_dir" =~ /Disc[[:space:]]*([0-9]+)$ ]] || [[ "$album_dir" =~ /CD[[:space:]]*([0-9]+)$ ]] || \
+           [[ "$album_dir" =~ /Disk[[:space:]]*([0-9]+)$ ]] || [[ "$album_dir" =~ /(CD|Disc|Disk)[[:space:]]*([0-9]+)[[:space:]]*$ ]]; then
+            local disc_num="${BASH_REMATCH[1]:-${BASH_REMATCH[2]}}"
+            disc_suffix=" (Disc ${disc_num})"
+            log $LOG_DEBUG "Detected disc number: $disc_num from path: $album_dir"
+        fi
+    fi
+    
     local path=""
     
     case "$mode" in
         "artist")
-            path="${quality}/${artist}/${title}"
+            # New format: Quality/Artist/Artist - Album (YYYY) [Label] [CAT]
+            path="${quality}/${artist}/${artist} - ${title}"
             [[ -n "$year" ]] && path="${path} (${year})"
+            # Add label and catalog info separately  
+            [[ -n "$label" ]] && path="${path} [${label}]"
+            [[ -n "$catalog" ]] && path="${path} [${catalog}]"
+            # Add disc suffix for multi-disc albums
+            [[ -n "$disc_suffix" ]] && path="${path}${disc_suffix}"
             ;;
         "label")
             path="${quality}/Labels/${label}/${artist} - ${title}"
@@ -267,8 +292,11 @@ build_organization_path() {
             path="${quality}/Series/${series_name}/${catalog} - ${artist} - ${title}"
             ;;
         "compilation")
-            path="${quality}/Compilations/${title}"
+            # Compilations: Quality/Various Artists/Various Artists - Album (YYYY) [Label] [CAT]
+            path="${quality}/Various Artists/Various Artists - ${title}"
             [[ -n "$year" ]] && path="${path} (${year})"
+            [[ -n "$label" ]] && path="${path} [${label}]"
+            [[ -n "$catalog" ]] && path="${path} [${catalog}]"
             ;;
         "underground")
             local folder_name="${catalog:-$year}"
@@ -286,8 +314,24 @@ build_organization_path() {
             ;;
     esac
     
-    # Sanitize the entire path
-    echo "$path" | sed 's/[\\/:*?"<>|]\+/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//'
+    # Truncate overly long path components (limit to 100 chars for album title)
+    if [[ ${#title} -gt 100 ]]; then
+        title="${title:0:97}..."
+        log $LOG_DEBUG "Truncated long album title to: $title"
+    fi
+    
+    # Rebuild path with truncated title if needed
+    case "$mode" in
+        "artist")
+            path="${quality}/${artist}/${artist} - ${title}"
+            [[ -n "$year" ]] && path="${path} (${year})"
+            [[ -n "$label" ]] && path="${path} [${label}]"
+            [[ -n "$catalog" ]] && path="${path} [${catalog}]"
+            ;;
+    esac
+    
+    # Sanitize the entire path (remove newlines, control chars, and invalid filename chars)
+    echo "$path" | tr -d '\n\r\t' | sed 's/[\\*?"<>|[:cntrl:]]/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//' | sed 's/  \+/ /g'
 }
 
 # Apply organization pattern
@@ -324,7 +368,7 @@ apply_organization_pattern() {
     path=$(echo "$path" | sed 's|//\+|/|g' | sed 's|/$||')
     
     # Sanitize the result
-    echo "$path" | sed 's/[\\/:*?"<>|]\+/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//'
+    echo "$path" | sed 's/[\\*?"<>|]/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//'
 }
 
 # Detect vinyl side markers in track names
@@ -369,6 +413,73 @@ get_vinyl_position() {
     fi
     
     echo "$position"
+}
+
+# Generate new filename based on pattern: nn - Track - Album - Artist.ext
+# Only renames when we have complete metadata
+generate_track_filename() {
+    local track_file="$1"
+    local track_number="$2"
+    local track_title="$3"
+    local album_title="$4"
+    local artist_name="$5"
+    local enable_renaming="${6:-1}"  # Default enabled, can be disabled
+    
+    # Get original filename and extension
+    local original_filename=$(basename "$track_file")
+    local extension="${original_filename##*.}"
+    
+    # If renaming is disabled, return original filename
+    if [[ "$enable_renaming" != "1" ]]; then
+        echo "$original_filename"
+        return 0
+    fi
+    
+    # Only rename if we have complete metadata
+    if [[ -z "$track_number" ]] || [[ -z "$track_title" ]] || [[ -z "$album_title" ]] || [[ -z "$artist_name" ]]; then
+        log $LOG_DEBUG "Incomplete metadata for track renaming, keeping original filename: $original_filename"
+        echo "$original_filename"
+        return 0
+    fi
+    
+    # Format track number with leading zero if needed
+    local formatted_track_number
+    if [[ "$track_number" =~ ^[0-9]+$ ]]; then
+        formatted_track_number=$(printf "%02d" "$track_number")
+    else
+        # Clean track number of invalid filename characters (like "/")
+        formatted_track_number=$(echo "$track_number" | sed 's/[\\/:*?"<>|]/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//')
+    fi
+    
+    # Sanitize each component for filename safety
+    local clean_track_title=$(echo "$track_title" | sed 's/[\\/:*?"<>|]/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//')
+    local clean_album_title=$(echo "$album_title" | sed 's/[\\/:*?"<>|]/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//')
+    local clean_artist_name=$(echo "$artist_name" | sed 's/[\\/:*?"<>|]/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//')
+    
+    # Build new filename: nn - Track - Album - Artist.ext
+    local new_filename="${formatted_track_number} - ${clean_track_title} - ${clean_album_title} - ${clean_artist_name}.${extension}"
+    
+    log $LOG_DEBUG "Generated new filename: $original_filename -> $new_filename"
+    echo "$new_filename"
+}
+
+# Check if album appears to be a compilation based on artist variations
+is_compilation_album() {
+    local exiftool_output="$1"
+    local artist_count=$(echo "$exiftool_output" | jq -r '.[].Artist // .[].Albumartist // ""' | sort -u | grep -v '^$' | wc -l)
+    
+    # If more than 3 different artists, likely a compilation
+    if [[ "$artist_count" -gt 3 ]]; then
+        return 0
+    fi
+    
+    # Check for common compilation indicators
+    local album_artist=$(echo "$exiftool_output" | jq -r '.[0].Albumartist // .[0].Artist // ""' | tr '[:upper:]' '[:lower:]')
+    if [[ "$album_artist" =~ (various|compilation|soundtrack|mixed|sampler) ]]; then
+        return 0
+    fi
+    
+    return 1
 }
 
 # Export all functions

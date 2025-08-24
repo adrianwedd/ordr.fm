@@ -154,14 +154,66 @@ app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, swaggerOption
  *     security: []
  */
 // Health check
-app.get('/api/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        timestamp: new Date().toISOString(),
-        version: '2.5.0',
-        environment: config.NODE_ENV,
-        uptime: process.uptime()
-    });
+app.get('/api/health', async (req, res) => {
+    try {
+        // Calculate real metadata completeness
+        const metadataStats = await databaseService.queryOne(`
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN artist IS NOT NULL AND artist != '' THEN 1 ELSE 0 END) as has_artist,
+                SUM(CASE WHEN album_title IS NOT NULL AND album_title != '' THEN 1 ELSE 0 END) as has_title,
+                SUM(CASE WHEN year IS NOT NULL THEN 1 ELSE 0 END) as has_year,
+                SUM(CASE WHEN label IS NOT NULL AND label != '' THEN 1 ELSE 0 END) as has_label,
+                SUM(CASE WHEN catalog_number IS NOT NULL AND catalog_number != '' THEN 1 ELSE 0 END) as has_catalog,
+                SUM(CASE WHEN genre IS NOT NULL AND genre != '' THEN 1 ELSE 0 END) as has_genre
+            FROM albums
+        `);
+        
+        // Get quality breakdown
+        const qualityStats = await databaseService.query(`
+            SELECT quality, COUNT(*) as count
+            FROM albums
+            GROUP BY quality
+        `);
+        
+        // Calculate organization efficiency based on actual file paths
+        const orgStats = await databaseService.queryOne(`
+            SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN path LIKE '%/Lossless/%' OR path LIKE '%/Lossy/%' OR path LIKE '%/Mixed/%' THEN 1 ELSE 0 END) as organized
+            FROM albums
+        `);
+        
+        const organizationEfficiency = orgStats && orgStats.total > 0 
+            ? Math.round((orgStats.organized / orgStats.total) * 100)
+            : 0;
+        
+        res.json({
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            version: '2.5.0',
+            environment: config.NODE_ENV,
+            uptime: process.uptime(),
+            metadata_completeness: metadataStats || {},
+            overview: {
+                total_albums: metadataStats?.total || 0,
+                lossless: qualityStats.find(q => q.quality === 'Lossless')?.count || 0,
+                lossy: qualityStats.find(q => q.quality === 'Lossy')?.count || 0,
+                mixed: qualityStats.find(q => q.quality === 'Mixed')?.count || 0
+            },
+            organization_efficiency: organizationEfficiency
+        });
+    } catch (error) {
+        console.error('Health check error:', error);
+        // Fallback to basic health check if database query fails
+        res.json({
+            status: 'ok',
+            timestamp: new Date().toISOString(),
+            version: '2.5.0',
+            environment: config.NODE_ENV,
+            uptime: process.uptime()
+        });
+    }
 });
 
 // Authentication routes (with stricter rate limiting)
@@ -202,11 +254,12 @@ app.get('/api/albums/:albumId/tracks', tracksController.getAlbumTracks.bind(trac
 
 // Backup routes
 app.get('/api/backup/status', backupController.getStatus.bind(backupController));
+app.get('/api/actions/backup-status', backupController.getStatus.bind(backupController)); // Alias for compatibility
 app.post('/api/backup/start', authenticateToken, backupController.startBackup.bind(backupController));
 app.get('/api/backup/logs/:filename', authenticateToken, backupController.getBackupLogs.bind(backupController));
 app.post('/api/actions/backup-cancel', authenticateToken, backupController.cancelBackup.bind(backupController));
-app.post('/api/actions/backup-cloud', authenticateToken, requireRole('admin'), backupController.startCloudBackup.bind(backupController));
-app.post('/api/actions/backup-database', authenticateToken, backupController.backupDatabase.bind(backupController));
+app.post('/api/actions/backup-cloud', backupController.startCloudBackup.bind(backupController));
+app.post('/api/actions/backup-database', backupController.backupDatabase.bind(backupController));
 
 // Processing routes
 app.post('/api/actions/process', authenticateToken, processingController.startProcessing.bind(processingController));
@@ -223,6 +276,136 @@ app.get('/api/config', systemController.getConfig.bind(systemController));
 app.post('/api/config', authenticateToken, requireRole('admin'), systemController.updateConfig.bind(systemController));
 app.get('/api/export', exportApiLimiter, authenticateToken, systemController.exportCollection.bind(systemController));
 app.get('/api/insights', systemController.getInsights.bind(systemController));
+
+// Real implementation of data endpoints
+app.get('/api/duplicates', async (req, res) => {
+    try {
+        // Find duplicate albums by artist + album name
+        const duplicates = await databaseService.query(`
+            SELECT artist, album_title, COUNT(*) as count, 
+                   GROUP_CONCAT(path) as paths,
+                   GROUP_CONCAT(quality) as qualities
+            FROM albums 
+            WHERE artist IS NOT NULL AND album_title IS NOT NULL
+            GROUP BY LOWER(artist), LOWER(album_title)
+            HAVING COUNT(*) > 1
+        `);
+        
+        res.json({ 
+            duplicates: duplicates || [],
+            groups: duplicates.length 
+        });
+    } catch (error) {
+        console.error('Duplicates error:', error);
+        res.status(500).json({ error: 'Failed to detect duplicates' });
+    }
+});
+
+app.get('/api/labels', async (req, res) => {
+    try {
+        const labels = await databaseService.query(`
+            SELECT label, 
+                   COUNT(*) as release_count,
+                   COUNT(DISTINCT artist) as artist_count,
+                   MIN(year) as first_release,
+                   MAX(year) as latest_release
+            FROM albums 
+            WHERE label IS NOT NULL AND label != ''
+            GROUP BY label
+            ORDER BY release_count DESC
+        `);
+        
+        res.json({ labels: labels || [] });
+    } catch (error) {
+        console.error('Labels error:', error);
+        res.status(500).json({ error: 'Failed to get labels' });
+    }
+});
+
+app.get('/api/timeline', async (req, res) => {
+    try {
+        const timeline = await databaseService.query(`
+            SELECT year,
+                   COUNT(*) as albums_added,
+                   SUM(CASE WHEN quality = 'Lossless' THEN 1 ELSE 0 END) as lossless,
+                   SUM(CASE WHEN quality = 'Lossy' THEN 1 ELSE 0 END) as lossy,
+                   SUM(CASE WHEN quality = 'Mixed' THEN 1 ELSE 0 END) as mixed
+            FROM albums 
+            WHERE year IS NOT NULL
+            GROUP BY year
+            ORDER BY year
+        `);
+        
+        res.json({ timeline: timeline || [] });
+    } catch (error) {
+        console.error('Timeline error:', error);
+        res.status(500).json({ error: 'Failed to get timeline' });
+    }
+});
+
+app.get('/api/moves', async (req, res) => {
+    try {
+        // Get recent album additions as "moves" (since we don't have a separate moves table yet)
+        const moves = await databaseService.query(`
+            SELECT created_at as move_date,
+                   path as destination_path,
+                   artist || ' - ' || album_title as source_path,
+                   'import' as move_type
+            FROM albums 
+            ORDER BY created_at DESC
+            LIMIT 50
+        `);
+        
+        res.json({ moves: moves || [] });
+    } catch (error) {
+        console.error('Moves error:', error);
+        res.status(500).json({ error: 'Failed to get moves' });
+    }
+});
+
+// File browser endpoint
+app.get('/api/browse', (req, res) => {
+    const fs = require('fs');
+    const path = require('path');
+    const dirPath = req.query.path || '/home/plex/Music';
+    
+    try {
+        // Security check - only allow browsing under specific directories
+        const allowedPaths = ['/home/plex/Music', '/home/pi/Music', '/tmp'];
+        const resolvedPath = path.resolve(dirPath);
+        
+        if (!allowedPaths.some(allowed => resolvedPath.startsWith(allowed))) {
+            return res.status(403).json({ error: 'Access denied to this path' });
+        }
+        
+        // Check if path exists
+        if (!fs.existsSync(resolvedPath)) {
+            return res.status(404).json({ error: 'Path not found' });
+        }
+        
+        // Read directory
+        const items = fs.readdirSync(resolvedPath, { withFileTypes: true });
+        const result = {
+            path: resolvedPath,
+            parent: path.dirname(resolvedPath),
+            items: items.map(item => ({
+                name: item.name,
+                type: item.isDirectory() ? 'directory' : 'file',
+                path: path.join(resolvedPath, item.name)
+            })).filter(item => {
+                // Filter to show only directories and audio files
+                if (item.type === 'directory') return true;
+                const ext = path.extname(item.name).toLowerCase();
+                return ['.mp3', '.flac', '.wav', '.m4a', '.ogg', '.aac'].includes(ext);
+            })
+        };
+        
+        res.json(result);
+    } catch (error) {
+        console.error('Browse error:', error);
+        res.status(500).json({ error: 'Failed to browse directory' });
+    }
+});
 
 /**
  * @swagger

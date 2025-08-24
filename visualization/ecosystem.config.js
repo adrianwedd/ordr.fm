@@ -6,14 +6,16 @@ module.exports = {
     // Production environment
     env: {
       NODE_ENV: 'production',
-      PORT: 3847
+      PORT: 3000,
+      JWT_SECRET: process.env.JWT_SECRET || require('crypto').randomBytes(32).toString('base64')
     },
     
     // Development environment  
     env_development: {
       NODE_ENV: 'development',
-      PORT: 3847,
-      watch: true
+      PORT: 3000,
+      watch: true,
+      JWT_SECRET: process.env.JWT_SECRET || 'dev-secret'
     },
     
     // Process management
@@ -38,7 +40,7 @@ module.exports = {
     // Health monitoring
     health_check_http: {
       path: '/api/health',
-      port: 3847
+      port: 3000
     },
     
     // Environment variables

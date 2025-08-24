@@ -43,8 +43,9 @@ function performanceTracking(req, res, next) {
  * Middleware to add performance headers to responses
  */
 function performanceHeaders(req, res, next) {
-    // Add processing time header
-    res.on('finish', () => {
+    // Set headers before response is sent
+    const originalSend = res.send;
+    res.send = function(data) {
         if (req.startTime) {
             const duration = Date.now() - req.startTime;
             res.set('X-Response-Time', `${duration}ms`);
@@ -54,7 +55,9 @@ function performanceHeaders(req, res, next) {
         if (req.requestId) {
             res.set('X-Request-ID', req.requestId);
         }
-    });
+        
+        originalSend.call(this, data);
+    };
     
     next();
 }

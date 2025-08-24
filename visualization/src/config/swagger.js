@@ -54,7 +54,7 @@ const options = {
                             type: 'string',
                             description: 'Album artist name'
                         },
-                        album_year: {
+                        year: {
                             type: 'integer',
                             description: 'Release year'
                         },
@@ -75,7 +75,7 @@ const options = {
                             type: 'integer',
                             description: 'Total duration in seconds'
                         },
-                        file_path: {
+                        path: {
                             type: 'string',
                             description: 'File system path to album'
                         },
@@ -96,7 +96,7 @@ const options = {
                             format: 'date-time',
                             description: 'Creation timestamp'
                         },
-                        last_modified: {
+                        created_at: {
                             type: 'string',
                             format: 'date-time',
                             description: 'Last modification timestamp'
@@ -106,17 +106,17 @@ const options = {
                         id: 1,
                         album_title: 'Selected Ambient Works 85-92',
                         album_artist: 'Aphex Twin',
-                        album_year: 1992,
+                        year: 1992,
                         genre: 'Electronic',
                         quality: 'Lossless',
                         track_count: 13,
                         total_duration: 4608,
-                        file_path: '/music/Electronic/Aphex Twin/Selected Ambient Works 85-92 (1992)',
+                        path: '/music/Electronic/Aphex Twin/Selected Ambient Works 85-92 (1992)',
                         label: 'R&S Records',
                         catalog_number: 'RS 9206 CD',
                         discogs_id: 9689,
                         created_at: '2024-01-15T10:30:00Z',
-                        last_modified: '2024-01-15T10:30:00Z'
+                        created_at: '2024-01-15T10:30:00Z'
                     }
                 },
                 Track: {
@@ -160,7 +160,7 @@ const options = {
                             type: 'string',
                             description: 'Original file name'
                         },
-                        file_path: {
+                        path: {
                             type: 'string',
                             description: 'Full file system path'
                         }

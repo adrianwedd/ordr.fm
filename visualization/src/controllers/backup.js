@@ -20,7 +20,9 @@ class BackupController {
             
             if (activeBackup) {
                 return res.json({
+                    isRunning: true,
                     status: 'running',
+                    currentPid: activeBackup.pid,
                     progress: activeBackup.progress || 0,
                     startTime: activeBackup.startTime,
                     currentFile: activeBackup.currentFile,
@@ -34,7 +36,9 @@ class BackupController {
             const lastBackup = this.backupHistory[this.backupHistory.length - 1];
             
             res.json({
+                isRunning: false,
                 status: 'idle',
+                currentPid: null,
                 lastBackup: lastBackup || null,
                 totalBackups: this.backupHistory.length,
                 nextScheduled: null // Would implement scheduling
@@ -224,7 +228,8 @@ class BackupController {
     async backupDatabase(req, res) {
         try {
             const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const backupPath = path.join(__dirname, '../../backups', `database_${timestamp}.sql`);
+            const backupFilename = `database_${timestamp}.db`;
+            const backupPath = path.join(__dirname, '../../backups', backupFilename);
 
             // Create backup directory if it doesn't exist
             const backupDir = path.dirname(backupPath);
@@ -232,42 +237,34 @@ class BackupController {
                 fs.mkdirSync(backupDir, { recursive: true });
             }
 
-            // Use sqlite3 to dump database
-            const dbPath = path.join(__dirname, '../../data/metadata.db');
-            const process = spawn('sqlite3', [dbPath, '.dump'], {
-                stdio: ['pipe', 'pipe', 'pipe']
-            });
-
-            const writeStream = fs.createWriteStream(backupPath);
-            process.stdout.pipe(writeStream);
-
-            process.on('close', (code) => {
-                if (code === 0) {
-                    const stats = fs.statSync(backupPath);
-                    res.json({
-                        message: 'Database backup completed successfully',
-                        backupFile: path.basename(backupPath),
-                        size: stats.size,
-                        timestamp
-                    });
-                } else {
-                    res.status(500).json({
-                        error: 'Database backup failed'
-                    });
-                }
-            });
-
-            process.on('error', (error) => {
-                console.error('Database backup error:', error);
-                res.status(500).json({
-                    error: 'Failed to start database backup process'
+            // Simple file copy for SQLite database backup
+            const dbPath = path.join(__dirname, '../../ordr.fm.metadata.db');
+            
+            // Check if source database exists
+            if (!fs.existsSync(dbPath)) {
+                return res.status(404).json({
+                    error: 'Database file not found'
                 });
+            }
+
+            // Copy the database file
+            fs.copyFileSync(dbPath, backupPath);
+            
+            // Get file stats
+            const stats = fs.statSync(backupPath);
+            
+            res.json({
+                message: 'Database backup completed successfully',
+                backupFile: backupFilename,
+                size: stats.size,
+                timestamp,
+                path: backupPath
             });
 
         } catch (error) {
             console.error('Backup database error:', error);
             res.status(500).json({
-                error: 'Internal server error during database backup'
+                error: 'Internal server error during database backup: ' + error.message
             });
         }
     }
