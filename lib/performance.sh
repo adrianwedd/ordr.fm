@@ -39,9 +39,9 @@ calculate_optimal_batch_size() {
     local cpu_cores=$(nproc 2>/dev/null || echo 4)
     local available_mem=$(free -m 2>/dev/null | awk 'NR==2 {print $7}' || echo 2048)
     
-    # Base calculation on available resources
-    local mem_based_batch=$((available_mem / 10))  # Assume ~10MB per album processing
-    local cpu_based_batch=$((cpu_cores * 25))      # 25 albums per core
+    # Conservative calculation for resource-constrained systems
+    local mem_based_batch=$((available_mem / 20))  # Assume ~20MB per album processing (more conservative)
+    local cpu_based_batch=$((cpu_cores * 15))      # 15 albums per core (reduced from 25)
     
     # Take the smaller of the two
     local optimal_batch=$mem_based_batch
@@ -53,6 +53,13 @@ calculate_optimal_batch_size() {
     
     # For very large collections, use smaller batches
     if [[ $total_albums -gt 10000 ]]; then
+        optimal_batch=$((optimal_batch / 2))
+    fi
+    
+    # Memory pressure detection - reduce batch size if low memory
+    local swap_used=$(free -m | awk 'NR==3 {print $3}')
+    if [[ $swap_used -gt 100 ]]; then
+        log $LOG_WARNING "Memory pressure detected (${swap_used}MB swap used). Reducing batch size."
         optimal_batch=$((optimal_batch / 2))
     fi
     
@@ -155,15 +162,23 @@ PRAGMA page_size = 4096;
 PRAGMA busy_timeout = 10000;
 EOF
     
-    # Create indexes if not exist
-    sqlite3 "$db_file" << EOF
-CREATE INDEX IF NOT EXISTS idx_processed_path ON processed_directories(path);
-CREATE INDEX IF NOT EXISTS idx_processed_status ON processed_directories(status);
-CREATE INDEX IF NOT EXISTS idx_processed_timestamp ON processed_directories(timestamp);
-CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(album_artist);
-CREATE INDEX IF NOT EXISTS idx_albums_path ON albums(source_path);
-CREATE INDEX IF NOT EXISTS idx_moves_operation ON move_operations(operation_id);
-EOF
+    # Create indexes only for tables that exist in this database
+    local tables_check=$(sqlite3 "$db_file" "SELECT name FROM sqlite_master WHERE type='table';" 2>/dev/null || echo "")
+    
+    if echo "$tables_check" | grep -q "processed_directories"; then
+        sqlite3 "$db_file" "CREATE INDEX IF NOT EXISTS idx_processed_path ON processed_directories(directory_path);" 2>/dev/null || true
+        sqlite3 "$db_file" "CREATE INDEX IF NOT EXISTS idx_processed_status ON processed_directories(status);" 2>/dev/null || true
+        sqlite3 "$db_file" "CREATE INDEX IF NOT EXISTS idx_processed_timestamp ON processed_directories(last_processed);" 2>/dev/null || true
+    fi
+    
+    if echo "$tables_check" | grep -q "albums"; then
+        sqlite3 "$db_file" "CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(album_artist);" 2>/dev/null || true
+        sqlite3 "$db_file" "CREATE INDEX IF NOT EXISTS idx_albums_path ON albums(directory_path);" 2>/dev/null || true
+    fi
+    
+    if echo "$tables_check" | grep -q "move_operations"; then
+        sqlite3 "$db_file" "CREATE INDEX IF NOT EXISTS idx_moves_operation ON move_operations(operation_id);" 2>/dev/null || true
+    fi
     
     # Analyze for query optimization
     sqlite3 "$db_file" "ANALYZE;"
@@ -236,6 +251,12 @@ process_large_collection_parallel() {
     local failed=0
     
     for ((i=start_position; i<total_albums; i+=batch_size)); do
+        # Resource monitoring and throttling
+        if command -v should_throttle_processing >/dev/null 2>&1 && should_throttle_processing; then
+            log $LOG_INFO "System under load - pausing for 10 seconds"
+            command -v smart_sleep >/dev/null 2>&1 && smart_sleep 10 || sleep 10
+        fi
+        
         local batch_end=$((i + batch_size))
         [[ $batch_end -gt $total_albums ]] && batch_end=$total_albums
         

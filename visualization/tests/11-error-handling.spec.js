@@ -341,7 +341,7 @@ test.describe('Error Handling Scenarios in UI', () => {
                             if (originalOnMessage) {
                                 try {
                                     originalOnMessage(malformedEvent);
-                                } catch (e) {
+                                } catch (_e) {
                                     console.log('WebSocket message parsing error handled');
                                 }
                             }

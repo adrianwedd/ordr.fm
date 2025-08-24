@@ -407,7 +407,7 @@ class ProcessingController {
             job.status = 'enhancing';
 
             for (const albumId of job.albumIds) {
-                if (job.status === 'cancelled') break;
+                if (job.status === 'cancelled') {break;}
 
                 job.currentAlbum = albumId;
                 

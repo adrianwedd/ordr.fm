@@ -258,6 +258,11 @@ build_organization_path() {
     local catalog=$(echo "$album_data" | cut -d'|' -f4)
     local year=$(echo "$album_data" | cut -d'|' -f5)
     
+    # Sanitize artist name to remove forward slashes and other problematic characters
+    # This prevents "DJ /Rupture" from creating nested directories
+    artist=$(sanitize_filename "$artist")
+    title=$(sanitize_filename "$title")
+    
     # Detect disc number from directory path
     local disc_suffix=""
     if [[ -n "$album_dir" ]]; then
@@ -445,6 +450,8 @@ generate_track_filename() {
     # Format track number with leading zero if needed
     local formatted_track_number
     if [[ "$track_number" =~ ^[0-9]+$ ]]; then
+        # Force decimal interpretation by removing leading zeros first
+        track_number=$((10#$track_number))
         formatted_track_number=$(printf "%02d" "$track_number")
     else
         # Clean track number of invalid filename characters (like "/")

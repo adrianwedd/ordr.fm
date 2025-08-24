@@ -6,7 +6,7 @@ const NODE_ENV = process.env.NODE_ENV || 'development';
 const PORT = process.env.PORT || 3000;
 
 // Security configuration
-const JWT_SECRET = process.env.JWT_SECRET || 'ordr-fm-default-secret-change-in-production';
+const JWT_SECRET = process.env.JWT_SECRET || 'aa1fe4e193a34edafb64905890f7405c8cecb811f312276277980653ae694fd9';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '24h';
 const BCRYPT_ROUNDS = 12;
 

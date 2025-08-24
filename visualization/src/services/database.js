@@ -36,7 +36,7 @@ class DatabaseService {
      * @returns {Promise<void>}
      */
     async disconnect() {
-        if (!this.db) return;
+        if (!this.db) {return;}
 
         return new Promise((resolve) => {
             this.db.close((err) => {

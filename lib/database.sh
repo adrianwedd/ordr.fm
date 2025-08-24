@@ -211,6 +211,12 @@ track_album_metadata() {
     local organization_mode=$(echo "$album_data" | cut -d'|' -f8)
     local organized_path=$(echo "$album_data" | cut -d'|' -f9)
     
+    # Ensure quality type is valid
+    case "$quality_type" in
+        "Lossless"|"Lossy"|"Mixed") ;;
+        *) quality_type="Mixed" ;;
+    esac
+    
     # Insert or update album record
     sqlite3 "$db_path" <<EOF
 INSERT OR REPLACE INTO albums 
@@ -218,7 +224,7 @@ INSERT OR REPLACE INTO albums
  quality_type, organization_mode, organized_path)
 VALUES 
 ('$(sql_escape "$directory_path")', '$(sql_escape "$album_artist")', 
- '$(sql_escape "$album_title")', ${album_year:-NULL}, $track_count, $total_size,
+ '$(sql_escape "$album_title")', ${album_year:-NULL}, ${track_count:-0}, ${total_size:-0},
  '$(sql_escape "$quality_type")', '$(sql_escape "$organization_mode")', 
  '$(sql_escape "$organized_path")');
 EOF

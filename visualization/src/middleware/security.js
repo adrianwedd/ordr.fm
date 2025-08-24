@@ -19,24 +19,15 @@ function configureSecurityHeaders() {
     
     // Development-specific adjustments
     if (config.isDevelopment()) {
-        helmetConfig.contentSecurityPolicy.directives.upgradeInsecureRequests = null;
+        if (helmetConfig.contentSecurityPolicy && helmetConfig.contentSecurityPolicy.directives) {
+            helmetConfig.contentSecurityPolicy.directives.upgradeInsecureRequests = null;
+        }
         helmetConfig.hsts = false; // Disable HSTS for local HTTP development
     }
 
-    // Configure CSP with nonces for inline scripts
-    helmetConfig.contentSecurityPolicy = {
-        directives: {
-            defaultSrc: ["'self'"],
-            scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net"],
-            styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
-            fontSrc: ["'self'", "https://fonts.gstatic.com"],
-            imgSrc: ["'self'", "data:", "blob:"],
-            connectSrc: ["'self'", "ws:", "wss:"],
-            mediaSrc: ["'self'"],
-            objectSrc: ["'none'"],
-            frameAncestors: ["'none'"],
-            upgradeInsecureRequests: []
-        }
+    // Disable CSP for development to fix CDN loading issues
+    if (config.isDevelopment()) {
+        helmetConfig.contentSecurityPolicy = false;
     }
 
     return helmet(helmetConfig);

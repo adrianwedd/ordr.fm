@@ -36,22 +36,51 @@ class PerformanceMonitor extends EventEmitter {
         this.thresholds = {
             slowRequest: 1000, // 1 second
             slowQuery: 500,    // 500ms
-            highMemory: 0.8,   // 80% of available memory
-            highCpu: 0.7       // 70% CPU usage
+            highMemory: 0.95,  // 95% of available memory (raised from 80%)
+            highCpu: 0.9       // 90% CPU usage (raised from 70%)
         };
         
-        this.isEnabled = true;
+        // Memory management limits
+        this.limits = {
+            maxResponses: 500,       // Reduced from 1000
+            maxQueries: 250,         // Reduced from 500
+            maxSlowQueries: 50,      // New limit
+            maxSystemMetrics: 50,    // Reduced from 100
+            maxActiveRequests: 100   // New limit
+        };
+        
+        this.isEnabled = process.env.NODE_ENV === 'production';
         this.startTime = Date.now();
         
-        // Start system monitoring
-        this.startSystemMonitoring();
+        // Start system monitoring only in production
+        if (this.isEnabled) {
+            this.startSystemMonitoring();
+            this.startMemoryCleanup();
+        }
     }
     
     /**
      * Start tracking a request
      */
     startRequest(requestId, metadata = {}) {
-        if (!this.isEnabled) return;
+        if (!this.isEnabled) {return;}
+        
+        // Prevent memory overflow from active requests
+        if (this.metrics.requests.size >= this.limits.maxActiveRequests) {
+            // Clean up old active requests (likely stale)
+            const cutoffTime = Date.now() - 300000; // 5 minutes ago
+            for (const [id, request] of this.metrics.requests.entries()) {
+                if (request.startTimestamp < cutoffTime) {
+                    this.metrics.requests.delete(id);
+                }
+            }
+            
+            // If still too many, remove oldest
+            if (this.metrics.requests.size >= this.limits.maxActiveRequests) {
+                const oldestId = this.metrics.requests.keys().next().value;
+                this.metrics.requests.delete(oldestId);
+            }
+        }
         
         this.metrics.requests.set(requestId, {
             startTime: process.hrtime.bigint(),
@@ -64,10 +93,10 @@ class PerformanceMonitor extends EventEmitter {
      * End tracking a request and record metrics
      */
     endRequest(requestId, statusCode = 200, responseSize = 0) {
-        if (!this.isEnabled) return;
+        if (!this.isEnabled) {return;}
         
         const request = this.metrics.requests.get(requestId);
-        if (!request) return;
+        if (!request) {return;}
         
         const endTime = process.hrtime.bigint();
         const duration = Number(endTime - request.startTime) / 1000000; // Convert to milliseconds
@@ -84,12 +113,14 @@ class PerformanceMonitor extends EventEmitter {
             ip: request.ip
         };
         
-        // Store response metric
+        // Store response metric with memory management
         this.metrics.responses.push(responseMetric);
         
-        // Keep only last 1000 responses
-        if (this.metrics.responses.length > 1000) {
-            this.metrics.responses.shift();
+        // Keep only last N responses (memory-bounded)
+        if (this.metrics.responses.length > this.limits.maxResponses) {
+            // Remove oldest 25% to avoid frequent array operations
+            const removeCount = Math.floor(this.limits.maxResponses * 0.25);
+            this.metrics.responses.splice(0, removeCount);
         }
         
         // Check for slow requests
@@ -107,7 +138,7 @@ class PerformanceMonitor extends EventEmitter {
      * Record database query performance
      */
     recordQuery(query, duration, rows = 0) {
-        if (!this.isEnabled) return;
+        if (!this.isEnabled) {return;}
         
         const queryMetric = {
             query: query.substring(0, 100), // Truncate long queries
@@ -118,14 +149,22 @@ class PerformanceMonitor extends EventEmitter {
         
         this.metrics.database.queries.push(queryMetric);
         
-        // Keep only last 500 queries
-        if (this.metrics.database.queries.length > 500) {
-            this.metrics.database.queries.shift();
+        // Keep only last N queries (memory-bounded)
+        if (this.metrics.database.queries.length > this.limits.maxQueries) {
+            const removeCount = Math.floor(this.limits.maxQueries * 0.25);
+            this.metrics.database.queries.splice(0, removeCount);
         }
         
         // Check for slow queries
         if (duration > this.thresholds.slowQuery) {
             this.metrics.database.slowQueries.push(queryMetric);
+            
+            // Limit slow queries storage
+            if (this.metrics.database.slowQueries.length > this.limits.maxSlowQueries) {
+                const removeCount = Math.floor(this.limits.maxSlowQueries * 0.25);
+                this.metrics.database.slowQueries.splice(0, removeCount);
+            }
+            
             this.emit('slowQuery', queryMetric);
         }
     }
@@ -134,7 +173,7 @@ class PerformanceMonitor extends EventEmitter {
      * Record cache operation
      */
     recordCache(operation, key, hit = false) {
-        if (!this.isEnabled) return;
+        if (!this.isEnabled) {return;}
         
         if (hit) {
             this.metrics.cache.hits++;
@@ -151,7 +190,7 @@ class PerformanceMonitor extends EventEmitter {
      * Record WebSocket activity
      */
     recordWebSocket(event, data = {}) {
-        if (!this.isEnabled) return;
+        if (!this.isEnabled) {return;}
         
         switch (event) {
             case 'connection':
@@ -300,7 +339,7 @@ class PerformanceMonitor extends EventEmitter {
         const interval = 30000; // 30 seconds
         
         setInterval(() => {
-            if (!this.isEnabled) return;
+            if (!this.isEnabled) {return;}
             
             const memory = process.memoryUsage();
             const cpu = process.cpuUsage();
@@ -315,10 +354,11 @@ class PerformanceMonitor extends EventEmitter {
                 ...cpu
             });
             
-            // Keep only last 100 system metrics (50 minutes)
-            if (this.metrics.system.memory.length > 100) {
-                this.metrics.system.memory.shift();
-                this.metrics.system.cpu.shift();
+            // Keep only last N system metrics (memory-bounded)
+            if (this.metrics.system.memory.length > this.limits.maxSystemMetrics) {
+                const removeCount = Math.floor(this.limits.maxSystemMetrics * 0.25);
+                this.metrics.system.memory.splice(0, removeCount);
+                this.metrics.system.cpu.splice(0, removeCount);
             }
             
             // Check system health
@@ -330,10 +370,60 @@ class PerformanceMonitor extends EventEmitter {
     }
     
     /**
+     * Start periodic memory cleanup
+     */
+    startMemoryCleanup() {
+        const cleanupInterval = 300000; // 5 minutes
+        
+        setInterval(() => {
+            if (!this.isEnabled) {return;}
+            
+            const now = Date.now();
+            const maxAge = 1800000; // 30 minutes
+            
+            // Clean up old responses
+            this.metrics.responses = this.metrics.responses.filter(r => 
+                now - r.timestamp < maxAge
+            );
+            
+            // Clean up old queries
+            this.metrics.database.queries = this.metrics.database.queries.filter(q => 
+                now - q.timestamp < maxAge
+            );
+            
+            // Clean up old slow queries
+            this.metrics.database.slowQueries = this.metrics.database.slowQueries.filter(q => 
+                now - q.timestamp < maxAge
+            );
+            
+            // Clean up stale active requests
+            const staleRequestCutoff = now - 300000; // 5 minutes
+            for (const [id, request] of this.metrics.requests.entries()) {
+                if (request.startTimestamp < staleRequestCutoff) {
+                    this.metrics.requests.delete(id);
+                }
+            }
+            
+            // Clean up old system metrics
+            this.metrics.system.memory = this.metrics.system.memory.filter(m => 
+                now - m.timestamp < maxAge
+            );
+            this.metrics.system.cpu = this.metrics.system.cpu.filter(c => 
+                now - c.timestamp < maxAge
+            );
+            
+            // Force garbage collection if available
+            if (global.gc && this.metrics.responses.length % 100 === 0) {
+                global.gc();
+            }
+        }, cleanupInterval);
+    }
+    
+    /**
      * Helper: Calculate average of array
      */
     calculateAverage(values) {
-        if (!values.length) return 0;
+        if (!values.length) {return 0;}
         return values.reduce((sum, val) => sum + val, 0) / values.length;
     }
     
@@ -382,7 +472,7 @@ class PerformanceMonitor extends EventEmitter {
      * Helper: Calculate trend (simple linear regression)
      */
     calculateTrend(values) {
-        if (values.length < 2) return 0;
+        if (values.length < 2) {return 0;}
         
         const n = values.length;
         const sumX = (n * (n + 1)) / 2;

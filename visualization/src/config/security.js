@@ -67,47 +67,8 @@ const securityConfig = {
 
     // Security Headers Configuration
     headers: {
-        // Content Security Policy
-        contentSecurityPolicy: {
-            directives: {
-                defaultSrc: ["'self'"],
-                scriptSrc: [
-                    "'self'",
-                    "'unsafe-inline'", // Required for Swagger UI and inline handlers
-                    "'unsafe-eval'", // Required for some libraries
-                    "https://cdn.jsdelivr.net",
-                    "https://unpkg.com"
-                ],
-                styleSrc: [
-                    "'self'",
-                    "'unsafe-inline'", // Required for Swagger UI and custom styles
-                    "https://fonts.googleapis.com",
-                    "https://cdn.jsdelivr.net"
-                ],
-                fontSrc: [
-                    "'self'",
-                    "https://fonts.gstatic.com",
-                    "data:"
-                ],
-                imgSrc: [
-                    "'self'",
-                    "data:",
-                    "https:"
-                ],
-                connectSrc: [
-                    "'self'",
-                    "ws://localhost:*", // WebSocket connections
-                    "wss://localhost:*",
-                    "https://cdn.jsdelivr.net", // CDN for libraries
-                    "https://unpkg.com"
-                ],
-                mediaSrc: ["'self'"],
-                objectSrc: ["'none'"],
-                baseUri: ["'self'"],
-                formAction: ["'self'"],
-                frameAncestors: ["'none'"]
-            }
-        },
+        // Content Security Policy - Temporarily relaxed for development
+        contentSecurityPolicy: false, // Disable CSP temporarily to fix CDN issues
         
         // HTTP Strict Transport Security
         hsts: {

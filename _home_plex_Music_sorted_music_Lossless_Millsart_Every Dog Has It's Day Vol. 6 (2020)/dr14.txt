@@ -1,0 +1,25 @@
+﻿----------------------------------------------------------------------------------------------	
+ Analyzed: Every Dog Has It's Day Vol. 6 /  Artist: Millsart
+----------------------------------------------------------------------------------------------	
+DR	Peak	RMS	Duration	Title [codec]	
+----------------------------------------------------------------------------------------------	
+ DR7	 -0.01 dB	 -8.28 dB	4:45	01 - Phoenix Rising 	 [flac]	
+ DR6	 -0.01 dB	 -6.89 dB	4:16	02 - Motor Vehicle Dept 	 [flac]	
+ DR7	 -0.01 dB	 -7.55 dB	5:00	03 - What's So Funny 	 [flac]	
+ DR7	 -0.01 dB	 -7.85 dB	4:33	04 - Six by Six by Nine 	 [flac]	
+ DR6	 -0.01 dB	 -7.32 dB	4:26	05 - The Big Deal 	 [flac]	
+ DR11	 -0.97 dB	 -13.60 dB	3:20	06 - The Possession 	 [flac]	
+ DR5	 -0.01 dB	 -6.11 dB	4:32	07 - L’addition S’il Vous Plait 	 [flac]	
+ DR6	 -0.00 dB	 -6.64 dB	5:04	08 - World Wide Woops 	 [flac]	
+ DR10	 -3.35 dB	 -19.60 dB	0:34	09 - Axis Identification (With) 	 [flac]	
+----------------------------------------------------------------------------------------------	
+ Number of files:    9
+ Official DR value:  DR7
+	
+ Sampling rate: 		 44100 Hz
+ Average bitrate: 		 936kbs 
+ Bits per sample: 		 16 bit
+	
+Dr14 T.meter 1.0.16 
+==============================================================================================	
+

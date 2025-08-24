@@ -55,11 +55,12 @@ init_parallel_processing() {
     MAX_PARALLEL_JOBS="$max_jobs"
     PARALLEL_ENABLED=1
     
-    # Adjust max jobs based on CPU cores
-    local cpu_cores=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-    if [[ $MAX_PARALLEL_JOBS -gt $((cpu_cores * 2)) ]]; then
-        log $LOG_WARNING "Reducing parallel jobs from $MAX_PARALLEL_JOBS to $((cpu_cores * 2)) (2x CPU cores)"
-        MAX_PARALLEL_JOBS=$((cpu_cores * 2))
+    # Force single worker to fix metadata extraction issues
+    local max_recommended=1
+    
+    if [[ $MAX_PARALLEL_JOBS -gt $max_recommended ]]; then
+        log $LOG_INFO "Using single worker to ensure reliable metadata extraction"
+        MAX_PARALLEL_JOBS=$max_recommended
     fi
     
     log $LOG_INFO "Initialized parallel processing: method=$PARALLEL_METHOD, max_jobs=$MAX_PARALLEL_JOBS"

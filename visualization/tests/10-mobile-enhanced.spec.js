@@ -1,4 +1,4 @@
-const { test, expect, devices } = require('@playwright/test');
+const { test, expect } = require('@playwright/test');
 
 test.describe('Enhanced Mobile Responsiveness and Touch Gestures', () => {
     // Test on multiple mobile viewports
@@ -64,7 +64,7 @@ test.describe('Enhanced Mobile Responsiveness and Touch Gestures', () => {
                 
                 if (box) {
                     // Get current active tab
-                    const initialTab = await page.locator('.tab.active').textContent();
+                    const _initialTab = await page.locator('.tab.active').textContent();
                     
                     // Perform swipe left gesture (next tab)
                     await page.touchscreen.tap(box.x + box.width - 50, box.y + box.height / 2);
@@ -174,7 +174,7 @@ test.describe('Enhanced Mobile Responsiveness and Touch Gestures', () => {
 
         test('pinch zoom is disabled on UI elements', async ({ page }) => {
             // Test that pinch zoom doesn't interfere with UI
-            const viewport = page.viewportSize();
+            const _viewport = page.viewportSize();
             
             // Simulate pinch gesture on main content
             const container = page.locator('.container');
@@ -202,7 +202,7 @@ test.describe('Enhanced Mobile Responsiveness and Touch Gestures', () => {
             await page.waitForTimeout(1000);
             
             // Get initial scroll position
-            const initialScroll = await page.evaluate(() => window.scrollY);
+            const _initialScroll = await page.evaluate(() => window.scrollY);
             
             // Perform touch scroll
             const container = page.locator('.container');
@@ -449,9 +449,9 @@ test.describe('Enhanced Mobile Responsiveness and Touch Gestures', () => {
             
             // Get initial memory if available
             const initialMetrics = await page.evaluate(() => {
-                return performance.memory ? {
-                    usedJSHeapSize: performance.memory.usedJSHeapSize,
-                    totalJSHeapSize: performance.memory.totalJSHeapSize
+                return window.performance && window.performance.memory ? {
+                    usedJSHeapSize: window.performance.memory.usedJSHeapSize,
+                    totalJSHeapSize: window.performance.memory.totalJSHeapSize
                 } : null;
             });
             
@@ -466,9 +466,9 @@ test.describe('Enhanced Mobile Responsiveness and Touch Gestures', () => {
             
             // Check memory after operations
             const finalMetrics = await page.evaluate(() => {
-                return performance.memory ? {
-                    usedJSHeapSize: performance.memory.usedJSHeapSize,
-                    totalJSHeapSize: performance.memory.totalJSHeapSize
+                return window.performance && window.performance.memory ? {
+                    usedJSHeapSize: window.performance.memory.usedJSHeapSize,
+                    totalJSHeapSize: window.performance.memory.totalJSHeapSize
                 } : null;
             });
             

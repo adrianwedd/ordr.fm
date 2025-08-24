@@ -235,6 +235,7 @@ app.get('/api/stats', albumsController.getStats.bind(albumsController));
 app.get('/api/artists', albumsController.getArtists.bind(albumsController));
 
 // Search routes (with search-specific rate limiting)
+app.get('/api/search', searchApiLimiter, searchController.searchAlbums.bind(searchController));
 app.get('/api/search/fuzzy', searchApiLimiter, searchController.fuzzySearch.bind(searchController));
 app.get('/api/search/suggestions', searchApiLimiter, searchController.getSuggestions.bind(searchController));
 app.get('/api/search/popular', searchController.getPopularSearches.bind(searchController));
@@ -394,9 +395,9 @@ app.get('/api/browse', (req, res) => {
                 path: path.join(resolvedPath, item.name)
             })).filter(item => {
                 // Filter to show only directories and audio files
-                if (item.type === 'directory') return true;
+                if (item.type === 'directory') {return true;}
                 const ext = path.extname(item.name).toLowerCase();
-                return ['.mp3', '.flac', '.wav', '.m4a', '.ogg', '.aac'].includes(ext);
+                return ['.mp3', '.flac', '.wav', '.m4a', '.ogg', '.aac', '.ape', '.aiff', '.alac', '.opus', '.wma', '.mp4', '.mkv', '.avi', '.mov', '.webm', '.nfo', '.m3u', '.log', '.cue', '.jpg', '.png', '.pdf'].includes(ext);
             })
         };
         
@@ -490,7 +491,7 @@ async function startServer() {
         server.listen(config.PORT, () => {
             console.log(`✅ Server running on port ${config.PORT}`);
             console.log(`📊 Environment: ${config.NODE_ENV}`);
-            console.log(`🔗 WebSocket: enabled`);
+            console.log('🔗 WebSocket: enabled');
             console.log(`💾 Database: ${databaseService.isConnected ? 'connected' : 'disconnected'}`);
         });
 

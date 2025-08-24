@@ -394,8 +394,8 @@ discogs_search_releases() {
         query="$query year:$year"
     fi
     
-    # URL encode the query
-    local encoded_query=$(echo "$query" | jq -sRr @uri)
+    # URL encode the query (using printf to avoid trailing newline)
+    local encoded_query=$(printf "%s" "$query" | jq -sRr @uri)
     local endpoint="/database/search?q=$encoded_query&type=release&per_page=10"
     
     local cache_key=$(discogs_cache_key "$artist" "$album" "$year")

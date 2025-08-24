@@ -394,7 +394,7 @@ class SystemController {
      * Escape CSV values (private method)
      */
     _escapeCsv(value) {
-        if (!value) return '';
+        if (!value) {return '';}
         const stringValue = String(value);
         if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
             return `"${stringValue.replace(/"/g, '""')}"`;
@@ -416,7 +416,7 @@ class SystemController {
         const keys = path.split('.');
         const lastKey = keys.pop();
         const target = keys.reduce((current, key) => {
-            if (!current[key]) current[key] = {};
+            if (!current[key]) {current[key] = {};}
             return current[key];
         }, obj);
         target[lastKey] = value;

@@ -122,10 +122,10 @@ function generateRandomPassword(length = 12) {
     length = Math.max(length, passwordConfig.minLength);
     
     let charset = '';
-    if (passwordConfig.requireLowercase) charset += 'abcdefghijklmnopqrstuvwxyz';
-    if (passwordConfig.requireUppercase) charset += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    if (passwordConfig.requireNumbers) charset += '0123456789';
-    if (passwordConfig.requireSpecialChars) charset += '!@#$%^&*';
+    if (passwordConfig.requireLowercase) {charset += 'abcdefghijklmnopqrstuvwxyz';}
+    if (passwordConfig.requireUppercase) {charset += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';}
+    if (passwordConfig.requireNumbers) {charset += '0123456789';}
+    if (passwordConfig.requireSpecialChars) {charset += '!@#$%^&*';}
     
     if (!charset) {
         charset = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789!@#$%^&*';
@@ -134,10 +134,10 @@ function generateRandomPassword(length = 12) {
     let password = '';
     
     // Ensure required character types are included
-    if (passwordConfig.requireLowercase) password += 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)];
-    if (passwordConfig.requireUppercase) password += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];
-    if (passwordConfig.requireNumbers) password += '0123456789'[Math.floor(Math.random() * 10)];
-    if (passwordConfig.requireSpecialChars) password += '!@#$%^&*'[Math.floor(Math.random() * 8)];
+    if (passwordConfig.requireLowercase) {password += 'abcdefghijklmnopqrstuvwxyz'[Math.floor(Math.random() * 26)];}
+    if (passwordConfig.requireUppercase) {password += 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'[Math.floor(Math.random() * 26)];}
+    if (passwordConfig.requireNumbers) {password += '0123456789'[Math.floor(Math.random() * 10)];}
+    if (passwordConfig.requireSpecialChars) {password += '!@#$%^&*'[Math.floor(Math.random() * 8)];}
     
     // Fill remaining length
     for (let i = password.length; i < length; i++) {

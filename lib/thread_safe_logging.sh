@@ -58,8 +58,11 @@ log_progress() {
     local message="${3:-Processing}"
     local thread_id="${WORKER_ID:-main}"
     
-    # Calculate percentage
-    local percent=$((current * 100 / total))
+    # Calculate percentage (avoid division by zero)
+    local percent=0
+    if [[ $total -gt 0 ]]; then
+        percent=$((current * 100 / total))
+    fi
     
     # Create progress bar
     local bar_length=20

@@ -194,7 +194,7 @@ determine_album_quality() {
         return 1
     fi
     
-    local all_file_types=$(echo "$exiftool_output" | jq -r '.[] | .FileTypeExtension // empty' | grep -v '^$')
+    local all_file_types=$(echo "$exiftool_output" | jq -r '.[] | .FileType // .FileTypeExtension // empty' | grep -v '^$')
     
     local has_lossless=0
     local has_lossy=0

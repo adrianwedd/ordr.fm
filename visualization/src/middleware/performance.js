@@ -102,9 +102,9 @@ function createDatabaseMonitor(db) {
         };
         
         // Replace the original query method
-        if (db.query) db.query = monitoredQuery;
-        if (db.all) db.all = monitoredQuery;
-        if (db.get) db.get = monitoredQuery;
+        if (db.query) {db.query = monitoredQuery;}
+        if (db.all) {db.all = monitoredQuery;}
+        if (db.get) {db.get = monitoredQuery;}
     }
     
     return db;
@@ -114,7 +114,7 @@ function createDatabaseMonitor(db) {
  * Middleware to monitor cache operations
  */
 function createCacheMonitor(cache) {
-    if (!cache) return cache;
+    if (!cache) {return cache;}
     
     const originalGet = cache.get;
     const originalSet = cache.set;
@@ -152,7 +152,7 @@ function createCacheMonitor(cache) {
  * WebSocket performance monitoring
  */
 function createWebSocketMonitor(io) {
-    if (!io) return io;
+    if (!io) {return io;}
     
     io.on('connection', (socket) => {
         performanceMonitor.recordWebSocket('connection');

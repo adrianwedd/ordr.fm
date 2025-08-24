@@ -247,8 +247,11 @@ process_album_directory() {
             while IFS= read -r catalog_candidate; do
                 [[ -z "$catalog_candidate" ]] && continue
                 # Skip common format/quality indicators and patterns containing them
-                if [[ ! "$catalog_candidate" =~ ^(FLAC|WEB|MP3|CD|WAV|VINYL|DIGITAL|Web|Disk|[0-9]{4})$ ]] && \
-                   [[ ! "$catalog_candidate" =~ (FLAC|WEB|MP3|WAV|VINYL|Web|Disk) ]]; then
+                # Also skip "part X" patterns which are part of titles, not catalogs
+                # Also skip remix/feature/version indicators
+                if [[ ! "$catalog_candidate" =~ ^(FLAC|WEB|MP3|CD|WAV|VINYL|DIGITAL|Web|Disk|[0-9]{4}|part[[:space:]]+[0-9]+|Part[[:space:]]+[0-9]+|PART[[:space:]]+[0-9]+)$ ]] && \
+                   [[ ! "$catalog_candidate" =~ (FLAC|WEB|MP3|WAV|VINYL|Web|Disk|^part[[:space:]]+|^Part[[:space:]]+|^PART[[:space:]]+) ]] && \
+                   [[ ! "$catalog_candidate" =~ (remix|Remix|REMIX|mix|Mix|MIX|edit|Edit|EDIT|version|Version|VERSION|instrumental|Instrumental|INSTRUMENTAL|vocal|Vocal|VOCAL|inch|Inch|INCH|vinyl|Vinyl|VINYL|radio|Radio|RADIO|club|Club|CLUB|dub|Dub|DUB|extended|Extended|EXTENDED|original|Original|ORIGINAL|remaster|Remaster|REMASTER) ]]; then
                     dir_catalog="$catalog_candidate"
                     break
                 fi
@@ -407,8 +410,14 @@ process_album_directory() {
         [[ -n "$album_title" ]] && confidence=$((confidence + 20))
         [[ -n "$album_year" ]] && confidence=$((confidence + 10))
         
-        # Check if reconstruction was successful
-        if [[ $confidence -ge 70 ]] && [[ -n "$album_artist" ]] && [[ -n "$album_title" ]]; then
+        # Check if reconstruction was successful - be more lenient
+        # Accept if we have artist and either title OR if directory name can be used as title
+        if [[ $confidence -ge 70 ]] && [[ -n "$album_artist" ]]; then
+            # If no title, use the directory name itself as title
+            if [[ -z "$album_title" ]]; then
+                album_title=$(basename "$album_dir")
+                log $LOG_DEBUG "Using directory name as title: '$album_title'"
+            fi
             log $LOG_INFO "Hybrid reconstruction successful (confidence: $confidence/100): '$album_artist' - '$album_title' ($([ -n "$album_year" ] && echo "$album_year" || echo "no year"))"
         else
             log $LOG_WARNING "Hybrid reconstruction failed - insufficient metadata (confidence: $confidence/100)"
@@ -521,6 +530,17 @@ perform_album_move() {
             # Update move record as successful
             update_move_operation_status "$operation_id" "SUCCESS"
             log $LOG_INFO "Album move with file renaming completed successfully: $operation_id"
+            
+            # Clean up empty parent directory if it exists
+            local parent_dir=$(dirname "$album_dir")
+            if [[ -d "$parent_dir" ]] && [[ "$parent_dir" != "$SOURCE_DIR" ]]; then
+                # Check if parent directory is now empty
+                if [[ -z "$(ls -A "$parent_dir" 2>/dev/null)" ]]; then
+                    rmdir "$parent_dir" 2>/dev/null && \
+                        log $LOG_DEBUG "Removed empty parent directory: $parent_dir"
+                fi
+            fi
+            
             return 0
         else
             log $LOG_ERROR "Directory move with file renaming failed"
@@ -811,14 +831,14 @@ main() {
         fi
     fi
     
-    # Create unsorted directory
+    # Create unsorted directory (simple, no timestamp)
     if [[ $DRY_RUN -eq 0 ]]; then
-        local unsorted_dir="${UNSORTED_BASE_DIR}/unsorted_${DATE_NOW}"
+        local unsorted_dir="${UNSORTED_BASE_DIR}"
         if create_directory_safe "$unsorted_dir"; then
-            log $LOG_INFO "Created unsorted directory for this run: $unsorted_dir"
+            log $LOG_DEBUG "Unsorted directory ready: $unsorted_dir"
         fi
     else
-        log $LOG_INFO "(Dry Run) Would create unsorted directory: ${UNSORTED_BASE_DIR}/unsorted_${DATE_NOW}"
+        log $LOG_INFO "(Dry Run) Would create unsorted directory: ${UNSORTED_BASE_DIR}"
     fi
     
     # Create temp file for album list

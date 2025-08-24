@@ -28,7 +28,8 @@ extract_album_metadata() {
         fi
         
         log $LOG_DEBUG "Running exiftool command on $(echo "$media_files" | wc -l) files"
-        exiftool_output=$(find "$album_dir" -maxdepth 1 -type f -iregex ".*\.\(mp3\|flac\|wav\|m4a\|ogg\|aiff\|alac\|opus\|wma\|ape\|mp4\|mkv\|avi\|mov\|webm\)$" -print0 2>/dev/null | \
+        # Exclude INCOMPLETE files from exiftool processing
+        exiftool_output=$(find "$album_dir" -maxdepth 1 -type f -iregex ".*\.\(mp3\|flac\|wav\|m4a\|ogg\|aiff\|alac\|opus\|wma\|ape\|mp4\|mkv\|avi\|mov\|webm\)$" ! -name "INCOMPLETE*" -print0 2>/dev/null | \
             xargs -0 $timeout_cmd exiftool -j -Artist -AlbumArtist -Album -Title -Track -DiscNumber \
             -Year -Date -Genre -FileType -AudioBitrate -SampleRate -Duration \
             -FileSize -Label -CatalogNumber -Publisher -Organization 2>/dev/null || echo "[]")
@@ -105,6 +106,21 @@ validate_artist_name() {
     # Remove null contamination and control characters - be more aggressive
     artist=$(echo "$artist" | sed 's/0null[0-9.]*//g' | sed 's/null[0-9.]*//g' | sed 's/null//g' | tr -d '\n\r' | sed 's/[[:cntrl:]]//g')
     
+    # NEW: Remove track number prefixes FIRST
+    # Examples: "01) kikoman" -> "kikoman", "02 - Artist" -> "Artist"  
+    artist=$(echo "$artist" | sed -E 's/^[0-9]{1,2}[\)]\s*//')
+    artist=$(echo "$artist" | sed -E 's/^[0-9]{1,2}\s*[-]\s*//')
+    artist=$(echo "$artist" | sed -E 's/^[0-9]{1,2}\.\s*//')
+    
+    # NEW: Remove catalog number prefixes (comprehensive patterns)
+    # Examples: "afk001) artist" -> "artist", "(aos-3) omar-s" -> "omar-s", "bl06 artist" -> "artist"
+    artist=$(echo "$artist" | sed -E 's/^\([a-z]{2,5}[0-9-]+\)\s*//i')       # (abc123) artist
+    artist=$(echo "$artist" | sed -E 's/^[a-z]{2,5}[0-9]+[\)]\s*//i')        # abc123) artist
+    artist=$(echo "$artist" | sed -E 's/^\[[a-z]{2,5}[0-9-]+\]\s*//i')      # [abc123] artist
+    artist=$(echo "$artist" | sed -E 's/^[a-z]{2,5}[0-9]+\s+//i')           # abc123 artist
+    artist=$(echo "$artist" | sed -E 's/^[a-z]+[0-9]+[\)]\s*//i')           # mom011) artist
+    artist=$(echo "$artist" | sed -E 's/^[a-z]+\s+[0-9]+[\)]\s*//i')        # abc 123) artist
+    
     # Remove leading/trailing whitespace
     artist=$(echo "$artist" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
@@ -148,6 +164,12 @@ validate_artist_name() {
         artist=$(echo "$artist" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     fi
     
+    # NEW: Remove "aka" and alias patterns
+    # Examples: "2000 And One Aka Dylan Hermelijn" -> "2000 And One"
+    artist=$(echo "$artist" | sed -E 's/\s+[Aa][Kk][Aa]\s+.+$//')
+    artist=$(echo "$artist" | sed -E 's/\s+[Aa]\.?[Kk]\.?[Aa]\.?\s+.+$//')
+    artist=$(echo "$artist" | sed -E 's/\s+[Aa]lso [Kk]nown [Aa]s\s+.+$//')
+    
     # NEW: Clean uploader contamination patterns
     # Remove "By [uploader]" suffixes: "Adam Beyer - Protechtion - By c4Rnir4Z" -> "Adam Beyer"
     if [[ "$artist" =~ ^(.+)[[:space:]]*-[[:space:]]*By[[:space:]]+[a-zA-Z0-9_]+.*$ ]]; then
@@ -177,6 +199,16 @@ validate_artist_name() {
     artist=$(echo "$artist" | sed 's/[[:space:]]*-[[:space:]]*$//') 
     artist=$(echo "$artist" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     
+    # NEW: Normalize capitalization (but preserve intentional all-caps)
+    # Skip if it's an acronym (2-5 chars all caps like "BBC", "DHS", "AFX")
+    if [[ ! "$artist" =~ ^[A-Z]{2,5}$ ]]; then
+        # Convert to title case: capitalize first letter of each word
+        # But preserve names like "deMarco" or "McDonald"
+        if [[ ! "$artist" =~ [a-z][A-Z] ]]; then
+            artist=$(echo "$artist" | sed 's/\b\([a-z]\)/\u\1/g')
+        fi
+    fi
+    
     # Remove catalog prefixes from various artists: "msqcd001 various artists" -> "Various Artists"
     if [[ "$artist" =~ ^[a-z]{2,6}[0-9]{3}[[:space:]]+various[[:space:]]+artists$ ]]; then
         artist="Various Artists"
@@ -203,6 +235,7 @@ validate_artist_name() {
     
     # Reject obviously invalid names - enhanced patterns
     if [[ "$artist" =~ ^[0-9]{1,3}\.?[[:space:]]*$ ]] || \
+       [[ "$artist" =~ ^[0-9]{4}$ ]] || \
        [[ -z "$artist" ]] || \
        [[ "$artist" =~ ^[¥\[\(\<].*$ ]] || \
        [[ "$artist" =~ ^\.[[:space:]]*If[[:space:]]*You.*$ ]] || \
@@ -215,11 +248,13 @@ validate_artist_name() {
        [[ "$artist" =~ ^[0-9]{3}[[:space:]]+bass[[:space:]]+mechanics$ ]] || \
        [[ "$artist" =~ ^[0-9]+[[:space:]]+voice$ ]] || \
        [[ "$artist" =~ ^[0-9]+[[:space:]]+dollar[[:space:]]+egg$ ]]; then
+        log $LOG_DEBUG "Rejected invalid artist name: '$artist'"
         return 1
     fi
     
-    # Be more permissive for scene releases - allow if >= 3 characters and not pure numbers/catalog codes
-    if [[ ${#artist} -ge 3 ]] && ! [[ "$artist" =~ ^[0-9]+$ ]] && ! [[ "$artist" =~ ^[A-Z0-9]{2,6}$ ]]; then
+    # Be more permissive for scene releases - allow if >= 3 characters and not pure numbers
+    # Allow ALL-CAPS artists like BECK, POD, DHS, etc.
+    if [[ ${#artist} -ge 3 ]] && ! [[ "$artist" =~ ^[0-9]+$ ]]; then
         log $LOG_DEBUG "Allowing scene release artist name: '$artist'"
         # Clean up spacing
         artist=$(echo "$artist" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed 's/[[:space:]]\+/ /g')
@@ -235,6 +270,24 @@ validate_artist_name() {
     
     # If we reach here, the artist name failed validation
     return 1
+}
+
+# Extract artist from parent directory when metadata is missing
+extract_artist_from_parent_dir() {
+    local album_path="$1"
+    local parent_dir=$(basename "$(dirname "$album_path")")
+    
+    # Clean catalog prefixes from parent dir name
+    parent_dir=$(echo "$parent_dir" | sed -E 's/^[a-z]{2,5}[0-9]+[\)]\s*//i')
+    parent_dir=$(echo "$parent_dir" | sed -E 's/^[0-9]+[\)]\s*//i')
+    parent_dir=$(echo "$parent_dir" | sed -E 's/^[a-z]+[0-9]+[\)]\s*//i')
+    
+    # Normalize capitalization unless it's an acronym
+    if [[ ! "$parent_dir" =~ ^[A-Z]{2,5}$ ]]; then
+        parent_dir=$(echo "$parent_dir" | sed 's/\b\([a-z]\)/\u\1/g')
+    fi
+    
+    echo "$parent_dir"
 }
 
 # Extract artist from directory/file path as fallback
@@ -337,6 +390,9 @@ extract_album_info() {
         # Try to extract artist from directory path as fallback
         if [[ -n "$album_dir" ]] && album_artist=$(extract_artist_from_path "$album_dir"); then
             log $LOG_DEBUG "Extracted artist from path: '$album_dir' -> '$album_artist'"
+        # Try parent directory as last resort
+        elif [[ -n "$album_dir" ]] && album_artist=$(extract_artist_from_parent_dir "$album_dir"); then
+            log $LOG_DEBUG "Extracted artist from parent directory: '$album_artist'"
         else
             log $LOG_DEBUG "Could not extract valid artist from metadata or path"
             album_artist=""
@@ -461,7 +517,8 @@ count_audio_files() {
     local dir="$1"
     local media_extensions="mp3\|flac\|wav\|m4a\|ogg\|aiff\|alac\|opus\|wma\|ape\|mp4\|mkv\|avi\|mov\|webm"
     
-    find "$dir" -maxdepth 1 -type f -iregex ".*\.\($media_extensions\)$" 2>/dev/null | wc -l
+    # Exclude INCOMPLETE files from the count
+    find "$dir" -maxdepth 1 -type f -iregex ".*\.\($media_extensions\)$" ! -name "INCOMPLETE*" 2>/dev/null | wc -l
 }
 
 # Get format distribution
@@ -552,7 +609,8 @@ clean_artist_name() {
         
         # Remove bracketed technical info [ABC123], (WEB), etc.
         s/[[:space:]]*\[[^]]*\]//g
-        s/[[:space:]]*([^)]*)//g
+        # Only remove parenthetical content that looks like technical info, not "part X"
+        s/[[:space:]]*\((WEB|CD|VINYL|REMASTER|REMASTERED|24BIT|16BIT|[0-9]{4})\)//gi
     ')
     
     # Trim whitespace
@@ -590,9 +648,11 @@ infer_metadata_from_dirname() {
     local year=""
     
     # Pattern 1: Artist - Title (Year) [Catalog]
-    if echo "$dirname" | grep -qE '^[^-]+ - [^(]+\([0-9]{4}\)'; then
+    # Updated to preserve "(part X)" in titles
+    if echo "$dirname" | grep -qE '^[^-]+ - .*\([0-9]{4}\)'; then
         artist=$(echo "$dirname" | sed -E 's/^([^-]+) - .*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        title=$(echo "$dirname" | sed -E 's/^[^-]+ - ([^(]+)\([0-9]{4}\).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        # Extract everything between " - " and the year (YYYY)
+        title=$(echo "$dirname" | sed -E 's/^[^-]+ - (.*)\([0-9]{4}\).*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         year=$(echo "$dirname" | sed -E 's/.*\(([0-9]{4})\).*/\1/')
         
     # Pattern 2: (Year) Title
@@ -626,13 +686,27 @@ infer_metadata_from_dirname() {
         title=$(echo "$dirname" | sed -E 's/^[a-z_]+-(.+)-[0-9]{4}-.*/\1/' | tr '_' ' ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         year=$(echo "$dirname" | sed -E 's/.*-([0-9]{4})-.*/\1/')
         
-    # Pattern 7: Artist - Title (generic fallback)
-    elif echo "$dirname" | grep -qE '^[^-]+ - '; then
+    # Pattern 7: Artist - Title [Catalog] or Artist - Title
+    elif echo "$dirname" | grep -qE ' - '; then
         # Clean the directory name first to remove contamination
         local cleaned_dir
         cleaned_dir=$(clean_directory_name_for_artist_extraction "$dirname")
-        artist=$(echo "$cleaned_dir" | sed -E 's/^([^-]+) - .*/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
-        title=$(echo "$cleaned_dir" | sed -E 's/^[^-]+ - (.*)/\1/' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+        
+        # Split on " - " (with spaces around dash to distinguish from hyphens in names)
+        if echo "$cleaned_dir" | grep -q ' - '; then
+            # Use awk to split on the first " - " only
+            artist=$(echo "$cleaned_dir" | awk -F' - ' '{print $1}' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            local remainder=$(echo "$cleaned_dir" | awk -F' - ' '{for(i=2;i<=NF;i++) printf "%s%s", $i, (i<NF?" - ":"")}')
+            
+            # Remove catalog numbers in brackets at the end
+            title=$(echo "$remainder" | sed -E 's/[[:space:]]*\[[^]]*\][[:space:]]*$//' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+            
+            # Extract year if present in parentheses
+            if echo "$remainder" | grep -qE '\([0-9]{4}\)'; then
+                year=$(echo "$remainder" | sed -E 's/.*\(([0-9]{4})\).*/\1/')
+                title=$(echo "$title" | sed -E 's/[[:space:]]*\([0-9]{4}\)[[:space:]]*$//')
+            fi
+        fi
         
     # Pattern 8: Complex scene release with underscores - artist___collaborator_-_title__details
     elif echo "$dirname" | grep -qE '^[a-z_]+___[a-z_]+_-_[a-z_]+__'; then
@@ -646,8 +720,11 @@ infer_metadata_from_dirname() {
         # Clean the directory name and use as title
         local cleaned_dir
         cleaned_dir=$(clean_directory_name_for_artist_extraction "$dirname")
-        if [[ -n "$cleaned_dir" ]] && [[ "$cleaned_dir" != "$dirname" ]]; then
+        if [[ -n "$cleaned_dir" ]]; then
             title="$cleaned_dir"
+        else
+            # Last resort - use the directory name itself as title
+            title="$dirname"
         fi
     fi
     
@@ -690,5 +767,5 @@ infer_metadata_from_dirname() {
 # Export all functions
 export -f extract_album_metadata determine_album_quality extract_album_info
 export -f extract_track_info generate_album_hash calculate_quality_score
-export -f directory_has_audio_files count_audio_files get_format_distribution
+export -f count_audio_files get_format_distribution
 export -f extract_nfo_metadata escape_json_string infer_metadata_from_dirname clean_artist_name

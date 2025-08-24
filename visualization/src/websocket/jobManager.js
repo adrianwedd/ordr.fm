@@ -134,7 +134,7 @@ class JobManager {
      */
     getJob(jobId) {
         const activeJob = this.activeJobs.get(jobId);
-        if (activeJob) return activeJob;
+        if (activeJob) {return activeJob;}
 
         return this.jobHistory.find(job => job.id === jobId) || null;
     }

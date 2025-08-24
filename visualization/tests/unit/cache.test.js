@@ -33,7 +33,7 @@ describe('Cache System', () => {
 
   const getCache = (key) => {
     const cached = cache.get(key);
-    if (!cached) return null;
+    if (!cached) {return null;}
     
     // Check TTL
     if (Date.now() - cached.timestamp > CACHE_TTL) {

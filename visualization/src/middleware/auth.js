@@ -9,6 +9,17 @@ const failedAttempts = new Map();
  * Middleware to authenticate JWT tokens with enhanced security
  */
 function authenticateToken(req, res, next) {
+    // Skip authentication in development mode
+    if (process.env.NODE_ENV === 'development') {
+        // Create a mock user for development
+        req.user = {
+            id: 1,
+            username: 'dev-user',
+            role: 'admin'
+        };
+        return next();
+    }
+    
     const securityConfig = getSecurityConfig('security');
     const clientIp = req.ip;
     
