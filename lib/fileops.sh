@@ -303,6 +303,10 @@ perform_atomic_directory_move_with_renaming() {
         if secure_move_file "$temp_dest" "$dest_dir"; then
             # Remove source files
             rm -rf "$source_dir" 2>/dev/null || sudo rm -rf "$source_dir" 2>/dev/null
+            
+            # Clean up empty parent directories
+            cleanup_empty_parent_directories "$source_dir"
+            
             log $LOG_DEBUG "Successfully completed atomic move with file renaming"
             return 0
         else
@@ -400,6 +404,46 @@ directory_has_audio_files() {
     return 1
 }
 
+# Function to clean up empty parent directories after album move
+cleanup_empty_parent_directories() {
+    local source_dir="$1"
+    local max_depth="${2:-3}"  # Maximum depth to clean (default 3 levels up)
+    
+    if [[ -z "$source_dir" ]]; then
+        return 1
+    fi
+    
+    # Start from parent directory
+    local parent_dir=$(dirname "$source_dir")
+    local depth=0
+    
+    while [[ "$depth" -lt "$max_depth" ]] && [[ "$parent_dir" != "/" ]] && [[ "$parent_dir" != "." ]]; do
+        # Check if directory is empty (no files, no subdirs)
+        if [[ -d "$parent_dir" ]]; then
+            # Count items in directory (excluding . and ..)
+            local item_count=$(find "$parent_dir" -maxdepth 1 -mindepth 1 2>/dev/null | wc -l)
+            
+            if [[ "$item_count" -eq 0 ]]; then
+                # Directory is empty, safe to remove
+                log $LOG_DEBUG "Removing empty parent directory: $parent_dir"
+                rmdir "$parent_dir" 2>/dev/null
+                
+                # Move up to next parent
+                parent_dir=$(dirname "$parent_dir")
+                ((depth++))
+            else
+                # Directory not empty, stop cleanup
+                break
+            fi
+        else
+            # Directory doesn't exist, stop
+            break
+        fi
+    done
+    
+    return 0
+}
+
 # Export all functions
 export -f secure_move_file move_to_unsorted skip_problematic_album perform_atomic_directory_move
-export -f check_directory_permissions create_directory_safe directory_has_audio_files
+export -f check_directory_permissions create_directory_safe directory_has_audio_files cleanup_empty_parent_directories
