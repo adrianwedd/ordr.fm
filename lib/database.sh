@@ -137,6 +137,144 @@ vacuum_database() {
     execute_sql_with_retry "$db_path" "ANALYZE;"
 }
 
+# Initialize state database for tracking processed directories
+init_state_db() {
+    local state_db="${1:-ordr.fm.state.db}"
+    
+    if [[ ! -f "$state_db" ]]; then
+        log $LOG_INFO "Initializing state database: $state_db"
+        sqlite3 "$state_db" <<EOF
+CREATE TABLE IF NOT EXISTS processed_directories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    directory_path TEXT UNIQUE NOT NULL,
+    last_modified INTEGER NOT NULL,
+    directory_hash TEXT NOT NULL,
+    processed_at INTEGER NOT NULL,
+    status TEXT NOT NULL,
+    created_at INTEGER DEFAULT (strftime('%s', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS processed_files (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    file_path TEXT UNIQUE NOT NULL,
+    file_size INTEGER NOT NULL,
+    file_hash TEXT NOT NULL,
+    directory_id INTEGER NOT NULL,
+    processed_at INTEGER NOT NULL,
+    FOREIGN KEY (directory_id) REFERENCES processed_directories(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_processed_directories_path ON processed_directories(directory_path);
+CREATE INDEX IF NOT EXISTS idx_processed_files_path ON processed_files(file_path);
+EOF
+        enable_wal_mode "$state_db"
+    fi
+}
+
+# Initialize metadata database for album information
+init_metadata_db() {
+    local metadata_db="${1:-ordr.fm.metadata.db}"
+    
+    log $LOG_INFO "Initializing metadata database: $metadata_db"
+    sqlite3 "$metadata_db" <<EOF
+CREATE TABLE IF NOT EXISTS albums (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    original_path TEXT NOT NULL,
+    new_path TEXT,
+    artist TEXT,
+    artist_resolved TEXT,
+    album TEXT,
+    year INTEGER,
+    quality TEXT,
+    label TEXT,
+    catalog_number TEXT,
+    series TEXT,
+    discogs_release_id TEXT,
+    discogs_confidence REAL,
+    track_count INTEGER,
+    total_duration INTEGER,
+    file_size_mb REAL,
+    processed_at INTEGER DEFAULT (strftime('%s', 'now')),
+    move_operation_id TEXT,
+    status TEXT DEFAULT 'pending'
+);
+
+CREATE TABLE IF NOT EXISTS move_operations (
+    id TEXT PRIMARY KEY,
+    source_path TEXT NOT NULL,
+    destination_path TEXT NOT NULL,
+    status TEXT NOT NULL,
+    error_message TEXT,
+    started_at INTEGER DEFAULT (strftime('%s', 'now')),
+    completed_at INTEGER
+);
+
+CREATE INDEX IF NOT EXISTS idx_albums_artist ON albums(artist);
+CREATE INDEX IF NOT EXISTS idx_albums_status ON albums(status);
+CREATE INDEX IF NOT EXISTS idx_move_operations_status ON move_operations(status);
+EOF
+    enable_wal_mode "$metadata_db"
+    log $LOG_INFO "Metadata database initialized successfully"
+}
+
+# Track album metadata
+track_album_metadata() {
+    local album_data="$1"
+    local metadata_db="${METADATA_DB:-ordr.fm.metadata.db}"
+    
+    # Parse album data (format: path|artist|album|year|quality|...)
+    local original_path=$(echo "$album_data" | cut -d'|' -f1)
+    local new_path=$(echo "$album_data" | cut -d'|' -f2)
+    local artist=$(echo "$album_data" | cut -d'|' -f3)
+    local album=$(echo "$album_data" | cut -d'|' -f4)
+    local year=$(echo "$album_data" | cut -d'|' -f5)
+    local quality=$(echo "$album_data" | cut -d'|' -f6)
+    
+    execute_sql_with_retry "$metadata_db" "INSERT INTO albums (original_path, new_path, artist, album, year, quality) VALUES ('$original_path', '$new_path', '$artist', '$album', '$year', '$quality');"
+}
+
+# Create move operation record
+create_move_operation() {
+    local operation_id="$1"
+    local source_path="$2"
+    local dest_path="$3"
+    local metadata_db="${METADATA_DB:-ordr.fm.metadata.db}"
+    
+    execute_sql_with_retry "$metadata_db" "INSERT INTO move_operations (id, source_path, destination_path, status) VALUES ('$operation_id', '$source_path', '$dest_path', 'IN_PROGRESS');"
+}
+
+# Update move operation status
+update_move_operation_status() {
+    local operation_id="$1"
+    local status="$2"
+    local error_msg="${3:-}"
+    local metadata_db="${METADATA_DB:-ordr.fm.metadata.db}"
+    
+    local sql="UPDATE move_operations SET status='$status', completed_at=strftime('%s', 'now')"
+    if [[ -n "$error_msg" ]]; then
+        sql="$sql, error_message='$error_msg'"
+    fi
+    sql="$sql WHERE id='$operation_id';"
+    
+    execute_sql_with_retry "$metadata_db" "$sql"
+}
+
+# Record directory processing
+record_directory_processing() {
+    local dir_path="$1"
+    local status="$2"
+    local state_db="${STATE_DB:-ordr.fm.state.db}"
+    local current_mtime=$(stat -c "%Y" "$dir_path" 2>/dev/null || echo "0")
+    local current_hash=$(find "$dir_path" -maxdepth 1 -type f -exec stat -c "%Y %s %n" {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
+    local processed_at=$(date +%s)
+    
+    execute_sql_with_retry "$state_db" "INSERT OR REPLACE INTO processed_directories (directory_path, last_modified, directory_hash, processed_at, status) VALUES ('$dir_path', $current_mtime, '$current_hash', $processed_at, '$status');"
+    
+    log $LOG_DEBUG "Recorded processing result for '$dir_path': $status"
+}
+
 # Export functions
 export -f enable_wal_mode execute_sql_with_retry batch_insert_albums
 export -f init_database_safe check_database_access vacuum_database
+export -f init_state_db init_metadata_db track_album_metadata
+export -f create_move_operation update_move_operation_status record_directory_processing
