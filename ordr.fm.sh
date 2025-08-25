@@ -577,7 +577,7 @@ find_album_directories() {
             albums+=("$dir")
             ((subdirs_found++))
         fi
-    done < <(find "$search_dir" -mindepth 1 -maxdepth 3 \( -type d -o -type l \) -print0 2>/dev/null)
+    done < <(find "$search_dir" -mindepth 1 -maxdepth 10 \( -type d -o -type l \) -print0 2>/dev/null)
     
     # Only treat source directory as an album if no subdirectories with audio files were found
     if [[ $subdirs_found -eq 0 ]] && directory_has_audio_files "$search_dir"; then
