@@ -2,7 +2,7 @@
 # Combines Bash processing engine with Node.js web interface
 
 # Multi-stage build for optimized image size
-FROM node:24-alpine AS node-builder
+FROM node:25-alpine AS node-builder
 
 # Install Node.js dependencies
 WORKDIR /app/visualization
