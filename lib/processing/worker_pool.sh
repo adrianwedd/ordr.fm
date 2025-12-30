@@ -278,8 +278,15 @@ process_album_parallel_safe() {
         # Fallback basic organization
         local sanitized_artist=$(sanitize_filename "$resolved_artist")
         local sanitized_title=$(sanitize_filename "$album_title")
+
+        # Validate and sanitize year (should be 4-digit numeric)
         local year_suffix=""
-        [[ -n "$album_year" && "$album_year" != "null" ]] && year_suffix=" ($album_year)"
+        if [[ -n "$album_year" && "$album_year" != "null" ]]; then
+            # Extract only 4-digit years to prevent path traversal
+            local clean_year=$(echo "$album_year" | grep -oE '^[0-9]{4}$')
+            [[ -n "$clean_year" ]] && year_suffix=" ($clean_year)"
+        fi
+
         proposed_album_path="${DEST_DIR:-/tmp/organized}/$album_quality/$sanitized_artist/$sanitized_title$year_suffix"
     fi
     local organization_end=$(date +%s%N)
