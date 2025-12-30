@@ -229,7 +229,15 @@ track_album_metadata() {
     local album=$(echo "$album_data" | cut -d'|' -f4)
     local year=$(echo "$album_data" | cut -d'|' -f5)
     local quality=$(echo "$album_data" | cut -d'|' -f6)
-    
+
+    # Escape all values to prevent SQL injection
+    original_path=$(sql_escape "$original_path")
+    new_path=$(sql_escape "$new_path")
+    artist=$(sql_escape "$artist")
+    album=$(sql_escape "$album")
+    year=$(sql_escape "$year")
+    quality=$(sql_escape "$quality")
+
     execute_sql_with_retry "$metadata_db" "INSERT INTO albums (original_path, new_path, artist, album, year, quality) VALUES ('$original_path', '$new_path', '$artist', '$album', '$year', '$quality');"
 }
 
@@ -239,7 +247,12 @@ create_move_operation() {
     local source_path="$2"
     local dest_path="$3"
     local metadata_db="${METADATA_DB:-ordr.fm.metadata.db}"
-    
+
+    # Escape values to prevent SQL injection
+    operation_id=$(sql_escape "$operation_id")
+    source_path=$(sql_escape "$source_path")
+    dest_path=$(sql_escape "$dest_path")
+
     execute_sql_with_retry "$metadata_db" "INSERT INTO move_operations (id, source_path, destination_path, status) VALUES ('$operation_id', '$source_path', '$dest_path', 'IN_PROGRESS');"
 }
 
@@ -249,13 +262,18 @@ update_move_operation_status() {
     local status="$2"
     local error_msg="${3:-}"
     local metadata_db="${METADATA_DB:-ordr.fm.metadata.db}"
-    
+
+    # Escape values to prevent SQL injection
+    operation_id=$(sql_escape "$operation_id")
+    status=$(sql_escape "$status")
+    error_msg=$(sql_escape "$error_msg")
+
     local sql="UPDATE move_operations SET status='$status', completed_at=strftime('%s', 'now')"
     if [[ -n "$error_msg" ]]; then
         sql="$sql, error_message='$error_msg'"
     fi
     sql="$sql WHERE id='$operation_id';"
-    
+
     execute_sql_with_retry "$metadata_db" "$sql"
 }
 
@@ -267,9 +285,14 @@ record_directory_processing() {
     local current_mtime=$(stat -c "%Y" "$dir_path" 2>/dev/null || echo "0")
     local current_hash=$(find "$dir_path" -maxdepth 1 -type f -exec stat -c "%Y %s %n" {} \; 2>/dev/null | sort | md5sum | cut -d' ' -f1)
     local processed_at=$(date +%s)
-    
+
+    # Escape values to prevent SQL injection
+    dir_path=$(sql_escape "$dir_path")
+    current_hash=$(sql_escape "$current_hash")
+    status=$(sql_escape "$status")
+
     execute_sql_with_retry "$state_db" "INSERT OR REPLACE INTO processed_directories (directory_path, last_modified, directory_hash, processed_at, status) VALUES ('$dir_path', $current_mtime, '$current_hash', $processed_at, '$status');"
-    
+
     log $LOG_DEBUG "Recorded processing result for '$dir_path': $status"
 }
 

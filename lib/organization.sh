@@ -258,10 +258,14 @@ build_organization_path() {
     local catalog=$(echo "$album_data" | cut -d'|' -f4)
     local year=$(echo "$album_data" | cut -d'|' -f5)
     
-    # Sanitize artist name to remove forward slashes and other problematic characters
-    # This prevents "DJ /Rupture" from creating nested directories
+    # Sanitize all metadata fields to remove forward slashes and other problematic characters
+    # This prevents "DJ /Rupture", "indie/underground" labels, or "2024/01" catalogs
+    # from creating nested directories
     artist=$(sanitize_filename "$artist")
     title=$(sanitize_filename "$title")
+    label=$(sanitize_filename "$label")
+    catalog=$(sanitize_filename "$catalog")
+    year=$(sanitize_filename "$year")
     
     # Detect disc number from directory path
     local disc_suffix=""
@@ -350,7 +354,14 @@ apply_organization_pattern() {
     local label=$(echo "$album_data" | cut -d'|' -f3)
     local catalog=$(echo "$album_data" | cut -d'|' -f4)
     local year=$(echo "$album_data" | cut -d'|' -f5)
-    
+
+    # Sanitize all fields to prevent directory traversal
+    artist=$(sanitize_filename "$artist")
+    title=$(sanitize_filename "$title")
+    label=$(sanitize_filename "$label")
+    catalog=$(sanitize_filename "$catalog")
+    year=$(sanitize_filename "$year")
+
     # Replace pattern variables
     local path="$pattern"
     path="${path//\{quality\}/$quality}"
@@ -458,10 +469,10 @@ generate_track_filename() {
         formatted_track_number=$(echo "$track_number" | sed 's/[\\/:*?"<>|]/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//')
     fi
     
-    # Sanitize each component for filename safety
-    local clean_track_title=$(echo "$track_title" | sed 's/[\\/:*?"<>|]/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//')
-    local clean_album_title=$(echo "$album_title" | sed 's/[\\/:*?"<>|]/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//')
-    local clean_artist_name=$(echo "$artist_name" | sed 's/[\\/:*?"<>|]/_/g' | sed 's/__\+/_/g' | sed 's/^_\+//;s/_\+$//')
+    # Sanitize each component for filename safety using the centralized function
+    local clean_track_title=$(sanitize_filename "$track_title")
+    local clean_album_title=$(sanitize_filename "$album_title")
+    local clean_artist_name=$(sanitize_filename "$artist_name")
     
     # Build new filename: nn - Track - Album - Artist.ext
     local new_filename="${formatted_track_number} - ${clean_track_title} - ${clean_album_title} - ${clean_artist_name}.${extension}"
